@@ -1,5 +1,10 @@
 # GetInRoute: Railway + Cloudflare Production Deployment (Staged)
 
+> **SUPERSEDED 2026-09-10** — the budget moved the deployment target from Railway
+> (Hobby $5/mo + metered overage) to a ~$5 VPS. Use **`docs/DEPLOYMENT_VPS.md`**
+> as the active runbook. This document is retained as the complete Railway
+> alternative (all verification stages were executed locally and passed).
+
 Authoritative runbook for moving GetInRoute off the personal Windows PC onto
 Railway. Follow stages IN ORDER. Each stage gates the next — a failed gate stops
 the pipeline. No stage may be skipped. Action / verification are strictly
