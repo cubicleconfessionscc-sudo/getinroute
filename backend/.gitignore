@@ -8,3 +8,4 @@ node_modules/
 logs/
 *.log
 migration-backups/
+.railway/
