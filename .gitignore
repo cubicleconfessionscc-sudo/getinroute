@@ -1,0 +1,31 @@
+# ---- GetInRoute root ignore ----
+# Secrets - never commit
+.env
+*.env
+.env.*
+!*.env.example
+
+# Databases and business data
+*.db
+*.db-wal
+*.db-shm
+*.bak
+data/
+backups/
+uploads/
+migration-backups/
+
+# Logs
+logs/
+*.log
+
+# Node
+node_modules/
+
+# Deploy artifacts (generated update bundles)
+deploy/*.zip
+.railway/
+
+# OS
+Thumbs.db
+Desktop.ini

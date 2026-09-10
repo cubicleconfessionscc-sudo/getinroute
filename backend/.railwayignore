@@ -1,0 +1,9 @@
+node_modules
+getinroute.db
+getinroute.db-shm
+getinroute.db-wal
+*.log
+.env
+backups
+*.bak
+test-rbac.js

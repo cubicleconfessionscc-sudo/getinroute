@@ -1,0 +1,19 @@
+{
+  "name": "GetInRoute",
+  "short_name": "GetInRoute",
+  "description": "Employee cab tracking and school bus tracking — live maps, schedules, safety alerts.",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "en",
+  "categories": ["business", "navigation", "education"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

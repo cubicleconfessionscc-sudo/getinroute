@@ -1,0 +1,61 @@
+// Dynamic app config: the same Expo project ships as two genuinely separate
+// builds. APP_VARIANT is baked at build time by eas.json (preview/production =>
+// 'company', school profile => 'school'). Each variant gets its own identity:
+// distinct display name, Android package / iOS bundle id, icon, splash color
+// and runtime data. The runtime entry (App.js) reads extra.appVariant to mount
+// the matching root navigator, so the School build is a real, separate app and
+// never shows "Employee" branding.
+const VARIANT = (process.env.APP_VARIANT || 'company').toLowerCase();
+const IS_SCHOOL = VARIANT === 'school';
+
+module.exports = {
+  expo: {
+    name: IS_SCHOOL ? 'GetInRoute School' : 'GetInRoute',
+    slug: 'clement',
+    version: '1.0.4',
+    orientation: 'portrait',
+    userInterfaceStyle: 'light',
+    updates: {
+      url: 'https://u.expo.dev/25f0833c-90f8-426f-bacb-0e2e12527a3e',
+      enabled: true,
+      checkAutomatically: 'ON_LOAD',
+      fallbackToCacheTimeout: 0,
+      runtimeVersion: { policy: 'appVersion' }
+    },
+    icon: IS_SCHOOL ? './assets/school-icon.png' : './assets/icon.png',
+    splash: {
+      backgroundColor: IS_SCHOOL ? '#0F766E' : '#10141A'
+    },
+    assetBundlePatterns: ['**/*'],
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: IS_SCHOOL ? 'com.getinroute.school' : 'com.getinroute.app',
+      config: { usesNonExemptEncryption: false },
+      infoPlist: {
+        NSLocationWhenInUseUsageDescription: 'GetInRoute needs your location to track your commute and, for drivers, to share live position with employees and admins.',
+        NSLocationAlwaysAndWhenInUseUsageDescription: 'GetInRoute needs background location during an active trip so live tracking keeps working while the app is minimized.'
+      },
+      runtimeVersion: { policy: 'appVersion' }
+    },
+    android: {
+      package: IS_SCHOOL ? 'com.getinroute.school' : 'com.getinroute.app',
+      compileSdkVersion: 35,
+      targetSdkVersion: 35,
+      runtimeVersion: { policy: 'appVersion' },
+      adaptiveIcon: {
+        foregroundImage: IS_SCHOOL ? './assets/school-adaptive-icon.png' : './assets/adaptive-icon.png',
+        backgroundColor: IS_SCHOOL ? '#0F766E' : '#10141A'
+      },
+      permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION'],
+      config: {
+        googleMaps: { apiKey: 'AIzaSyDZ6JqrpMh1o8_zbtR_N1RNjaPDJQKSEgE' }
+      },
+      versionCode: IS_SCHOOL ? 1 : 23
+    },
+    extra: {
+      appVariant: IS_SCHOOL ? 'school' : 'company',
+      eas: { projectId: '25f0833c-90f8-426f-bacb-0e2e12527a3e' }
+    },
+    owner: 'clementedwins-team'
+  }
+};

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GetInRoute — Smarter Employee Transportation</title>
+<meta name="description" content="GetInRoute helps organizations manage employee transportation, routes, pickups, drop-offs, and daily commute operations through one simple platform.">
+<meta name="keywords" content="GetInRoute, employee transportation, cab management, commute app, transport management system, corporate cab">
+<meta name="robots" content="index, follow">
+<meta name="google-site-verification" content="2MDs3LA8tGHdg2BSDvsTJ_7Om-ukBuGqDngEdz5U7aE" />
+<link rel="canonical" href="https://getinroute.in/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="GetInRoute">
+<meta property="og:title" content="GetInRoute — Smarter Employee Transportation">
+<meta property="og:description" content="Manage employee transportation, routes, pickups, drop-offs, and daily commute operations through one simple platform.">
+<meta property="og:url" content="https://getinroute.in/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grain"></div>
+
+<!-- NAV -->
+<header class="nav" id="top">
+  <div class="nav-inner">
+    <a href="#top" class="brand">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 17L9 6H15L20 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="7.5" cy="17" r="2" stroke="currentColor" stroke-width="1.8"/>
+          <circle cx="16.5" cy="17" r="2" stroke="currentColor" stroke-width="1.8"/>
+        </svg>
+      </span>
+      GETINROUTE
+    </a>
+    <nav class="nav-links">
+      <a href="#about">About</a>
+      <a href="#companies">Companies</a>
+      <a href="#school">Schools</a>
+      <a href="#founder">Founder</a>
+      <a href="#download">Download</a>
+      <a href="#contact">Contact</a>
+    </nav>
+    <a href="#download" class="btn btn-nav">Get the app</a>
+    <a href="/login" class="btn btn-nav btn-nav-login">Admin Login</a>
+    <a href="/vendor-login" class="btn btn-nav btn-nav-vendor">Vendor Login</a>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <nav class="nav-mobile" id="navMobile">
+    <a href="#about">About</a>
+    <a href="#companies">Companies</a>
+    <a href="#school">Schools</a>
+    <a href="#founder">Founder</a>
+    <a href="#download">Download</a>
+    <a href="#contact">Contact</a>
+    <a href="/login" style="color:var(--accent); font-weight:600;">Admin Login</a>
+    <a href="/vendor-login" style="color:#a78bfa; font-weight:600;">Vendor Login</a>
+  </nav>
+</header>
+
+<!-- HERO -->
+<section class="hero" id="about">
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="dot-pulse"></span> Live fleet, every morning</p>
+      <h1>Smarter employee transportation.<br><span class="accent-text">Safer journeys.</span></h1>
+      <p class="hero-desc">GetInRoute helps organizations manage employee transportation, routes, pickups, drop-offs, and daily commute operations through one simple platform &mdash; built for admins, drivers, and the people riding along.</p>
+      <div class="hero-actions">
+        <a href="https://getinroute.in/apk" class="btn btn-primary" download="GetInRoute.apk">Download APK</a>
+        <a href="https://getinroute.in/apk/school" class="btn btn-ghost" download="GetInRouteSchool.apk">School App APK</a>
+        <a href="https://apps.apple.com/search?term=GetinRoute" class="btn btn-ghost" target="_blank" rel="noopener">iPhone &middot; App Store</a>
+        <a href="#companies" class="btn btn-ghost">See how it works</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><span class="stat-num">8</span><span class="stat-label">core modules</span></div>
+        <div class="stat"><span class="stat-num">24/7</span><span class="stat-label">trip tracking</span></div>
+        <div class="stat"><span class="stat-num">1</span><span class="stat-label">admin dashboard</span></div>
+      </div>
+    </div>
+
+    <div class="hero-visual" aria-hidden="true">
+      <div class="route-card">
+        <div class="route-card-head">
+          <span class="trip-code">TRIP · GR-2481</span>
+          <span class="status-pill">On route</span>
+        </div>
+        <svg class="route-svg" viewBox="0 0 340 220" fill="none">
+          <path class="route-path-bg" d="M30 190 C 80 150, 60 90, 120 80 S 220 40, 250 90 S 300 40, 310 30" stroke-linecap="round"/>
+          <path class="route-path" d="M30 190 C 80 150, 60 90, 120 80 S 220 40, 250 90 S 300 40, 310 30" stroke-linecap="round"/>
+          <circle class="stop-dot start" cx="30" cy="190" r="6"/>
+          <circle class="stop-dot" cx="120" cy="80" r="4.5"/>
+          <circle class="stop-dot" cx="250" cy="90" r="4.5"/>
+          <circle class="stop-dot end" cx="310" cy="30" r="6"/>
+          <circle class="mover" r="5">
+            <animateMotion dur="4.5s" repeatCount="indefinite"
+              path="M30 190 C 80 150, 60 90, 120 80 S 220 40, 250 90 S 300 40, 310 30"/>
+          </circle>
+        </svg>
+        <div class="route-card-foot">
+          <div class="rf-item"><span class="rf-label">Pickup</span><span class="rf-value">Sector 12 Hub</span></div>
+          <div class="rf-item"><span class="rf-label">Drop-off</span><span class="rf-value">Tech Park East</span></div>
+          <div class="rf-item"><span class="rf-label">ETA</span><span class="rf-value">08:42</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPANIES -->
+<section class="features" id="companies">
+  <div class="section-inner">
+    <p class="section-eyebrow">For Companies</p>
+    <h2>Employee transportation, managed end to end.</h2>
+    <p class="school-desc">GetInRoute helps companies run employee pickups, drop-offs, routes, and daily commute operations through a single dispatch board &mdash; for admins, drivers, and the people riding along.</p>
+
+    <div class="feature-grid">
+      <a class="feature-card" href="features/pickup-drop.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16M4 6h16M4 18h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Pickup &amp; drop management</h3>
+        <p>Assign employees to stops, adjust points on the fly, and keep every roster accurate.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/route-trip.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 17L9 6H15L20 17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="17" r="2" stroke="currentColor" stroke-width="1.7"/><circle cx="16.5" cy="17" r="2" stroke="currentColor" stroke-width="1.7"/></svg>
+        </span>
+        <h3>Route &amp; trip management</h3>
+        <p>Build, edit, and optimize routes so no one waits longer than they should.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/driver-vehicle.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M7 7V5a2 2 0 012-2h6a2 2 0 012 2v2" stroke="currentColor" stroke-width="1.7"/></svg>
+        </span>
+        <h3>Driver &amp; vehicle info</h3>
+        <p>One record per driver and vehicle &mdash; documents, assignments, and status at a glance.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/trip-tracking.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Daily trip tracking</h3>
+        <p>Know exactly where every trip stands, from first pickup to final drop-off.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/scheduling.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 9h18M8 3v3M16 3v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Transport scheduling</h3>
+        <p>Plan shifts and recurring commutes ahead of time, not the morning of.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/notifications.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a5 5 0 00-5 5v3.2c0 .6-.2 1.2-.6 1.7L5 15h14l-1.4-2.1a2.6 2.6 0 01-.6-1.7V8a5 5 0 00-5-5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 18a2 2 0 004 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Notifications &amp; updates</h3>
+        <p>Delays, arrivals, and route changes reach riders and admins the moment they happen.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/admin-dashboard.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.7"/></svg>
+        </span>
+        <h3>Admin dashboard</h3>
+        <p>Every route, driver, and trip in a single view built for fast decisions.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/safer-commutes.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.5 5.4 5.4 0 0121.3 12c-2.3 4.4-9.3 9-9.3 9z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </span>
+        <h3>Safer, organized commutes</h3>
+        <p>Structured operations mean fewer missed pickups and safer trips, every day.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/vendor-management.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 21h16M6 21V5a1 1 0 011-1h7a1 1 0 011 1v16M15 9h3a1 1 0 011 1v11M9 8h2M9 12h2M9 16h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Vendor management</h3>
+        <p>Run multiple transport partners with clear vendor ownership of every trip.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+    </div>
+
+    <div class="school-cta">
+      <p class="school-cta-text">Get the GetInRoute app for your company's commutes.</p>
+      <a href="https://getinroute.in/apk" class="btn btn-primary btn-lg" download="GetInRoute.apk">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        GetInRoute Android APK
+      </a>
+      <a href="https://apps.apple.com/search?term=GetinRoute" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        GetInRoute on the App Store
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- SCHOOL -->
+<section class="school" id="school">
+  <div class="section-inner">
+    <p class="section-eyebrow">School transport</p>
+    <h2>GetInRoute for Schools.<br><span class="accent-text">Every student, safely tracked.</span></h2>
+    <p class="school-desc">The School App brings the same reliable transport operations to schools &mdash; live bus tracking, pickup and drop-off confirmation, parent notifications, and driver management in one simple app.</p>
+
+    <div class="school-grid">
+      <a class="feature-card" href="features/pickup-drop.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16M4 6h16M4 18h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Student pickup &amp; drop</h3>
+        <p>Confirm every student at each stop, on time, with a clear record for the school.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/route-trip.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 17L9 6H15L20 17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="17" r="2" stroke="currentColor" stroke-width="1.7"/><circle cx="16.5" cy="17" r="2" stroke="currentColor" stroke-width="1.7"/></svg>
+        </span>
+        <h3>Bus route &amp; trip plans</h3>
+        <p>Plan routes per bus and keep every morning and evening trip organized.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/trip-tracking.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Live trip tracking</h3>
+        <p>Parents and school admins see where every bus is in real time.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/notifications.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3a5 5 0 00-5 5v3.2c0 .6-.2 1.2-.6 1.7L5 15h14l-1.4-2.1a2.6 2.6 0 01-.6-1.7V8a5 5 0 00-5-5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 18a2 2 0 004 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Parent notifications</h3>
+        <p>Arrivals, delays and route changes reach parents the moment they happen.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/driver-vehicle.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M7 7V5a2 2 0 012-2h6a2 2 0 012 2v2" stroke="currentColor" stroke-width="1.7"/></svg>
+        </span>
+        <h3>Driver &amp; vehicle records</h3>
+        <p>Verified drivers and vehicles with complete documents for every bus.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+      <a class="feature-card" href="features/safer-commutes.html">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.5 5.4 5.4 0 0121.3 12c-2.3 4.4-9.3 9-9.3 9z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </span>
+        <h3>Safer school commutes</h3>
+        <p>Structured operations mean fewer missed pickups and safer trips, every day.</p>
+      <span class="feature-more">Learn more &rarr;</span></a>
+    </div>
+
+    <div class="school-cta">
+      <p class="school-cta-text">Get the dedicated School App &mdash; Android or iPhone.</p>
+      <a href="https://getinroute.in/apk/school" class="btn btn-primary btn-lg" download="GetInRouteSchool.apk">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        School App APK
+      </a>
+      <a href="https://apps.apple.com/search?term=GetinRoute" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        School App on the App Store
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- FOUNDER -->
+<section class="founder" id="founder">
+  <div class="section-inner founder-inner">
+    <div class="founder-photo-wrap">
+      <img src="images/founder.jpg" alt="C Edwin Peroli, Founder of GetInRoute" class="founder-photo">
+      <span class="founder-photo-ring" aria-hidden="true"></span>
+    </div>
+    <div class="founder-copy">
+      <p class="section-eyebrow">Founder</p>
+      <h2>C Edwin Peroli</h2>
+      <p class="founder-title">Founder &amp; Developer, GetInRoute</p>
+      <p class="founder-bio">GetInRoute was created with the goal of making employee transportation easier to manage, more transparent, and more convenient &mdash; for the organizations running the commute, and for the employees relying on it every day.</p>
+    </div>
+  </div>
+</section>
+
+<!-- DOWNLOAD -->
+<section class="download" id="download">
+  <div class="section-inner">
+    <div class="download-card">
+      <div class="download-copy">
+        <p class="section-eyebrow light">Get the app</p>
+        <h2>GetInRoute on Android &amp; iPhone</h2>
+        <p>Install the app to track pickups, drop-offs, and trip updates in real time.</p>
+        <a href="https://getinroute.in/apk" class="btn btn-primary btn-lg" download="GetInRoute.apk">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download APK (Android)
+        </a>
+        <a href="https://getinroute.in/apk/school" class="btn btn-ghost btn-lg" download="GetInRouteSchool.apk">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          School App APK
+        </a>
+        <a href="https://apps.apple.com/search?term=GetinRoute" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3v13m0 0l-4.5-4.5M12 16l4.5-4.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          GetInRoute on the App Store
+        </a>
+        <p class="download-note">Android · direct APK install · iPhone via the App Store</p>
+      </div>
+      <div class="download-badge" aria-hidden="true">
+        <span class="trip-code">v1.0 · GETINROUTE.APK</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer" id="contact">
+  <div class="section-inner footer-grid">
+    <div class="footer-col footer-brand-col">
+      <a href="#top" class="brand">
+        <span class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 17L9 6H15L20 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="17" r="2" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="17" r="2" stroke="currentColor" stroke-width="1.8"/></svg>
+        </span>
+        GETINROUTE
+      </a>
+      <p>Smarter employee transportation. Safer journeys.</p>
+    </div>
+    <nav class="footer-col" aria-label="Quick links">
+      <h4>Quick Links</h4>
+      <a href="#top">Home</a>
+      <a href="#about">About Us</a>
+      <a href="#companies">Products</a>
+      <a href="#contact">Contact Us</a>
+    </nav>
+    <div class="footer-col footer-contact">
+      <h4>Contact Us</h4>
+      <p class="footer-contact-line">Clement Edwin Peroli (Founder)</p>
+      <a href="mailto:routegetin0@gmail.com">routegetin0@gmail.com</a>
+      <a href="tel:+919886684938">+91 9886684938</a>
+      <p class="footer-contact-line">Mon - Sat: 10:30 AM - 6:30 PM</p>
+    </div>
+  </div>
+  <div class="section-inner footer-bottom">
+    <p>&copy; <span id="year"></span> GetInRoute. All rights reserved.</p>
+  </div>
+</footer>
+
+<!-- HELP-LINE CHAT -->
+<button class="chat-fab" id="chatFab" aria-label="Open help chat" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    <path d="M8.5 10.5h7M8.5 13.5h4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  </svg>
+</button>
+<div class="chat-widget" id="chatWidget" aria-hidden="true">
+  <div class="chat-head">
+    <div class="chat-head-txt">
+      <strong>GetInRoute Help</strong>
+      <span>We reply by email</span>
+    </div>
+    <button class="chat-close" id="chatClose" aria-label="Close chat">&times;</button>
+  </div>
+  <div class="chat-body">
+    <p class="chat-greeting">Hi! Type your question below and we'll email you back as soon as we can.</p>
+    <label class="chat-label" for="chatName">Your name (optional)</label>
+    <input class="chat-input" id="chatName" type="text" placeholder="Your name">
+    <label class="chat-label" for="chatEmail">Your email (optional)</label>
+    <input class="chat-input" id="chatEmail" type="email" placeholder="you@example.com">
+    <label class="chat-label" for="chatMessage">Message</label>
+    <textarea class="chat-input" id="chatMessage" rows="3" placeholder="Type your message&hellip;"></textarea>
+    <div id="chatStatus" class="chat-status" role="status"></div>
+    <button class="chat-send" id="chatSend">Send message</button>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

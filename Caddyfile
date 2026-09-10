@@ -1,0 +1,38 @@
+# ============================================================
+# GetInRoute - Caddy reverse proxy + automatic HTTPS (Let's Encrypt)
+#
+# Canonical site : https://www.getinroute.in
+# Bare domain     : https://getinroute.in  -> 301 redirect to www
+# Backend         : 127.0.0.1:4000 (private, never exposed)
+#
+# Requires (owner manual steps - see docs):
+#   1. Move DNS away from Cloudflare at the registrar; add A records:
+#        @   ->  <your public IPv4>
+#        www ->  <your public IPv4>
+#   2. Router: forward TCP 80 and TCP 443 to this PC (192.168.1.79).
+#   3. Windows Firewall: open inbound TCP 80 and TCP 443 only.
+#   4. Install Caddy, place this file at C:\Caddy\Caddyfile, run as a
+#      service (see GETINROUTE_WINDOWS_SERVICE_NSSM.md) or:
+#         caddy run --config "C:\Caddy\Caddyfile"
+#
+# Caddy obtains + renews TLS certificates automatically. WebSocket/Socket.IO
+# is reverse-proxied transparently by the reverse_proxy handler.
+# ============================================================
+
+www.getinroute.in {
+	encode gzip zstd
+
+	# Socket.IO + HTTP + WebSockets all go to the private backend port.
+	reverse_proxy 127.0.0.1:4000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer"
+	}
+}
+
+getinroute.in {
+	redir https://www.getinroute.in{uri} permanent
+}

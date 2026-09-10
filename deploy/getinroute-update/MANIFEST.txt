@@ -1,0 +1,54 @@
+GetInRoute local build -> LIVE deployment package
+=================================================
+Created from the improved local build (D:\GetInRoute). Overlay these files
+onto the same paths in the LIVE project (`D:\Default Project Portable\Project`
+is the local snapshot of the live repo), then redeploy. See DEPLOY_NOW.md.
+
+IMPORTANT
+---------
+* Back up the live database file BEFORE deploying.
+* DO NOT copy any real `.env` file. Live secrets stay in your host's env
+  variables (Railway dashboard / your CI secrets). `.env.example` is included
+  only as a reference of what variables can exist.
+* Nothing here touches your data folder. New tables are created automatically
+  on first boot (`CREATE TABLE IF NOT EXISTS`) — safe on existing live data.
+
+FILES  (path = where it goes on the live repo)
+------
+backend\server.js            Engine: loads env.js, SIMULATE_GPS gate (default OFF,
+                             real GPS now required), location history
+                             coalescing/retention, on-volume backup + pruning
+                             (BACKUP_KEEP), graceful shutdown (Ctrl+C -> backup +
+                             WAL checkpoint), raw Excel import wired in.
+backend\db.js                env.js load + 2 NEW tables (location_history,
+                             import_audit_log) — auto-created, IF NOT EXISTS.
+backend\env.js               NEW. Fills only unset vars from .env / host env.
+backend\raw-import.js        NEW. Excel/CSV bulk import endpoint + helpers used
+                             by the Admin > Raw Data import UI.
+backend\seed.js              Now loads env.js (so it matches live config).
+backend\package.json         Adds xlsx ^0.18.5 (import engine dep). Run npm install.
+backend\.env.example         Reference ONLY — list of supported env vars. Do not
+                             overwrite any real .env with this.
+backend\public\website\      index.html + style.css: marketing site / landing page
+   index.html, style.css     with NEW top nav: Admin Login (-> /login) and
+                             Vendor Login (-> /vendor-login) on desktop bar and
+                             in the mobile (hamburger) menu.
+backend\public\admin\*       Fresh React SPA build (index-MxKihUk4.*) — includes
+                             Raw Data import & audit UI, Admin/Vendor login pages,
+                             Landing page. Completely replaces the old bundle.
+frontend\src\pages\admin\    Source for the import & audit screen (rebuild only if
+   RawDataPage.jsx           you edit React source; otherwise the bundle above is enough).
+frontend\src\pages\Landing.jsx
+mobile\src\api\client.js     API base becomes EXPO_PUBLIC_API_URL || live URL.
+                             NOTE: this only affects the MOBILE APP BINARY, which
+                             must be rebuilt (EAS) and re-uploaded as the APK/AAB
+                             to reach users — web deploy alone does NOT update it.
+
+NEW / optional env vars for the host
+------------------------------------
+SIMULATE_GPS              =0  (or unset) -> GPS demo movement OFF; 1 = on.
+GPS_HISTORY_COALESCE_MS   (default 5000)  live GPS throttle.
+LOCATION_HISTORY_RETAIN_DAYS (default 3)  auto-purge age.
+BACKUP_KEEP              (default 14)     backup snapshots to keep.
+DB_PATH                  (optional)       where the live sqlite db lives.
+UPLOAD_DIR / ALLOWED_ORIGINS (optional)   local defaults are fine unless changed.
