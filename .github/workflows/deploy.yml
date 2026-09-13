@@ -19,22 +19,22 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Enable GitHub autodeploy source (best-effort)
-        working-directory: backend
+      - name: Restore Railway session
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_CONFIG: ${{ secrets.RAILWAY_CONFIG }}
         run: |
-          railway service source connect --repo cubicleconfessionscc-sudo/getinroute --branch main --service getinroute-app || echo "source connect skipped"
+          mkdir -p "$HOME/.railway"
+          echo "$RAILWAY_CONFIG" | base64 -d > "$HOME/.railway/config.json"
+          chmod 600 "$HOME/.railway/config.json"
+          railway whoami
 
       - name: Deploy to Railway (production)
         working-directory: backend
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up --detach \
             --project df871066-14b2-4fbc-b218-1782d72063be \
