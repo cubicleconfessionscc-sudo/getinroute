@@ -605,6 +605,32 @@ try { db.exec(`ALTER TABLE schedules ADD COLUMN missed_email_type TEXT;`); } cat
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN connected INTEGER DEFAULT 0;`); } catch (e) {}
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN gps_status TEXT DEFAULT 'stopped';`); } catch (e) {}
 
+// Geocoding/routing response cache (MapLibre era). Keeps provider call volume
+// minimal: identical searches/routes within TTL are served from PG/SQLite.
+db.exec(`
+CREATE TABLE IF NOT EXISTS geo_result_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL CHECK (kind IN ('search','reverse')),
+  cache_key TEXT UNIQUE NOT NULL,
+  result TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS geo_route_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cache_key TEXT UNIQUE NOT NULL,
+  profile TEXT NOT NULL DEFAULT 'driving',
+  points TEXT NOT NULL,
+  result TEXT NOT NULL,
+  distance_meters REAL,
+  duration_seconds REAL,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_geo_result_cache_key ON geo_result_cache(kind, cache_key);
+CREATE INDEX IF NOT EXISTS idx_geo_route_cache_key ON geo_route_cache(cache_key);
+`);
+
 // Cumulative realtime message / GPS-ping usage log. Row per active month keeps
 // the table tiny (one row per month) so it never grows unbounded.
 db.exec(`

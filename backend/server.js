@@ -129,15 +129,48 @@ app.get('/health', (req, res) => {
 });
 
 // Public, unauthenticated runtime config for the web frontends (P2 maps).
-// Google Maps key is read from the SERVER environment at runtime so the
-// frontend never needs a rebuild to pick up a key, and can be enabled purely
-// by setting the Railway variable. No secret material is exposed beyond the
-// public JS key itself, which is designed to be shipped to browsers.
+// The web map is rendered with MapLibre GL JS. Tile/geocoding/routing providers
+// are isolated server-side and exposed only as names here — never secrets.
 app.get('/api/config/public', (req, res) => {
   res.json({
-    googleMapsApiKey: process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '',
-    mapsProvider: 'google'
+    mapsProvider: 'maplibre',
+    geocodingProvider: process.env.GEOCODING_PROVIDER || 'photon',
+    routingProvider: process.env.ROUTING_PROVIDER || 'osrm'
   });
+});
+
+/* ---------------- GEO PROVIDER PROXY (MapLibre) ----------------
+ * Geocoding (search + reverse) and routing are proxied server-side and
+ * normalized, so the frontend never binds to one vendor. Providers are
+ * configurable via GEOCODING_URL / ROUTING_URL env vars. */
+const { geocodeSearch, geocodeReverse, calculateRoute } = require('./geo');
+
+app.get('/api/geo/search', auth, guard(60, 60 * 1000), (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json([]);
+  const limit = Math.min(Number(req.query.limit) || 8, 12);
+  geocodeSearch(q, { limit }).then((rows) => res.json(rows)).catch(() => res.json([]));
+});
+
+app.get('/api/geo/reverse', auth, guard(60, 60 * 1000), (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return res.json(null);
+  geocodeReverse(lat, lng).then((r) => res.json(r)).catch(() => res.json(null));
+});
+
+app.post('/api/geo/route', auth, guard(30, 60 * 1000), (req, res) => {
+  const points = req.body?.points;
+  if (!Array.isArray(points) || points.length < 2) {
+    return res.status(400).json({ error: 'At least 2 points required' });
+  }
+  const clean = points
+    .filter((p) => p && !Number.isNaN(Number(p.lat)) && !Number.isNaN(Number(p.lng)))
+    .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
+  if (clean.length < 2) return res.status(400).json({ error: 'At least 2 valid coordinates required' });
+  calculateRoute(clean)
+    .then((route) => res.json(route))
+    .catch((e) => res.status(502).json({ error: e.message || 'Route calculation failed' }));
 });
 
 /* ---------------- MOBILE VERSION / UPDATE MANAGER (spec 22/23) ----------------

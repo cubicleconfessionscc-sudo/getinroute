@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import GoogleMap from './GoogleMap';
+import MapLibreMap from './MapLibreMap';
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext(() => {});
@@ -54,7 +54,7 @@ export const statusColor = (s) => {
 };
 export const statusLabel = (s) => String(s).replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
-/* ---------- Map (Google Maps — no silent fallback) ---------- */
+/* ---------- Map (MapLibre GL JS) ---------- */
 export function LiveMap({ center, zoom = 12, stops, vehicles, employees, polyline, height = '420px', focus = null }) {
   const safeStops = Array.isArray(stops) ? stops : [];
   const safeVehicles = Array.isArray(vehicles) ? vehicles : [];
@@ -100,7 +100,7 @@ export function LiveMap({ center, zoom = 12, stops, vehicles, employees, polylin
   const lines = [];
   if (safeStops.length > 1) lines.push({ path: safeStops.map((s) => ({ lat: Number(s.lat), lng: Number(s.lng) })), color: '#7c3aed', dash: true, opacity: 0.7, weight: 4 });
   if (safePolyline.length > 1) lines.push({ path: safePolyline, color: '#4f46e5', weight: 5 });
-  return <GoogleMap markers={markers} lines={lines} center={center} zoom={zoom} height={height} focus={focus} />;
+  return <MapLibreMap markers={markers} lines={lines} center={center} zoom={zoom} height={height} focus={focus} />;
 }
 
 /* ---------- useInterval hook ---------- */

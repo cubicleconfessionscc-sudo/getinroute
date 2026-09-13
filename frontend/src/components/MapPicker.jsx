@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { LocateFixed } from 'lucide-react';
-import GoogleMap from './GoogleMap';
+import MapLibreMap from './MapLibreMap';
 import AddressPicker from './AddressPicker';
 
 export default function MapPicker({ lat, lng, onPick, height = '260px', label }) {
@@ -44,7 +44,7 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
         </div>
       </div>
       {geoErr && <div style={{ fontSize: 12, color: '#ef4444', margin: '0 0 6px' }}>{geoErr}</div>}
-      <GoogleMap
+      <MapLibreMap
         center={cur.lat != null ? { lat: Number(cur.lat), lng: Number(cur.lng) } : null}
         zoom={valid ? 14 : 11}
         markers={valid ? [{ lat: Number(lat), lng: Number(lng), color: 'indigo' }] : []}

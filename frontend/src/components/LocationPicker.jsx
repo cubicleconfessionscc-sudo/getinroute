@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { api } from '../api';
+import { searchAddress } from '../../lib/geo';
 import { MapPin, Search, X } from 'lucide-react';
 
 export default function LocationPicker({ onSelect, initialQuery = '', placeholder = 'Search location...' }) {
@@ -15,14 +15,14 @@ export default function LocationPicker({ onSelect, initialQuery = '', placeholde
     if (!q || q.length < 3) { setResults([]); return; }
     timerRef.current = setTimeout(() => {
       setLoading(true);
-      api.get('/api/v3/location/search', { params: { q } }).then((r) => {
-        setResults(Array.isArray(r) ? r : (r && r.results ? r.results : []));
+      searchAddress(q).then((rows) => {
+        setResults(Array.isArray(rows) ? rows : []);
       }).catch(() => setResults([])).finally(() => setLoading(false));
     }, 300);
   }, []);
 
   const pick = (item) => {
-    const loc = { lat: parseFloat(item.lat || item.latitude), lng: parseFloat(item.lon || item.longitude), name: item.display_name || item.name || query };
+    const loc = { lat: parseFloat(item.lat), lng: parseFloat(item.lng), name: item.address || item.label || query };
     setSelected(loc);
     setResults([]);
     if (onSelect) onSelect(loc);
@@ -47,7 +47,7 @@ export default function LocationPicker({ onSelect, initialQuery = '', placeholde
           {results.slice(0, 8).map((r, i) => (
             <div key={i} onClick={() => pick(r)} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--line)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <MapPin size={14} style={{ color: 'var(--primary)', marginTop: 2, flexShrink: 0 }} />
-              <span>{r.display_name || r.name || `${r.lat}, ${r.lon}`}</span>
+              <span>{r.label || r.address || `${r.lat}, ${r.lng}`}</span>
             </div>
           ))}
         </div>

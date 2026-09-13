@@ -4,8 +4,8 @@ import { useAuth } from '../../auth';
 import { Modal, Badge, useToast } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
 import MapPicker from '../../components/MapPicker';
-import GoogleMap from '../../components/GoogleMap';
-import { loadGoogleMaps, mapErrorMessage } from '../../lib/gmaps';
+import MapLibreMap from '../../components/MapLibreMap';
+import { calculateRoute } from '../../lib/geo';
 import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2 } from 'lucide-react';
 
 const emptyRoute = { name: '', start_point: '', end_point: '', speed_limit: 40, stops: [{ sequence: 1, name: '', lat: 12.97, lng: 77.59 }], start_lat: null, start_lng: null, end_lat: null, end_lng: null };
@@ -137,40 +137,36 @@ export default function RoutesPage() {
     setDirLoading(true);
     setDir(null);
     try {
-      const g = await loadGoogleMaps();
-      if (!g) { setDir({ status: 'not-configured' }); setDirLoading(false); return; }
-      const ds = new g.maps.DirectionsService();
       const ordered = coords;
-      const origin = form.start_lat ? { lat: Number(form.start_lat), lng: Number(form.start_lng) } : { lat: Number(ordered[0].lat), lng: Number(ordered[0].lng) };
-      const destination = form.end_lat ? { lat: Number(form.end_lat), lng: Number(form.end_lng) } : { lat: Number(ordered[ordered.length - 1].lat), lng: Number(ordered[ordered.length - 1].lng) };
-      const waypoints = ordered.slice(1, -1).map((s) => ({ location: { lat: Number(s.lat), lng: Number(s.lng) }, stopover: true }));
-      ds.route({ origin, destination, waypoints, travelMode: 'DRIVING', provideRouteAlternatives: false, optimizeWaypoints: false },
-        (res, status) => {
-          setDirLoading(false);
-          if (status === 'OK' && res && res.routes && res.routes.length) {
-            const legs = res.routes[0].legs || [];
-            const distKm = legs.reduce((a, l) => a + ((l.distance && l.distance.value) || 0), 0) / 1000;
-            const mins = legs.reduce((a, l) => a + ((l.duration && l.duration.value) || 0), 0) / 60;
-            setDir({
-              status: 'OK',
-              distText: `${distKm.toFixed(1)} km`,
-              timeText: `${Math.round(mins)} min`,
-              polyline: res.routes[0].overview_path || [],
-              legs: legs.map((l) => ({
-                dist: l.distance ? l.distance.text : '',
-                dur: l.duration ? l.duration.text : '',
-                from: l.start_address || '',
-                to: l.end_address || '',
-                steps: (l.steps || []).map((st) => String(st.instructions || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')).filter(Boolean).slice(0, 5)
-              }))
-            });
-          } else {
-            setDir({ status: 'ERROR', msg: status === 'ZERO_RESULTS' ? 'Google could not find a driving route between these points — verify the coordinates are in India.' : `Directions request failed: ${status || 'UNKNOWN'}` });
-          }
-        });
+      const points = [];
+      if (form.start_lat != null && form.start_lng != null) points.push({ lat: Number(form.start_lat), lng: Number(form.start_lng) });
+      coords.forEach((s) => points.push({ lat: Number(s.lat), lng: Number(s.lng) }));
+      if (form.end_lat != null && form.end_lng != null &&
+          !(points.length && Math.abs(points[points.length - 1].lat - Number(form.end_lat)) < 1e-6 && Math.abs(points[points.length - 1].lng - Number(form.end_lng)) < 1e-6)) {
+        points.push({ lat: Number(form.end_lat), lng: Number(form.end_lng) });
+      }
+      if (points.length < 2) { setDir({ status: 'ERROR', msg: 'Add coordinates to at least 2 stops, or start & end points.' }); setDirLoading(false); return; }
+      const res = await calculateRoute(points);
+      const distKm = (res.distanceMeters || 0) / 1000;
+      const mins = (res.durationSeconds || 0) / 60;
+      const geo = res.geometry;
+      const polyline = geo && geo.coordinates ? geo.coordinates.map((c) => ({ lat: c[1], lng: c[0] })) : [];
+      setDir({
+        status: 'OK',
+        distText: `${distKm.toFixed(1)} km`,
+        timeText: `${Math.round(mins)} min`,
+        polyline,
+        legs: (res.legs || []).map((l) => ({
+          dist: `${((l.distanceMeters || 0) / 1000).toFixed(1)} km`,
+          dur: `${Math.round((l.durationSeconds || 0) / 60)} min`,
+          from: '',
+          to: '',
+          steps: []
+        }))
+      });
     } catch (e) {
-      setDirLoading(false);
-      setDir({ status: 'ERROR', msg: mapErrorMessage(e) });
+      const msg = e.message || String(e);
+      setDir({ status: 'ERROR', msg: msg.includes('No route found') ? 'No driving route found between these points — verify the coordinates.' : msg });
     }
   };
 
@@ -206,7 +202,7 @@ export default function RoutesPage() {
       <div className="page-head">
         <div>
           <div className="page-title">Routes</div>
-          <div className="page-sub">Search start and end points, build the stop sequence on Google Maps (drag pins to fine-tune), then calculate the driving route and assign employees. Speed limits are set per cab under Vehicles.</div>
+          <div className="page-sub">Search start and end points, build the stop sequence on the map (drag pins to fine-tune), then calculate the driving route and assign employees. Speed limits are set per cab under Vehicles.</div>
         </div>
         {!isVendor && <button className="btn btn-primary" onClick={() => { setEditing(null); setForm(emptyRoute); setMapFor(null); setDir(null); setModal(true); }}><Plus size={16} /> New route</button>}
       </div>
@@ -334,7 +330,7 @@ export default function RoutesPage() {
         )}
         {dir && dir.status === 'not-configured' && (
           <div style={{ padding: '10px 12px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: 13, marginBottom: 10 }}>
-            Google Maps is not configured on the server (no GOOGLE_MAPS_API_KEY / VITE_GOOGLE_MAPS_API_KEY env var), so live directions can't be calculated. Set the key and reload to enable routing.
+            The map backend is not configured on the server, so live routing can't be calculated. Check that the routing service is reachable, then reload.
           </div>
         )}
 
@@ -351,7 +347,7 @@ export default function RoutesPage() {
         )}
 
         {previewMarkers().length > 0 && (
-          <GoogleMap
+          <MapLibreMap
             markers={previewMarkers()}
             lines={previewLines()}
             height={300}
