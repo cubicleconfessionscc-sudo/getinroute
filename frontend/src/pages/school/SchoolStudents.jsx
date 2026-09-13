@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, todayStr } from '../../api';
 import { useToast, Modal, Badge } from '../../components/ui';
-import { Plus, Pencil, Trash2, KeyRound, Users, Upload, Copy, Check } from 'lucide-react';
+import { Plus, Pencil, Trash2, KeyRound, Users, Upload, Copy, Check, FileSpreadsheet, ClipboardList, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const empty = {
   name: '', email: '', phone: '', class_grade: '', section: '', education_level: 'school',
@@ -20,6 +20,10 @@ export default function SchoolStudents() {
   const [csv, setCsv] = useState('');
   const [copied, setCopied] = useState(null);
   const [pw, setPw] = useState('');
+  const [importMode, setImportMode] = useState('csv');
+  const [preview, setPreview] = useState(null);
+  const [fileName, setFileName] = useState('');
+  const [importing, setImporting] = useState(false);
 
   const load = () => api.get('/api/school/students').then((r) => setList(Array.isArray(r) ? r : [])).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -87,6 +91,39 @@ export default function SchoolStudents() {
       setPwModal(null); setPw(''); load();
     } catch (e) { toast(e.message, 'err'); }
   };
+
+  const onExcelSelect = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = String(reader.result).split(',')[1] || '';
+      setImporting(true);
+      setPreview(null);
+      api.post('/api/school/students/import/preview', { base64: b64 })
+        .then((d) => setPreview(d))
+        .catch((err) => { toast(err.message, 'err'); setPreview(null); })
+        .finally(() => setImporting(false));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const confirmExcelImport = async () => {
+    if (!preview) return;
+    const valid = preview.rows.filter((r) => r.errors.length === 0);
+    if (!valid.length) { toast('No valid rows to import', 'err'); return; }
+    setImporting(true);
+    try {
+      const r = await api.post('/api/school/students/import/confirm', { rows: valid });
+      toast(`Imported ${r.imported} student(s)${r.skipped ? `, skipped ${r.skipped}` : ''}`);
+      setImportModal(false); setPreview(null); setCsv(''); setFileName(''); load();
+    } catch (err) { toast(err.message, 'err'); }
+    finally { setImporting(false); }
+  };
+
+  const cellVal = (r, k) => r[k] ? String(r[k]) : '—';
 
   const copy = (code) => {
     navigator.clipboard?.writeText(code);
@@ -217,15 +254,76 @@ export default function SchoolStudents() {
         </div>
       </Modal>
 
-      <Modal open={importModal} onClose={() => setImportModal(false)} title="Import students" wide>
-        <p style={{ fontSize: 13, color: 'var(--slate)', marginBottom: 12 }}>
-          Paste rows below — one student per line. Columns: <code>name, email, phone, class, section</code> (email/phone optional). You can include a header row.
-        </p>
-        <textarea rows="8" className="field" style={{ width: '100%', boxSizing: 'border-box' }} placeholder={'Aarav Sharma, aarav@example.com, +919000000001, 5, A\nMeera Nair, meera@example.com, , 6, B'} value={csv} onChange={(e) => setCsv(e.target.value)} />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-ghost" onClick={() => setImportModal(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={importStudents}><Upload size={16} /> Import</button>
+      <Modal open={importModal} onClose={() => { setImportModal(false); setPreview(null); setCsv(''); setFileName(''); }} title="Import students" wide>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button className={`btn btn-sm ${importMode === 'csv' ? 'btn-blue' : 'btn-outline'}`} onClick={() => { setImportMode('csv'); setPreview(null); }}>
+            <ClipboardList size={14} /> Paste CSV
+          </button>
+          <button className={`btn btn-sm ${importMode === 'excel' ? 'btn-blue' : 'btn-outline'}`} onClick={() => setImportMode('excel')}>
+            <FileSpreadsheet size={14} /> Excel file (.xlsx)
+          </button>
         </div>
+
+        {importMode === 'csv' && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--slate)', marginBottom: 12 }}>
+              Paste rows below — one student per line. Columns: <code>name, email, phone, class, section</code> (email/phone optional). You can include a header row.
+            </p>
+            <textarea rows="8" className="field" style={{ width: '100%', boxSizing: 'border-box' }} placeholder={'Aarav Sharma, aarav@example.com, +919000000001, 5, A\nMeera Nair, meera@example.com, , 6, B'} value={csv} onChange={(e) => setCsv(e.target.value)} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={() => setImportModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={importStudents}><Upload size={16} /> Import</button>
+            </div>
+          </>
+        )}
+
+        {importMode === 'excel' && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--slate)', marginBottom: 12 }}>
+              Pick a <code>.xlsx</code> file (first sheet is read). Supported columns: <code>Name, Email, Phone, Class/Grade, Section, Guardian Name, Guardian Phone, Emergency Name, Emergency Phone, Education Level</code>. The system previews and validates before anything is imported.
+            </p>
+            <input type="file" accept=".xlsx,.xls" onChange={onExcelSelect} />
+            {fileName && !preview && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>{importing ? 'Parsing…' : `File: ${fileName}`}</div>}
+
+            {preview && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <span style={{ fontSize: 13 }}><b>Sheet:</b> {preview.sheetName}</span>
+                  <span style={{ fontSize: 13, color: 'var(--green)' }}><CheckCircle2 size={14} style={{ verticalAlign: -2 }} /> {preview.validCount} valid</span>
+                  {preview.invalidCount > 0 && <span style={{ fontSize: 13, color: '#ef4444' }}><AlertTriangle size={14} style={{ verticalAlign: -2 }} /> {preview.invalidCount} invalid</span>}
+                </div>
+                <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                  <table className="tbl">
+                    <thead>
+                      <tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Class</th><th>Section</th><th>Guardian</th><th>Guardian Phone</th><th>Issues</th></tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.map((r) => (
+                        <tr key={r.row} style={r.errors.length ? { background: 'rgba(239,68,68,.06)' } : undefined}>
+                          <td>{r.row}</td>
+                          <td>{cellVal(r, 'name')}</td>
+                          <td>{cellVal(r, 'email')}</td>
+                          <td>{cellVal(r, 'phone')}</td>
+                          <td>{cellVal(r, 'class_grade')}</td>
+                          <td>{cellVal(r, 'section')}</td>
+                          <td>{cellVal(r, 'guardian_name_1')}</td>
+                          <td>{cellVal(r, 'guardian_phone_1')}</td>
+                          <td>{r.errors.length ? <span style={{ color: '#ef4444', fontSize: 12 }}>{r.errors.join('; ')}</span> : <span style={{ color: '#10b981', fontSize: 12 }}>OK</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+                  <button className="btn btn-ghost" onClick={() => setImportModal(false)}>Cancel</button>
+                  <button className="btn btn-primary" disabled={importing || !preview.validCount} onClick={confirmExcelImport}>
+                    <CheckCircle2 size={16} /> Import {preview.validCount} valid
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </Modal>
 
       <Modal open={!!pwModal} onClose={() => setPwModal(null)} title={`Set login password — ${pwModal?.name || ''}`}>

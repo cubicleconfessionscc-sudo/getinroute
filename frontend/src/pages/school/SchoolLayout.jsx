@@ -5,6 +5,7 @@ import { useInterval, useToast } from '../../components/ui';
 import { useSocketEvent } from '../../socket';
 import { api } from '../../api';
 import ErrorBoundary from '../../components/ErrorBoundary';
+import { useNoindex } from '../../components/Noindex';
 import {
   LayoutDashboard, Route as RouteIcon, Truck, Users, GraduationCap, Bus,
   CalendarClock, ShieldAlert, Home, X, LogOut, Menu, MapPinned, School, Settings
@@ -33,6 +34,7 @@ const NAV_SCHOOL = [
 ];
 
 export default function SchoolLayout() {
+  useNoindex(); // keep private dashboards out of search engine indexes
   const { user, logout } = useAuth();
   const toast = useToast();
   const [openSos, setOpenSos] = useState(0);

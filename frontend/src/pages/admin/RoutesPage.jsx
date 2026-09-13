@@ -4,7 +4,9 @@ import { useAuth } from '../../auth';
 import { Modal, Badge, useToast } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
 import MapPicker from '../../components/MapPicker';
-import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User } from 'lucide-react';
+import GoogleMap from '../../components/GoogleMap';
+import { loadGoogleMaps, mapErrorMessage } from '../../lib/gmaps';
+import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2 } from 'lucide-react';
 
 const emptyRoute = { name: '', start_point: '', end_point: '', speed_limit: 40, stops: [{ sequence: 1, name: '', lat: 12.97, lng: 77.59 }], start_lat: null, start_lng: null, end_lat: null, end_lng: null };
 
@@ -19,10 +21,12 @@ export default function RoutesPage() {
   const [editing, setEditing] = useState(null);
   const [mapFor, setMapFor] = useState(null); // null | 'start' | 'end' | stopIndex
   const [empPick, setEmpPick] = useState('');
-  const [assign, setAssign] = useState(null); // route being roster-updated
+  const [assign, setAssign] = useState(null);
   const [selEmps, setSelEmps] = useState([]);
   const [pushDate, setPushDate] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const [dir, setDir] = useState(null); // { status: 'OK'|'ERROR'|'not-configured', ... }
+  const [dirLoading, setDirLoading] = useState(false);
 
   const load = () => {
     api.get('/api/admin/routes').then((r) => setRoutes(Array.isArray(r) ? r : [])).catch(() => {});
@@ -108,7 +112,8 @@ export default function RoutesPage() {
       const s = form.stops[target];
       if (s && s.lat && s.lng) return { lat: Number(s.lat), lng: Number(s.lng) };
     }
-    return { lat: 12.9716, lng: 77.5946 };
+    const first = form.stops.find((s) => s.lat && s.lng);
+    return first ? { lat: Number(first.lat), lng: Number(first.lng) } : { lat: 12.9716, lng: 77.5946 };
   };
 
   const pickEmployee = (id) => {
@@ -125,14 +130,85 @@ export default function RoutesPage() {
     toast(`Added ${emp.name}'s address as a stop`);
   };
 
+  const coords = form.stops.filter((s) => s && s.lat != null && s.lng != null && !isNaN(Number(s.lat)));
+
+  const calcDirections = async () => {
+    if (coords.length < 2) return toast('Add coordinates for the start and end of the route first (search the start and end points, then add stops).', 'err');
+    setDirLoading(true);
+    setDir(null);
+    try {
+      const g = await loadGoogleMaps();
+      if (!g) { setDir({ status: 'not-configured' }); setDirLoading(false); return; }
+      const ds = new g.maps.DirectionsService();
+      const ordered = coords;
+      const origin = form.start_lat ? { lat: Number(form.start_lat), lng: Number(form.start_lng) } : { lat: Number(ordered[0].lat), lng: Number(ordered[0].lng) };
+      const destination = form.end_lat ? { lat: Number(form.end_lat), lng: Number(form.end_lng) } : { lat: Number(ordered[ordered.length - 1].lat), lng: Number(ordered[ordered.length - 1].lng) };
+      const waypoints = ordered.slice(1, -1).map((s) => ({ location: { lat: Number(s.lat), lng: Number(s.lng) }, stopover: true }));
+      ds.route({ origin, destination, waypoints, travelMode: 'DRIVING', provideRouteAlternatives: false, optimizeWaypoints: false },
+        (res, status) => {
+          setDirLoading(false);
+          if (status === 'OK' && res && res.routes && res.routes.length) {
+            const legs = res.routes[0].legs || [];
+            const distKm = legs.reduce((a, l) => a + ((l.distance && l.distance.value) || 0), 0) / 1000;
+            const mins = legs.reduce((a, l) => a + ((l.duration && l.duration.value) || 0), 0) / 60;
+            setDir({
+              status: 'OK',
+              distText: `${distKm.toFixed(1)} km`,
+              timeText: `${Math.round(mins)} min`,
+              polyline: res.routes[0].overview_path || [],
+              legs: legs.map((l) => ({
+                dist: l.distance ? l.distance.text : '',
+                dur: l.duration ? l.duration.text : '',
+                from: l.start_address || '',
+                to: l.end_address || '',
+                steps: (l.steps || []).map((st) => String(st.instructions || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')).filter(Boolean).slice(0, 5)
+              }))
+            });
+          } else {
+            setDir({ status: 'ERROR', msg: status === 'ZERO_RESULTS' ? 'Google could not find a driving route between these points — verify the coordinates are in India.' : `Directions request failed: ${status || 'UNKNOWN'}` });
+          }
+        });
+    } catch (e) {
+      setDirLoading(false);
+      setDir({ status: 'ERROR', msg: mapErrorMessage(e) });
+    }
+  };
+
+  const previewMarkers = () => {
+    const mk = [];
+    if (form.start_lat != null && form.start_lng != null) mk.push({ id: 'start', lat: Number(form.start_lat), lng: Number(form.start_lng), label: 'A', color: 'green', title: form.start_point || 'Start' });
+    coords.forEach((s, i) => mk.push({ id: `s${form.stops.indexOf(s)}`, lat: Number(s.lat), lng: Number(s.lng), label: String(i + 1), color: 'amber', title: s.name || `Stop ${i + 1}` }));
+    if (form.end_lat != null && form.end_lng != null) mk.push({ id: 'end', lat: Number(form.end_lat), lng: Number(form.end_lng), label: 'B', color: 'red', title: form.end_point || 'End' });
+    return mk;
+  };
+
+  const previewLines = () => {
+    const lines = [];
+    if (coords.length > 1) lines.push({ path: coords.map((s) => ({ lat: Number(s.lat), lng: Number(s.lng) })), color: '#f59e0b', weight: 4, dash: true, opacity: 0.8 });
+    if (dir && dir.status === 'OK' && dir.polyline.length > 1) lines.push({ path: dir.polyline, color: '#22c55e', weight: 5 });
+    return lines;
+  };
+
+  const dragStop = (id, la, ln) => {
+    const n = Number(String(id).replace(/^s/, ''));
+    if (Number.isNaN(n)) return;
+    setForm((f) => {
+      if (id === 'start') return { ...f, start_lat: la, start_lng: ln };
+      if (id === 'end') return { ...f, end_lat: la, end_lng: ln };
+      const stops = [...f.stops];
+      if (stops[n]) stops[n] = { ...stops[n], lat: la, lng: ln };
+      return { ...f, stops };
+    });
+  };
+
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <div className="page-title">Routes</div>
-          <div className="page-sub">Design pickup/drop sequences with the map picker and assign employees. Speed limits are set per cab under Vehicles.</div>
+          <div className="page-sub">Search start and end points, build the stop sequence on Google Maps (drag pins to fine-tune), then calculate the driving route and assign employees. Speed limits are set per cab under Vehicles.</div>
         </div>
-        {!isVendor && <button className="btn btn-primary" onClick={() => { setEditing(null); setForm(emptyRoute); setModal(true); }}><Plus size={16} /> New route</button>}
+        {!isVendor && <button className="btn btn-primary" onClick={() => { setEditing(null); setForm(emptyRoute); setMapFor(null); setDir(null); setModal(true); }}><Plus size={16} /> New route</button>}
       </div>
 
       <div className="card">
@@ -143,7 +219,7 @@ export default function RoutesPage() {
               {routes.map((r) => (
                 <tr key={r.id}>
                   <td><b>{r.name}</b></td>
-                  <td style={{ fontSize: 13, color: 'var(--slate)' }}>{r.start_point} → {r.end_point}</td>
+                  <td style={{ fontSize: 13, color: 'var(--slate)' }}>{r.start_point || '—'} → {r.end_point || '—'}</td>
                   <td><Badge color="violet">{Array.isArray(r.stops) ? r.stops.length : 0} stops</Badge></td>
                   <td>
                     <Badge color={r.employees?.length ? 'green' : 'slate'}>{r.employees?.length ? `${r.employees.length} assigned` : 'None'}</Badge>
@@ -155,7 +231,7 @@ export default function RoutesPage() {
                   <td>
                     <div className="actions">
                       {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => openAssign(r)}><User size={14} /> Assign</button>}
-                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setModal(true); }}><Pencil size={14} /> Edit</button>}
+                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
                       {!isVendor && <button className="btn btn-sm btn-ghost" title="Delete route" onClick={() => delRoute(r)}><Trash2 size={14} color="#ef4444" /></button>}
                     </div>
                   </td>
@@ -169,53 +245,42 @@ export default function RoutesPage() {
 
       <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit route' : 'New route'} wide>
         <div className="field" style={{ marginBottom: 12 }}><label>Route name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Electronic City → Manyata Tech Park" /></div>
+
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 12 }}>
           <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-            <label>Start point</label>
+            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#22c55e" />Start point (search & pick exact location)</label>
             <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <AddressPicker
-                  value={form.start_point ? { address: form.start_point } : null}
-                  onChange={(item) => setForm((f) => ({ ...f, start_point: item.address || f.start_point }))}
+                  value={form.start_point ? { address: form.start_point, lat: form.start_lat, lng: form.start_lng } : null}
+                  onChange={(item) => setForm((f) => ({ ...f, start_point: item.address || f.start_point, start_lat: item.lat ?? f.start_lat, start_lng: item.lng ?? f.start_lng }))}
                 />
               </div>
-              <button type="button" title="Pick start point on map" className="btn btn-outline"
-                onClick={() => setMapFor('start')}
-                style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
-                <MapPinned size={15} color="#4f46e5" />
+              <button type="button" title="Pick start point on map" className="btn btn-outline" onClick={() => setMapFor('start')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
+                <MapPinned size={15} color="#22c55e" />
               </button>
             </div>
+            {form.start_lat != null && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>📍 {Number(form.start_lat).toFixed(5)}, {Number(form.start_lng).toFixed(5)}</div>}
           </div>
           <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-            <label>End point</label>
+            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#ef4444" />End point (search & pick exact location)</label>
             <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <AddressPicker
-                  value={form.end_point ? { address: form.end_point } : null}
-                  onChange={(item) => setForm((f) => ({ ...f, end_point: item.address || f.end_point }))}
+                  value={form.end_point ? { address: form.end_point, lat: form.end_lat, lng: form.end_lng } : null}
+                  onChange={(item) => setForm((f) => ({ ...f, end_point: item.address || f.end_point, end_lat: item.lat ?? f.end_lat, end_lng: item.lng ?? f.end_lng }))}
                 />
               </div>
-              <button type="button" title="Pick end point on map" className="btn btn-outline"
-                onClick={() => setMapFor('end')}
-                style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
+              <button type="button" title="Pick end point on map" className="btn btn-outline" onClick={() => setMapFor('end')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
                 <MapPinned size={15} color="#ef4444" />
               </button>
             </div>
+            {form.end_lat != null && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>📍 {Number(form.end_lat).toFixed(5)}, {Number(form.end_lng).toFixed(5)}</div>}
           </div>
         </div>
 
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label><User size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add employee by address (auto-fills their saved address)</label>
-          <select value={empPick} onChange={(e) => pickEmployee(e.target.value)}>
-            <option value="">Select an employee to add their address…</option>
-            {employees.map((e) => (
-              <option key={e.id || e._id} value={String(e.id || e._id)}>{e.name} · {e.emp_id}{e.home_address ? '' : ' (no address)'}</option>
-            ))}
-          </select>
-        </div>
-
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0 8px' }}>
-          <b style={{ fontSize: 14 }}>Stops (pick-up / drop sequence)</b>
+          <b style={{ fontSize: 14 }}>Stops (pick-up / drop sequence — drag the numbered pin on the preview map to fine-tune)</b>
           <button className="btn btn-sm btn-outline" onClick={() => setForm({ ...form, stops: [...form.stops, { sequence: form.stops.length + 1, name: '', lat: 12.97, lng: 77.59 }] })}><Plus size={14} /> Add stop</button>
         </div>
         {form.stops.map((s, i) => (
@@ -229,8 +294,7 @@ export default function RoutesPage() {
                 return { ...f, stops };
               })}
             />
-            <button type="button" title={`Pick stop ${i + 1} on map`} className="btn btn-outline"
-              onClick={() => setMapFor(i)} style={{ padding: '7px 9px' }}>
+            <button type="button" title={`Pick stop ${i + 1} on map`} className="btn btn-outline" onClick={() => setMapFor(i)} style={{ padding: '7px 9px' }}>
               <MapPinned size={15} color="#f59e0b" />
             </button>
             <input type="number" placeholder="Lat" value={s.lat} onChange={(e) => { const stops = [...form.stops]; stops[i].lat = Number(e.target.value); setForm({ ...form, stops }); }} />
@@ -242,6 +306,59 @@ export default function RoutesPage() {
             </div>
           </div>
         ))}
+
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label><User size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add employee by address (auto-fills their saved address)</label>
+          <select value={empPick} onChange={(e) => pickEmployee(e.target.value)}>
+            <option value="">Select an employee to add their address…</option>
+            {employees.map((e) => (
+              <option key={e.id || e._id} value={String(e.id || e._id)}>{e.name} · {e.emp_id}{e.home_address ? '' : ' (no address)'}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ margin: '14px 0 8px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-outline" disabled={dirLoading || coords.length < 2} onClick={calcDirections}>
+            {dirLoading ? <Loader2 size={15} style={{ animation: 'spin .8s linear infinite' }} /> : <Navigation size={15} />} {dirLoading ? 'Calculating…' : 'Calculate driving route'}
+          </button>
+          {dir && dir.status === 'OK' && (
+            <span className="badge badge-green">Route found — {dir.distText} · {dir.timeText}</span>
+          )}
+          {coords.length < 2 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Add coordinates to at least 2 stops, or start & end points, to calculate directions.</span>}
+        </div>
+
+        {dir && dir.status === 'ERROR' && (
+          <div style={{ padding: '10px 12px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, marginBottom: 10 }}>
+            <b>Could not calculate directions.</b> {dir.msg} <span style={{ color: '#7f1d1d' }}>Check the coordinates, then try again.</span>
+          </div>
+        )}
+        {dir && dir.status === 'not-configured' && (
+          <div style={{ padding: '10px 12px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: 13, marginBottom: 10 }}>
+            Google Maps is not configured on the server (no GOOGLE_MAPS_API_KEY / VITE_GOOGLE_MAPS_API_KEY env var), so live directions can't be calculated. Set the key and reload to enable routing.
+          </div>
+        )}
+
+        {dir && dir.status === 'OK' && (
+          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1.5px solid var(--line)', borderRadius: 12, marginBottom: 12 }}>
+            {dir.legs.map((leg, i) => (
+              <div key={i} style={{ padding: '9px 12px', borderBottom: i < dir.legs.length - 1 ? '1px solid #f1f5f9' : 'none', fontSize: 13 }}>
+                <b>{i + 1}. {leg.from}</b> → {leg.to}
+                <span style={{ color: 'var(--muted)', marginLeft: 8 }}>{leg.dist} · {leg.dur}</span>
+                {leg.steps.length > 0 && <div style={{ fontSize: 12, color: 'var(--slate)', marginTop: 4 }}>{leg.steps.join(' · ')}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {previewMarkers().length > 0 && (
+          <GoogleMap
+            markers={previewMarkers()}
+            lines={previewLines()}
+            height={300}
+            onMarkerDrag={dragStop}
+          />
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={() => setModal(false)}>Cancel</button>
           <button className="btn btn-primary" onClick={save}><RouteIcon size={16} /> {editing ? 'Save changes' : 'Create route'}</button>
@@ -249,14 +366,14 @@ export default function RoutesPage() {
       </Modal>
 
       <Modal open={mapFor !== null} onClose={() => setMapFor(null)} title="Search & select location" wide>
-        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Type the address and pick from the dropdown, or tap anywhere on the map below.</p>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Type the address and pick from the dropdown, tap anywhere on the map, drag the pin, or use your current location.</p>
         <AddressPicker onChange={(item) => applyAddress(mapFor, item)} />
         <div style={{ marginTop: 12 }}>
           <MapPicker
-            lat={(mapCenterFor(mapFor) || {}).lat || 12.9716}
-            lng={(mapCenterFor(mapFor) || {}).lng || 77.5946}
+            lat={(mapCenterFor(mapFor) || {}).lat ?? null}
+            lng={(mapCenterFor(mapFor) || {}).lng ?? null}
             height={300}
-            onPick={({ lat, lng, address }) => applyAddress(mapFor, { lat, lng, address: address || `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` })}
+            onPick={(la, ln) => applyAddress(mapFor, { lat: la, lng: ln, address: `${Number(la).toFixed(5)}, ${Number(ln).toFixed(5)}` })}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>

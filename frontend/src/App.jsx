@@ -5,11 +5,16 @@ import { ToastProvider } from './components/ui';
 import ErrorBoundary from './components/ErrorBoundary';
 
 import Landing from './pages/Landing';
-import OwnerLogin from './pages/OwnerLogin';
+import PortalLogin from './pages/PortalLogin';
+import RoleLogin from './pages/RoleLogin';
 import AdminLogin from './pages/AdminLogin';
+import CompanyLogin from './pages/CompanyLogin';
+import SchoolLogin from './pages/SchoolLogin';
+import OwnerLogin from './pages/OwnerLogin';
 import EmployeeLogin from './pages/EmployeeLogin';
 import Register from './pages/Register';
 import CompanyOnboard from './pages/CompanyOnboard';
+import Apps from './pages/Apps';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 
@@ -45,6 +50,21 @@ import SafetyPage from './pages/admin/SafetyPage';
 import VendorPortal from './pages/admin/VendorPortal';
 import VendorLogin from './pages/VendorLogin';
 
+import SubscriptionCommandCenter from './pages/admin/SubscriptionCommandCenter';
+import FeatureFlags from './pages/admin/FeatureFlags';
+import PolicyEngine from './pages/admin/PolicyEngine';
+import IntelligenceCenter from './pages/admin/IntelligenceCenter';
+import AITransportManager from './pages/admin/AITransportManager';
+import Reports from './pages/admin/Reports';
+import Documents from './pages/admin/Documents';
+import BillingOps from './pages/admin/BillingOps';
+import NotificationTemplates from './pages/admin/NotificationTemplates';
+import CommandCenter from './pages/admin/CommandCenter';
+import AutomationBuilder from './pages/admin/AutomationBuilder';
+import DriversManagement from './pages/admin/DriversManagement';
+import ParentsManagement from './pages/admin/ParentsManagement';
+import WhatIfSimulator from './pages/admin/WhatIfSimulator';
+
 import EmployeeApp from './pages/employee/EmployeeApp';
 import EHome from './pages/employee/EHome';
 import ETrack from './pages/employee/ETrack';
@@ -78,6 +98,7 @@ import ParentRegister from './pages/parent/ParentRegister';
 
 function Require({ role, roles, vertical, children }) {
   const { user, loading } = useAuth();
+  const loginTarget = role === 'admin' ? '/admin/login' : role === 'employee' ? '/employee-login' : role === 'driver' ? '/driver/login' : role === 'parent' ? '/parent/login' : '/login';
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9' }}>
       <div style={{ textAlign: 'center' }}>
@@ -87,7 +108,7 @@ function Require({ role, roles, vertical, children }) {
       </div>
     </div>
   );
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to={loginTarget} replace />;
   const allowed = roles || (role ? [role] : null);
   if (vertical && user.vertical !== vertical) {
     if (user.role === 'admin') return <Navigate to={user.vertical === 'school' ? '/school' : '/admin'} replace />;
@@ -112,8 +133,21 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
 
+          <Route path="/login" element={<PortalLogin />} />
+          <Route path="/driver/login" element={<RoleLogin role="driver" />} />
+          <Route path="/parent/login" element={<RoleLogin role="parent" />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/company/login" element={<CompanyLogin />} />
+          <Route path="/vendor/login" element={<VendorLogin />} />
+          <Route path="/school/login" element={<SchoolLogin />} />
+          <Route path="/apps" element={<Apps />} />
+          <Route path="/get-started" element={<Navigate to="/register-company" replace />} />
+          <Route path="/platform" element={<Navigate to="/#platform" replace />} />
+          <Route path="/solutions" element={<Navigate to="/#solutions" replace />} />
+          <Route path="/about" element={<Navigate to="/#about" replace />} />
+          <Route path="/contact" element={<Navigate to="/#contact" replace />} />
+
           <Route path="/owner" element={<OwnerLogin />} />
-          <Route path="/login" element={<AdminLogin />} />
           <Route path="/employee-login" element={<EmployeeLogin />} />
           <Route path="/register" element={<Register />} />
           <Route path="/register-company" element={<CompanyOnboard />} />
@@ -150,6 +184,20 @@ export default function App() {
             <Route path="parking-lines" element={<ParkingLinesPage />} />
             <Route path="cancellations" element={<CancellationsPage />} />
             <Route path="safety" element={<SafetyPage />} />
+            <Route path="subscription" element={<SubscriptionCommandCenter />} />
+            <Route path="feature-flags" element={<FeatureFlags />} />
+            <Route path="policies" element={<PolicyEngine />} />
+            <Route path="intelligence" element={<IntelligenceCenter />} />
+            <Route path="transport-manager" element={<AITransportManager />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="documents" element={<Documents />} />
+            <Route path="billing" element={<BillingOps />} />
+            <Route path="notification-templates" element={<NotificationTemplates />} />
+            <Route path="command-center" element={<CommandCenter />} />
+            <Route path="automation" element={<AutomationBuilder />} />
+            <Route path="drivers" element={<DriversManagement />} />
+            <Route path="parents" element={<ParentsManagement />} />
+            <Route path="what-if" element={<WhatIfSimulator />} />
           </Route>
 
           <Route path="/school" element={<Require role="admin" vertical="school"><SchoolLayout /></Require>}>

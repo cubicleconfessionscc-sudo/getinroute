@@ -47,6 +47,9 @@ if (USE_PG) {
   const { PG_SCHEMA } = require('./pg-schema');
   pgdb.setAppTimezone(process.env.APP_TIMEZONE || 'Asia/Kolkata');
   pgdb.exec(PG_SCHEMA);
+  // Idempotent column ensures an already-migrated PG database gets P1.6 columns.
+  try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS safety_drop_eligible INTEGER DEFAULT 0;"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));
@@ -260,6 +263,7 @@ try { db.exec(`ALTER TABLE schedules ADD COLUMN cancelled_by INTEGER;`); } catch
 try { db.exec(`ALTER TABLE schedules ADD COLUMN cancelled_at TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE schedules ADD COLUMN safety_status TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN safety_drop_eligible INTEGER DEFAULT 0;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN gender TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN last_login TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN home_address TEXT;`); } catch (e) {}
@@ -568,6 +572,13 @@ try { db.exec(`ALTER TABLE users ADD COLUMN company_id INTEGER;`); } catch (e) {
     throw e;
   }
 })();
+
+// Post-rebuild columns: the one-time users rebuild above recreates the table
+// from an explicit column list, so any column that is only ALTERed before it
+// (e.g. gender / safety_drop_eligible) would be silently dropped. Re-add them
+// here so both legacy and brand-new databases end up with them.
+try { db.exec(`ALTER TABLE users ADD COLUMN gender TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN safety_drop_eligible INTEGER DEFAULT 0;`); } catch (e) {}
 
 try { db.exec(`ALTER TABLE users ADD COLUMN invite_code TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0;`); } catch (e) {}

@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import { AuthProvider } from './auth.jsx';
 import { SocketProvider } from './socket.jsx';
-import 'leaflet/dist/leaflet.css';
 import './styles.css';
 
 window.addEventListener('error', (e) => {

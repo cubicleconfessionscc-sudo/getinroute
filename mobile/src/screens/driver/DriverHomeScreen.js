@@ -9,6 +9,7 @@ import { connectSocket, joinTrip, leaveTrip, updateStopStatus, updateAllotmentSt
 import { startDriverTracking, stopDriverTracking } from "../../services/location";
 import { getSupportConfig } from "../../api/support";
 import { useAuth } from "../../context/AuthContext";
+import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
 import { speakTripAssigned } from "../../services/voice";
 import { notifyTripAssigned, notifyChatMessage } from "../../services/notifications";
 import { colors, spacing, radius } from "../../theme";
@@ -50,8 +51,15 @@ function fmtEta(minutes, km) {
   return parts.join(" · ");
 }
 
+const CHECK_ITEMS = [
+  "Fuel/charge level adequate",
+  "Tires in good condition",
+  "Mirrors and lights working",
+  "First aid kit present",
+];
+
 export default function DriverHomeScreen({ navigation }) {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const [trip, setTrip] = useState(null);       // legacy carpool trip, if any
   const [run, setRun] = useState(null);         // the active allotment run, if any
   const [allotted, setAllotted] = useState([]);
@@ -63,6 +71,7 @@ export default function DriverHomeScreen({ navigation }) {
   const [sosNote, setSosNote] = useState("");
   const [checklistModal, setChecklistModal] = useState(false);
   const [checklistDone, setChecklistDone] = useState(false);
+  const [checkedItems, setCheckedItems] = useState({});
   const [standingPoint, setStandingPointState] = useState(null);
   const [standingModal, setStandingModal] = useState(false);
   const [cancelModal, setCancelModal] = useState(false);
@@ -176,21 +185,43 @@ export default function DriverHomeScreen({ navigation }) {
     };
   }, []);
 
-  async function toggleTracking() {
-    if (!activeId) return;
+  async function startRun() {
     try {
-      if (tracking) {
-        await stopDriverTracking();
-        setTracking(false);
-        if (idleTimerRef.current) clearInterval(idleTimerRef.current);
-      } else {
-        await startDriverTracking(activeId);
-        setTracking(true);
-        startIdleReminder();
-      }
+      await startDriverTracking(activeId);
+      setTracking(true);
+      startIdleReminder();
     } catch (err) {
       Alert.alert("Location needed", err.message);
     }
+  }
+
+  async function toggleTracking() {
+    if (!activeId) return;
+    if (tracking) {
+      try {
+        await stopDriverTracking();
+        setTracking(false);
+        if (idleTimerRef.current) clearInterval(idleTimerRef.current);
+      } catch (err) {
+        Alert.alert("Location needed", err.message);
+      }
+      return;
+    }
+    if (checklistDone) {
+      await startRun();
+    } else {
+      setChecklistModal(true);
+    }
+  }
+
+  function confirmChecklist() {
+    if (CHECK_ITEMS.filter((i) => checkedItems[i]).length !== CHECK_ITEMS.length) {
+      Alert.alert("Checklist incomplete", "Please verify every item before starting.");
+      return;
+    }
+    setChecklistModal(false);
+    setChecklistDone(true);
+    startRun();
   }
 
   function startIdleReminder() {
@@ -491,6 +522,12 @@ export default function DriverHomeScreen({ navigation }) {
         </ScrollView>
       </View>
 
+      {user?.company_id ? (
+        <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xs }}>
+          <SubscriptionStatusBar companyId={user.company_id} compact />
+        </View>
+      ) : null}
+
       {run && (
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Allotted cab</Text>
@@ -720,13 +757,15 @@ export default function DriverHomeScreen({ navigation }) {
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>Pre-Trip Vehicle Check</Text>
             <Text style={styles.modalBody}>Confirm before starting:</Text>
-            {["Fuel/charge level adequate", "Tires in good condition", "Mirrors and lights working", "First aid kit present"].map((item) => (
-              <TouchableOpacity key={item} style={styles.checkItem} onPress={() => {}}>
-                <Text style={styles.checkItemText}>☐ {item}</Text>
+            {CHECK_ITEMS.map((item) => (
+              <TouchableOpacity key={item} style={styles.checkItem} onPress={() => setCheckedItems((p) => ({ ...p, [item]: !p[item] }))}>
+                <Text style={styles.checkItemText}>{checkedItems[item] ? "☑" : "☐"} {item}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={[styles.modalConfirm, !checklistDone && { opacity: 0.5 }]}
-              onPress={() => { setChecklistModal(false); setChecklistDone(true); }}>
+            <TouchableOpacity
+              style={[styles.modalConfirm, CHECK_ITEMS.some((i) => !checkedItems[i]) && { opacity: 0.5 }]}
+              onPress={confirmChecklist}
+            >
               <Text style={styles.modalConfirmText}>Confirm & Start</Text>
             </TouchableOpacity>
           </View>

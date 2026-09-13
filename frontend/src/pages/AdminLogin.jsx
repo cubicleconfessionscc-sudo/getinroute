@@ -67,7 +67,10 @@ export default function AdminLogin() {
           </button>
         </form>
         <p className="auth-switch">New company? <Link to="/register-company" className="auth-link">Register here</Link></p>
-        <p className="auth-switch" style={{ marginTop: 8 }}>Are you a transport vendor? <Link to="/vendor-login" className="auth-link" style={{ color: '#7c3aed' }}>Vendor Login</Link></p>
+        <p className="auth-switch" style={{ marginTop: 8 }}>Are you a transport vendor? <Link to="/vendor/login" className="auth-link" style={{ color: '#7c3aed' }}>Vendor Login</Link></p>
+        <div style={{ marginTop: 10, textAlign: 'center' }}>
+          <Link to="/login" className="auth-link" style={{ fontSize: 13 }}>All sign-in portals</Link>
+        </div>
       </div>
     </div>
   );

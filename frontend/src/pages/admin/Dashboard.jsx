@@ -97,6 +97,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const toast = useToast();
   const [stats, setStats] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [schedules, setSchedules] = useState([]);
   const [tracking, setTracking] = useState(null);
   const [loginActivity, setLoginActivity] = useState([]);
@@ -105,12 +106,13 @@ export default function Dashboard() {
 
   const isVendor = user?.role === 'vendor';
   const load = () => {
+    let ok = false;
     if (user?.isOwner) {
-      api.get('/api/owner/stats').then((s) => setStats(s && typeof s === 'object' ? s : {})).catch(() => {});
+      api.get('/api/owner/stats').then((s) => { setStats(s && typeof s === 'object' ? s : {}); ok = true; setLoadError(''); }).catch((e) => setLoadError(e.message || 'Dashboard data failed to load'));
       api.get('/api/owner/login-activity?days=30').then((d) => setLoginActivity(Array.isArray(d) ? d : [])).catch(() => {});
       api.get('/api/admin/tracking').then((t) => setTracking({ vehicles: [], employees: [], speedEvents: [], ...(t && typeof t === 'object' ? t : {}) })).catch(() => {});
     } else {
-      api.get('/api/admin/stats').then((s) => setStats(s && typeof s === 'object' ? s : {})).catch(() => {});
+      api.get('/api/admin/stats').then((s) => { setStats(s && typeof s === 'object' ? s : {}); ok = true; setLoadError(''); }).catch((e) => setLoadError(e.message || 'Dashboard data failed to load'));
       if (!isVendor) api.get('/api/admin/schedules').then((rows) => setSchedules(Array.isArray(rows) ? rows.filter((x) => x?.date === todayStr()) : [])).catch(() => {});
       api.get('/api/admin/tracking').then((t) => setTracking({ vehicles: [], employees: [], speedEvents: [], ...(t && typeof t === 'object' ? t : {}) })).catch(() => {});
     }
@@ -191,6 +193,15 @@ export default function Dashboard() {
     return Object.entries(m).map(([k, v]) => ({ name: k.length > 18 ? k.slice(0, 17) + '…' : k, trips: v }));
   }, [schedules]);
 
+  if (!stats && loadError) {
+    return (
+      <div className="empty" style={{ padding: 60 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Dashboard could not load</div>
+        <div style={{ color: 'var(--muted)', marginBottom: 16 }}>{loadError}</div>
+        <button className="btn btn-primary" onClick={() => { setLoadError(''); setStats(null); load(); }}>Retry</button>
+      </div>
+    );
+  }
   if (!stats) return <div className="empty">Loading dashboard…</div>;
 
   const pct = (a, b) => (b ? Math.min(100, Math.round((a / b) * 100)) : 0);

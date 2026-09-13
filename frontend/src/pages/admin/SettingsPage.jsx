@@ -442,7 +442,7 @@ export default function SettingsPage() {
           </Field>
           <Field label="Or click on the map to set location">
             <MapPicker lat={npForm.lat} lng={npForm.lng} height={280}
-              onPick={({ lat, lng, address }) => setNpForm((prev) => ({ ...prev, lat, lng, address: address || prev.address }))} />
+              onPick={(la, ln) => setNpForm((prev) => ({ ...prev, lat: la, lng: ln, address: prev.address || `${Number(la).toFixed(5)}, ${Number(ln).toFixed(5)}` }))} />
           </Field>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <Field label="Latitude">

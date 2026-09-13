@@ -1,5 +1,5 @@
 import React from 'react';
-import { downloadCsv } from '../../api';
+import { downloadCsv, downloadFile } from '../../api';
 import { useToast } from '../../components/ui';
 import { FileSpreadsheet, Download, Users, Truck, Route as RouteIcon, CalendarClock, Star, BellRing, History } from 'lucide-react';
 
@@ -15,9 +15,10 @@ const EXPORTS = [
 
 export default function ExportsPage() {
   const toast = useToast();
-  const dl = async (kind, label) => {
+  const dl = async (kind, label, xlsx) => {
     try {
-      await downloadCsv(`/api/admin/export/${kind}`, `getinroute-${kind}.csv`);
+      if (xlsx) await downloadFile(`/api/admin/export/${kind}.xlsx`, `getinroute-${kind}.xlsx`);
+      else await downloadCsv(`/api/admin/export/${kind}`, `getinroute-${kind}.csv`);
       toast(`${label} downloaded`);
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -39,8 +40,8 @@ export default function ExportsPage() {
             </div>
             <p style={{ color: 'var(--slate)', fontSize: 13, marginBottom: 14, minHeight: 36 }}>{e.desc}</p>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-outline btn-sm" onClick={() => dl(e.kind, e.label)}><Download size={15} /> CSV</button>
-              <button className="btn btn-green btn-sm" onClick={() => dl(e.kind, e.label)}><FileSpreadsheet size={15} /> Excel</button>
+              <button className="btn btn-outline btn-sm" onClick={() => dl(e.kind, e.label, false)}><Download size={15} /> CSV</button>
+              <button className="btn btn-green btn-sm" onClick={() => dl(e.kind, e.label, true)}><FileSpreadsheet size={15} /> Excel</button>
             </div>
           </div>
         ))}

@@ -6,4 +6,13 @@ getinroute.db-wal
 .env
 backups
 *.bak
-test-rbac.js
+test-*.js
+test-*.cjs
+apk-backup
+_apk_view.zip
+public/assets
+public/download
+data
+uploads
+.rbenv
+.railway

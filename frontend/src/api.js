@@ -1,13 +1,50 @@
-const TOKEN_KEY = 'getinroute_token';
-
+const LEGACY_KEY = 'getinroute_token';
+const roleKey = (role) => `getinroute_token_${role || 'admin'}`;
+// Resolve which portal the current URL belongs to so each role keeps its own
+// session token in localStorage (P1.18). Without this, logging into the vendor
+// portal would overwrite the admin token and break the admin tab.
+const PATH_ROLES = [
+  ['/admin', 'admin'], ['/vendor', 'vendor'], ['/parent', 'parent'],
+  ['/school', 'school'], ['/driver', 'driver'], ['/employee', 'employee'],
+  ['/app', 'employee']
+];
+function pathRole() {
+  const p = window.location.pathname;
+  for (const [prefix, role] of PATH_ROLES) {
+    if (p === prefix || p.startsWith(prefix + '/')) return role;
+  }
+  return null;
+}
+export function tokenRole(t) {
+  try { return JSON.parse(atob(String(t || getToken()).split('.')[1])).role || null; }
+  catch { return null; }
+}
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  const pr = pathRole();
+  if (pr) {
+    const direct = localStorage.getItem(roleKey(pr));
+    if (direct) return direct;
+    // /admin hosts both admin and vendor sessions; use whichever exists.
+    if (pr === 'admin') {
+      const alt = localStorage.getItem(roleKey('vendor')) || localStorage.getItem(roleKey('admin'));
+      if (alt) return alt;
+    }
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) return legacy;
+  }
+  const last = localStorage.getItem('getinroute_last_role');
+  return localStorage.getItem(roleKey(last)) || localStorage.getItem(LEGACY_KEY) || '';
 }
 export function setToken(t) {
-  localStorage.setItem(TOKEN_KEY, t);
+  const role = tokenRole(t) || 'admin';
+  localStorage.setItem(roleKey(role), t);
+  localStorage.setItem('getinroute_last_role', role);
+  localStorage.removeItem(LEGACY_KEY);
 }
 export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
+  const pr = pathRole();
+  if (pr) localStorage.removeItem(roleKey(pr));
+  localStorage.removeItem(LEGACY_KEY);
 }
 
 async function request(path, { method = 'GET', body, params } = {}) {
@@ -58,6 +95,10 @@ export function ensureArray(v) {
 }
 
 export async function downloadCsv(path, filename) {
+  await downloadFile(path, filename);
+}
+
+export async function downloadFile(path, filename) {
   const token = getToken();
   const res = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('Download failed');

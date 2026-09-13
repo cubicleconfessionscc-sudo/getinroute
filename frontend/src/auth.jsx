@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { api, getToken, setToken, clearToken } from './api';
+import { api, getToken, setToken, clearToken, tokenRole } from './api';
 
 const AuthCtx = createContext(null);
 
@@ -11,7 +11,7 @@ export function AuthProvider({ children }) {
     if (!getToken()) return setLoading(false);
     let stored = null;
     try { stored = JSON.parse(localStorage.getItem('gir_user') || 'null'); } catch {}
-    const path = stored?.role === 'vendor' ? '/api/vendor/me' : '/api/auth/me';
+    const path = tokenRole() === 'vendor' ? '/api/vendor/me' : '/api/auth/me';
     api.get(path)
       .then((r) => setUser(r.user || r))
       .catch(() => clearToken())

@@ -26,6 +26,10 @@ node_modules/
 deploy/*.zip
 .railway/
 
+# Build output lives only under backend/public/admin (served); don't track dev duplicates or source maps
+frontend/dist/
+backend/public/admin/assets/*.map
+
 # OS
 Thumbs.db
 Desktop.ini

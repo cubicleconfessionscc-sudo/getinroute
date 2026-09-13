@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS users (
   school_id BIGINT,
   company_id BIGINT,
   location_profile TEXT,
+  gender TEXT,
   driver_verified INTEGER DEFAULT 0,
   safety_drop_eligible INTEGER DEFAULT 0,
   must_change_password INTEGER DEFAULT 0,

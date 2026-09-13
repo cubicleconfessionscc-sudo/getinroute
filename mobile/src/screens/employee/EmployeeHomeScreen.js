@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, Linking, Platform, Modal } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getMyTrips, checkIn, checkOut } from "../../api/trips";
-import { getMyLiveAllotment, allotmentCheckIn, allotmentCheckOut, confirmAllotmentSafeDrop } from "../../api/schedules";
+import { getMyLiveAllotment, allotmentCheckIn, allotmentCheckOut, confirmReachedHome } from "../../api/schedules";
 import { getLocationProfile } from "../../api/locations";
 import { getSupportConfig } from "../../api/support";
 import { connectSocket, joinTrip, leaveTrip, getSocket } from "../../services/socket";
@@ -10,6 +10,7 @@ import { speakTripAssigned } from "../../services/voice";
 import { notifyTripAssigned, notifyChatMessage } from "../../services/notifications";
 import { useAuth } from "../../context/AuthContext";
 import SwipeButton from "../../components/SwipeButton";
+import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
 import { colors, spacing, radius } from "../../theme";
 
 export default function EmployeeHomeScreen({ navigation }) {
@@ -266,7 +267,7 @@ export default function EmployeeHomeScreen({ navigation }) {
   async function handleSafeDrop() {
     if (!allotment) return;
     try {
-      await confirmAllotmentSafeDrop(allotment._id);
+      await confirmReachedHome(allotment.scheduleId);
       loadTrip();
     } catch (e) {
       Alert.alert("Couldn't confirm", e.response?.data?.message || e.message);
@@ -459,6 +460,12 @@ export default function EmployeeHomeScreen({ navigation }) {
           <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
         </ScrollView>
       </View>
+
+      {user?.company_id ? (
+        <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xs }}>
+          <SubscriptionStatusBar companyId={user.company_id} compact />
+        </View>
+      ) : null}
 
       {locationStatus !== "none" && locationStatus !== "approved" && (
         <View style={[styles.card, styles.pendingCard]}>

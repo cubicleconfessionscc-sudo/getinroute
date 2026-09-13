@@ -84,7 +84,7 @@ export default function Register() {
         </form>
         <p className="auth-switch">Already have an account? <Link to="/employee-login" className="auth-link">Sign in</Link></p>
         <div style={{ marginTop: 12, textAlign: 'center' }}>
-          <Link to="/login" className="auth-link" style={{ fontSize: 13 }}>Admin Login</Link>
+          <Link to="/admin/login" className="auth-link" style={{ fontSize: 13 }}>Admin Login</Link>
           <span style={{ margin: '0 8px', color: '#cbd5e1' }}>|</span>
           <Link to="/register-company" className="auth-link" style={{ fontSize: 13 }}>Register Company</Link>
         </div>

@@ -58,7 +58,7 @@ export default function OwnerLogin() {
           </button>
         </form>
         <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <Link to="/login" className="auth-link" style={{ fontSize: 13 }}>Admin Login</Link>
+          <Link to="/admin/login" className="auth-link" style={{ fontSize: 13 }}>Admin Login</Link>
           <span style={{ margin: '0 8px', color: '#cbd5e1' }}>|</span>
           <Link to="/employee-login" className="auth-link" style={{ fontSize: 13 }}>Employee Login</Link>
         </div>

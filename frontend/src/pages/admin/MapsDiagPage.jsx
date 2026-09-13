@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { gmapsKey, loadGoogleMaps } from '../../lib/gmaps';
+import { getGoogleMapsKey, loadGoogleMaps } from '../../lib/gmaps';
 import AddressPicker from '../../components/AddressPicker';
 
 const Row = ({ name, state, detail }) => {
@@ -40,7 +40,8 @@ export default function MapsDiagPage() {
     setRows(tests.map((name) => ({ name, state: 'wait', detail: '' })));
 
     // Test 1: key
-    set(0, tests[0], gmapsKey ? 'pass' : 'fail', gmapsKey ? `present (${gmapsKey.length} chars, starts ${gmapsKey.slice(0, 6)}…)` : 'VITE_GOOGLE_MAPS_API_KEY is EMPTY');
+    const gmapsKey = await getGoogleMapsKey();
+    set(0, tests[0], gmapsKey ? 'pass' : 'fail', gmapsKey ? `present (${gmapsKey.length} chars, starts ${gmapsKey.slice(0, 6)}…)` : 'Google Maps key is EMPTY (no VITE_GOOGLE_MAPS_API_KEY, no server /api/config/public key)');
 
     // Test 2: script load
     let google = null;

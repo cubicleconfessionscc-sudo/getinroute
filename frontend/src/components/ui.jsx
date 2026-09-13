@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
-import L from 'leaflet';
 import { X } from 'lucide-react';
+import GoogleMap from './GoogleMap';
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext(() => {});
@@ -55,71 +54,53 @@ export const statusColor = (s) => {
 };
 export const statusLabel = (s) => String(s).replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
-/* ---------- Map ---------- */
-const fixIcons = () => {
-  L.Icon.Default.mergeOptions({
-    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-  });
-};
-fixIcons();
-
-const vehIcon = L.divIcon({ className: '', html: '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.3)"></div>', iconSize: [30, 30], iconAnchor: [15, 15] });
-const empIcon = L.divIcon({ className: '', html: '<div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#10b981,#059669);border:2.5px solid #fff;box-shadow:0 4px 10px rgba(0,0,0,.3)"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
-const stopIcon = L.divIcon({ className: '', html: '<div style="width:18px;height:18px;border-radius:50%;background:#fff;border:4px solid #f59e0b;box-shadow:0 3px 8px rgba(0,0,0,.25)"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
-
-function FocusController({ focus }) {
-  const map = useMap();
-  useEffect(() => {
-    if (focus && focus.lat && focus.lng) {
-      map.flyTo([focus.lat, focus.lng], 15, { duration: 1.2 });
-    }
-  }, [focus?.lat, focus?.lng]);
-  return null;
-}
-
-const toArr = (v) => (Array.isArray(v) ? v : []);
-
+/* ---------- Map (Google Maps — no silent fallback) ---------- */
 export function LiveMap({ center, zoom = 12, stops, vehicles, employees, polyline, height = '420px', focus = null }) {
-  const safeStops = toArr(stops);
-  const safeVehicles = toArr(vehicles);
-  const safeEmployees = toArr(employees);
-  const safePolyline = toArr(polyline);
-  const companyIcon = L.divIcon({
-    html: '<div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)">C</div>',
-    className: '', iconSize: [28, 28], iconAnchor: [14, 14]
+  const safeStops = Array.isArray(stops) ? stops : [];
+  const safeVehicles = Array.isArray(vehicles) ? vehicles : [];
+  const safeEmployees = Array.isArray(employees) ? employees : [];
+  const safePolyline = Array.isArray(polyline) ? polyline : [];
+  const markers = [];
+  safeStops.forEach((s, i) => {
+    if (s && s.lat != null && s.lng != null) {
+      markers.push({
+        id: `s${i}`, lat: Number(s.lat), lng: Number(s.lng), label: String(i + 1), color: 'amber',
+        title: `${i + 1}. ${s.name || ''}`,
+        info: { title: `${i + 1}. ${s.name || 'Stop'}`, body: `${Number(s.lat).toFixed(5)}, ${Number(s.lng).toFixed(5)}` }
+      });
+    }
   });
-  const pos = center || (safeStops[0] ? [safeStops[0].lat, safeStops[0].lng] : [12.9716, 77.5946]);
-  return (
-    <div className="map-box" style={{ height }}>
-      <MapContainer center={pos} zoom={zoom} style={{ height: '100%', width: '100%' }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
-        <FocusController focus={focus} />
-        {safeStops.map((s, i) => (
-          <Marker key={i} position={[s.lat, s.lng]} icon={stopIcon}>
-            <Popup><b>{i + 1}. {s.name}</b></Popup>
-          </Marker>
-        ))}
-        {safeStops.length > 1 && <Polyline positions={safeStops.map((s) => [s.lat, s.lng])} pathOptions={{ color: '#7c3aed', weight: 4, opacity: 0.7, dashArray: '6 8' }} />}
-        {safePolyline.length > 1 && <Polyline positions={safePolyline} pathOptions={{ color: '#4f46e5', weight: 5 }} />}
-        {safeVehicles.map((v) => v.lat && v.lng ? (
-          <Marker key={`v${v.id}`} position={[v.lat, v.lng]} icon={v.type === 'company' ? companyIcon : vehIcon}>
-            <Popup>
-              <b>{v.vehicle_name || v.name}</b><br />{v.plate || v.email || ''}<br />
-              {v.type === 'company' ? `Department: ${v.department || ''}` : <>Driver: {v.driver_name}<br />{v.speed != null && `Speed: ${Math.round(v.speed)} km/h`}</>}
-              {v.route_name && <><br />Route: {v.route_name}</>}
-            </Popup>
-          </Marker>
-        ) : null)}
-        {safeEmployees.map((e) => e.lat && e.lng ? (
-          <CircleMarker key={`e${e.id}`} center={[e.lat, e.lng]} radius={7} pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.85, weight: 2 }}>
-            <Popup><b>{e.name}</b>{e.emp_id ? <><br />{e.emp_id}</> : null}</Popup>
-          </CircleMarker>
-        ) : null)}
-      </MapContainer>
-    </div>
-  );
+  safeVehicles.forEach((v) => {
+    if (v && v.lat != null && v.lng != null) {
+      const body = [v.plate || v.email];
+      if (v.type === 'company') body.push(v.department ? `Department: ${v.department}` : 'Company vehicle');
+      else body.push(v.driver_name ? `Driver: ${v.driver_name}` : '');
+      if (v.speed != null) body.push(`Speed: ${Math.round(v.speed)} km/h`);
+      if (v.route_name) body.push(`Route: ${v.route_name}`);
+      markers.push({
+        id: `v${v.id || v._id || v.vehicle_name}`,
+        lat: Number(v.lat), lng: Number(v.lng),
+        label: v.type === 'company' ? 'C' : '',
+        color: v.type === 'company' ? 'indigo' : 'blue',
+        title: v.vehicle_name || v.name || 'Vehicle',
+        info: { title: v.vehicle_name || v.name || 'Vehicle', body: body.filter(Boolean).join('<br/>') }
+      });
+    }
+  });
+  safeEmployees.forEach((e) => {
+    if (e && e.lat != null && e.lng != null) {
+      markers.push({
+        id: `e${e.id || e._id}`,
+        lat: Number(e.lat), lng: Number(e.lng),
+        color: 'green', title: e.name || '',
+        info: { title: e.name || '', body: e.emp_id ? e.emp_id : (e.home_address || e.address || '') }
+      });
+    }
+  });
+  const lines = [];
+  if (safeStops.length > 1) lines.push({ path: safeStops.map((s) => ({ lat: Number(s.lat), lng: Number(s.lng) })), color: '#7c3aed', dash: true, opacity: 0.7, weight: 4 });
+  if (safePolyline.length > 1) lines.push({ path: safePolyline, color: '#4f46e5', weight: 5 });
+  return <GoogleMap markers={markers} lines={lines} center={center} zoom={zoom} height={height} focus={focus} />;
 }
 
 /* ---------- useInterval hook ---------- */

@@ -1,201 +1,546 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPinned, ShieldCheck, BellRing, Route, Users, Truck, LogIn, UserPlus, Zap, Clock, Star, ChevronRight, Building2, User, Download, Smartphone, School, Apple } from 'lucide-react';
+import {
+  MapPinned, ShieldCheck, BellRing, Route, Users, Truck, LogIn, UserPlus, Zap, Clock, ChevronRight,
+  Building2, User, Download, Smartphone, School, Menu, X, CarFront, BarChart3, Sparkles, Wallet,
+  Gauge, Siren, MoonStar, HelpCircle, LifeBuoy, MessageCircle, MapPin, Navigation, ShieldAlert,
+  RadioTower, AlertTriangle, BrainCircuit, Repeat, Activity, Radar, Target, CheckCircle2, ArrowRight
+} from 'lucide-react';
+import { APP_LINKS } from '../config/apps';
 
-const FEATURES = [
-  { icon: <MapPinned size={26} />, color: 'ico-indigo', title: 'Live Cab & Employee Tracking', text: 'Admin watches every cab and employee in real time on an interactive map — from the first pickup stop to the final drop.' },
-  { icon: <BellRing size={26} />, color: 'ico-pink', title: 'Speed Limit Alerts', text: 'Set per-route speed limits. The moment a driver crosses the limit, the admin gets an instant notification.' },
-  { icon: <Route size={26} />, color: 'ico-violet', title: 'Smart Route Editor', text: 'Design routes with any number of stops, pick-up/drop sequences, and assign unlimited employees and vehicles.' },
-  { icon: <Users size={26} />, color: 'ico-green', title: 'Admin Approvals & Access Control', text: 'Every registration needs admin approval. Only you decide who gets in, who is scheduled, and what they can see.' },
-  { icon: <Truck size={26} />, color: 'ico-amber', title: 'Vehicle & Trip Management', text: 'Allocate cabs to Lines 1–10 and Trips 1–2, update driver names, vehicle details, and phone numbers anytime.' },
-  { icon: <ShieldCheck size={26} />, color: 'ico-blue', title: 'Check-in / Check-out + Feedback', text: 'Employees swipe to check in and out of the cab. Drivers see who boarded. Everyone rates each trip when it ends.' }
+const NAV = [
+  { label: 'Home', id: 'top' },
+  { label: 'Platform', id: 'platform' },
+  { label: 'Solutions', id: 'solutions' },
+  { label: 'Features', id: 'features' },
+  { label: 'Apps', id: 'apps' },
+  { label: 'Safety', id: 'safety' },
+  { label: 'AI', id: 'ai' },
+  { label: 'About', id: 'about' },
+  { label: 'Contact', id: 'contact' }
+];
+
+const PLATFORM_FEATURES = [
+  { icon: <Truck size={24} />, title: 'Live Fleet Tracking', text: 'Know where every vehicle is from the first pickup to the final drop on one interactive live map.' },
+  { icon: <Route size={24} />, title: 'Intelligent Routes', text: 'Unlimited stops, pickup/drop sequencing, per-route speed limits and smart route planning.' },
+  { icon: <Users size={24} />, title: 'Driver Management', text: 'Complete driver lifecycle — onboarding, documents, compliance, availability and performance.' },
+  { icon: <ShieldCheck size={24} />, title: 'Safety & SOS', text: 'One-tap SOS with live GPS, SafeDrop, geofencing, overspeed and route-deviation alerts.' },
+  { icon: <BrainCircuit size={24} />, title: 'Predictive Intelligence', text: 'Predicted ETA, no-show, demand and utilization forecasts that help operators act early.' },
+  { icon: <Repeat size={24} />, title: 'Intelligent Automation', text: 'Events become actions automatically — incidents, recommendations, escalations and alerts.' },
+  { icon: <Activity size={24} />, title: 'Analytics & Reports', text: 'Utilization, cost, check-in logs and exportable reports across the whole operation.' },
+  { icon: <Building2 size={24} />, title: 'Vendor Management', text: 'Scoped portals for transport partners — fleets, drivers, trips and billing from one system.' },
+  { icon: <Wallet size={24} />, title: 'Enterprise Billing', text: 'Transparent billing and payment verification with a clear subscription lifecycle.' },
+  { icon: <Radar size={24} />, title: 'Real-Time Operations', text: 'Socket-powered live updates — tracking, chat, alerts and events reach the right person instantly.' },
+  { icon: <Target size={24} />, title: 'Command Center', text: 'A single pane for active trips, vehicles, drivers, delays, incidents and AI recommendations.' },
+  { icon: <Gauge size={24} />, title: 'Every Platform', text: 'Admin, employee, driver, parent and school experiences from one connected system.' }
+];
+
+const SOLUTIONS = [
+  { icon: <Building2 size={30} />, title: 'Corporate', text: 'End-to-end employee transportation for companies of every size.', cta: 'Explore for Companies', to: '/register-company' },
+  { icon: <Users size={30} />, title: 'Employee Transport', text: 'Bookings, live tracking, safety confirmation and support in every journey.', cta: 'Employee Experience', to: '/employee-login' },
+  { icon: <School size={30} />, title: 'School Transport', text: 'Student transportation with parent visibility, attendance and safe drops.', cta: 'Explore for Schools', to: '/register-company' },
+  { icon: <Truck size={30} />, title: 'Fleet Management', text: 'Vehicles, drivers, route allocation and compliance in one command center.', cta: 'Explore Fleet Tools', to: '/vendor/login' }
+];
+
+const AUTOMATION_FLOW = ['MANUAL', 'DETECT', 'RECOMMEND', 'APPROVE', 'AUTOMATE', 'MONITOR', 'RECOVER'];
+
+const AI_FEATURES = [
+  { icon: <Clock size={20} />, title: 'Predictive ETA', text: 'Live arrival estimates for every stop based on schedule and journey progress.' },
+  { icon: <Route size={20} />, title: 'Smart Routing', text: 'Route optimization that keeps pickup and drop times intact.' },
+  { icon: <User size={20} />, title: 'Driver Allocation', text: 'Best-driver matching informed by capacity, availability and history.' },
+  { icon: <Truck size={20} />, title: 'Vehicle Allocation', text: 'Right-size vehicles to expected demand, capacity and route load.' },
+  { icon: <BarChart3 size={20} />, title: 'Demand Prediction', text: 'Per-route, per-date ridership forecasts to plan fleet capacity.' },
+  { icon: <ShieldAlert size={20} />, title: 'No-Show Prediction', text: 'Flag likely no-shows early so allocations can adjust.' },
+  { icon: <Gauge size={20} />, title: 'Safety Intelligence', text: 'Risk scoring that focuses teams on what matters most first.' },
+  { icon: <Wallet size={20} />, title: 'Cost Intelligence', text: 'Cost and utilization insight to keep the operation efficient.' },
+  { icon: <Sparkles size={20} />, title: 'Operational Recommendations', text: 'Concrete, explainable recommends — with human approval before action.' }
 ];
 
 const SAFETY_FEATURES = [
-  { title: 'SOS Emergency Alert', text: 'One-tap SOS button sends live GPS location and alerts to admin and security team instantly.' },
-  { title: 'SafeDrop Confirmation', text: 'Employees confirm safe arrival home. If not confirmed within 30 minutes, admin gets notified.' },
-  { title: 'Night-Hour Doorstep Drop', text: 'Female employees get mandatory doorstep drop for shifts after 9 PM with GPS-verified delivery.' },
-  { title: 'Escort for Women', text: 'Admin assigns a dedicated escort for women employees on late-night cabs. Escort badge visible in-app.' },
-  { title: 'Overspeed Monitoring', text: 'Real-time speed tracking with instant alerts when drivers exceed route speed limits.' },
-  { title: 'Driver Background Checks', text: 'License verification, Aadhaar, phone validation, and face photo — all vetted before first trip.' }
+  { title: 'One-tap SOS', text: 'Emergency alert with live GPS position to admin and security immediately.' },
+  { title: 'Live Tracking', text: 'Every employee and every stop watched in real time on a live map.' },
+  { title: 'Route Deviation', text: 'Any vehicle leaving the planned route is flagged to operations instantly.' },
+  { title: 'Overspeed Detection', text: 'Instant alerts when drivers exceed per-route speed limits.' },
+  { title: 'Geofencing', text: 'Automatic arrival, departure and zone-boundary detection.' },
+  { title: 'Emergency Escalation', text: 'Every safety event becomes a tracked incident with priority scoring and resolution flow.' },
+  { title: 'Driver Safety', text: 'Verified drivers, document checks and compliance before the first trip.' },
+  { title: 'Employee Safety', text: 'SafeDrop confirmation, night-shift protocols and escort support built in.' },
+  { title: 'Incident Management', text: 'A full state machine turning events into resolved, audited incidents.' }
 ];
 
-const PRICING = [
-  { name: 'Starter', price: '₹15,000', per: '/month', employees: 'Up to 200 employees', features: ['Live GPS tracking', 'Route management', 'Cab allotment', 'Employee & driver apps', 'Check-in / check-out', 'Basic reporting', 'Email support'] },
-  { name: 'Professional', price: '₹30,000', per: '/month', employees: 'Up to 500 employees', features: ['Everything in Starter', 'Multi-vendor support', 'Speed monitoring', 'SafeDrop confirmation', 'SOS alerts', 'Night-hour drops', 'Priority support'], popular: true },
-  { name: 'Enterprise', price: '₹60,000+', per: '/month', employees: '500+ employees', features: ['Everything in Professional', 'Unlimited vendors & zones', 'Escort management', 'Custom integrations', 'Dedicated account manager', 'SLA guarantee', 'Phone + on-site support'] }
+const ANALYTICS_FEATURES = [
+  { icon: <BarChart3 size={22} />, title: 'Utilization', text: 'Vehicle utilization across routes, days and shifts.' },
+  { icon: <Wallet size={22} />, title: 'Cost Insights', text: 'Transparent operating cost per trip, per route and per employee.' },
+  { icon: <Activity size={22} />, title: 'Operational Load', text: 'Trips, check-ins, no-shows and cancellations at a glance.' },
+  { icon: <Download size={22} />, title: 'Exports', text: 'Raw operational data exportable whenever you need it.' }
+];
+
+const INDUSTRIES = [
+  'IT & Tech Parks', 'BPO & Contact Centres', 'Manufacturing', 'Healthcare & Hospitals', 'Banking & Finance', 'Retail & E-commerce', 'Colleges & Universities', 'K-12 Schools'
 ];
 
 const FAQ = [
-  { q: 'What is GetInRoute?', a: 'GetInRoute is an employee transport management platform for Indian companies. It provides live cab tracking, route optimization, driver management, cab allotment, SOS emergency alerts, SafeDrop confirmation, and multi-vendor support — all in one web and mobile app.' },
-  { q: 'How much does GetInRoute cost?', a: 'GetInRoute offers three pricing tiers: Starter (Rs.15,000/month for up to 200 employees), Professional (Rs.30,000/month for up to 500 employees), and Enterprise (Rs.60,000+/month for 500+ employees). Infrastructure costs start at just Rs.400/month.' },
-  { q: 'Is GetInRoute compliant with OSH Rules 2026?', a: 'Yes. GetInRoute includes all features required by India\'s OSH Rules 2026: GPS tracking for night-shift vehicles, driver background verification, trip documentation, SOS alerts, female escort protocols, and audit-ready reporting.' },
-  { q: 'Does GetInRoute support multiple transport vendors?', a: 'Yes. GetInRoute supports unlimited transport vendors, each with their own drivers, vehicles, and zone assignments. Admins can filter and manage vendors separately from the dispatch dashboard.' },
-  { q: 'How does GetInRoute ensure employee safety?', a: 'GetInRoute provides multiple safety features: one-tap SOS emergency alerts with live GPS, SafeDrop confirmation (auto-alerts if not confirmed within 30 minutes), speed monitoring with overspeed alerts, night-hour doorstep drops, escort feature for women employees, and real-time cab tracking.' },
-  { q: 'Can employees book cabs themselves?', a: 'Yes. Employees use the GetInRoute mobile app to request cabs by selecting pickup zone, destination, shift, and preferred timing. Admin approves the request and assigns a vehicle and driver.' },
-  { q: 'Which cities does GetInRoute operate in?', a: 'GetInRoute works across India. It is a cloud-based platform — you can deploy it in any city. Setup takes less than 1 week. No hardware installation required.' },
-  { q: 'How is GetInRoute different from MoveInSync or Routematic?', a: 'GetInRoute is significantly more affordable (starts at Rs.15,000/month vs Rs.3-10 per employee/month). It includes multi-vendor support, SafeDrop, SOS alerts, escort feature, and full cab allotment — all in the base plan. MoveInSync charges extra for each module.' }
+  { q: 'What is GetInRoute?', a: 'GetInRoute is an intelligent employee transportation operating system. It connects companies, employees, drivers, vehicles and routes into one platform with live tracking, safety, automation and predictive intelligence.' },
+  { q: 'How does the 10-day trial work?', a: 'Register your company, submit a few details, owner approval is given, and a 10-day free trial begins with full platform access. Payment is required only after the trial ends.' },
+  { q: 'Which apps are available?', a: 'The Employee and School Android apps are available now. The Driver and Parent apps are in active development — no placeholder links, only real builds.' },
+  { q: 'Is GetInRoute compliant with India\'s OSH Rules 2026?', a: 'Yes. GetInRoute includes GPS tracking for night-shift vehicles, driver background verification, trip documentation, SOS alerts, escort protocols, and audit-ready reporting.' },
+  { q: 'Does it support multiple transport vendors?', a: 'Yes. Unlimited vendors, each with their own drivers, vehicles and zone assignments, all managed separately from the dispatch dashboard.' },
+  { q: 'How is it different from generic cab-tracking tools?', a: 'GetInRoute is built for transportation operations — booking, boarding, safety, automation, intelligence and billing combined, with no per-employee module upsells.' }
+];
+
+const TRUST = [
+  { icon: <MapPinned size={16} />, text: 'Real-time tracking' },
+  { icon: <ShieldCheck size={16} />, text: 'Secure & audited' },
+  { icon: <Building2 size={16} />, text: 'Multi-company' },
+  { icon: <Sparkles size={16} />, text: 'AI-assisted decisions' },
+  { icon: <AlertTriangle size={16} />, text: 'Safety-first design' },
+  { icon: <Activity size={16} />, text: 'Scalable' },
+  { icon: <Target size={16} />, text: 'Enterprise-ready' }
+];
+
+const CONTACT_CATEGORIES = [
+  { icon: <Building2 size={22} />, title: 'Company enquiry', subject: 'Company enquiry' },
+  { icon: <School size={22} />, title: 'School enquiry', subject: 'School enquiry' },
+  { icon: <Truck size={22} />, title: 'Vendor enquiry', subject: 'Vendor enquiry' },
+  { icon: <Smartphone size={22} />, title: 'App support', subject: 'App support' },
+  { icon: <LifeBuoy size={22} />, title: 'Technical support', subject: 'Technical support' },
+  { icon: <Users size={22} />, title: 'Partnership', subject: 'Partnership' }
+];
+
+const DEMO_KPIS = [
+  { num: '24', label: 'Vehicles' },
+  { num: '18', label: 'On Route' },
+  { num: '3', label: 'Delayed' },
+  { num: '1', label: 'Incident' },
+  { num: '2', label: 'Alerts' }
+];
+
+const QUICK_ACCESS = [
+  { icon: <Building2 size={24} />, title: 'Manage Transportation', sub: 'For Companies', to: '/register-company' },
+  { icon: <School size={24} />, title: 'Manage School Transport', sub: 'For Schools', to: '/register-company' },
+  { icon: <Truck size={24} />, title: 'Manage Fleet', sub: 'For Vendors', to: '/vendor/login' },
+  { icon: <Users size={24} />, title: 'Track My Ride', sub: 'For Employees', to: '/employee-login' },
+  { icon: <Navigation size={24} />, title: 'Manage My Trip', sub: 'For Drivers', to: '/login' },
+  { icon: <School size={24} />, title: 'Track My Child', sub: 'For Parents', to: '/parent/register' }
 ];
 
 export default function Landing() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [contactForm, setContactForm] = useState({ name: '', email: '', category: 'General', message: '' });
+  const headRef = useRef(null);
+
+  const go = (id) => {
+    setMenuOpen(false);
+    setHelpOpen(false);
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    history.replaceState(null, '', id && id !== 'top' ? `/#${id}` : '/');
+  };
+
+  useEffect(() => {
+    const id = window.location.hash ? window.location.hash.slice(1) : null;
+    if (id) {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ block: 'start' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const els = document.querySelectorAll([
+      '.pub-card', '.pub-app-chip', '.demo-row', '.demo-box',
+      '.pub-kpi', '.pub-demo-card', '.founder-card', '.pub-hero-visual',
+      '.live-dashboard-preview', '.pub-callout', '.pub-faq'
+    ].join(','));
+    if (!els.length) return;
+    const clean = [];
+    els.forEach((el) => {
+      let raf = 0;
+      const move = (e) => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;
+        const px = (e.clientX - r.left) / r.width;
+        const py = (e.clientY - r.top) / r.height;
+        const rx = (0.5 - py) * 9;
+        const ry = (px - 0.5) * 9;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          el.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateZ(8px)`;
+          el.style.setProperty('--tilt-x', `${((px - 0.5) * 22).toFixed(1)}px`);
+          el.style.setProperty('--tilt-y', `${((py - 0.5) * 22).toFixed(1)}px`);
+        });
+      };
+      const leave = () => {
+        cancelAnimationFrame(raf);
+        el.style.transform = '';
+        el.style.setProperty('--tilt-x', '0px');
+        el.style.setProperty('--tilt-y', '0px');
+      };
+      el.addEventListener('mousemove', move);
+      el.addEventListener('mouseleave', leave);
+      clean.push(() => { el.removeEventListener('mousemove', move); el.removeEventListener('mouseleave', leave); });
+    });
+    return () => clean.forEach((fn) => fn());
+  }, []);
+
+  const mailtoHref = () => {
+    const s = encodeURIComponent(`GetInRoute enquiry — ${contactForm.category}${contactForm.name ? ` (${contactForm.name})` : ''}\n${contactForm.message}`);
+    return `mailto:hello@getinroute.in?subject=${encodeURIComponent(contactForm.category)}&body=${s}`;
+  };
+
   return (
     <div className="landing">
-      {/* TOP BAR */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 20px', background: 'rgba(15,20,26,.9)', backdropFilter: 'blur(10px)', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
-        <Link to="/" style={{ textDecoration: 'none', color: '#fff', fontWeight: 800, fontSize: 18, letterSpacing: '.3px' }}>
-          GetInRoute<span className="grad-text">.</span>
-        </Link>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Link to="/login" className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}><LogIn size={15} /> Admin Login</Link>
-          <Link to="/vendor-login" className="btn btn-sm" style={{ textDecoration: 'none', background: 'rgba(124,58,237,.22)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,.45)' }}><Truck size={15} /> Vendor Login</Link>
+      {/* ================= TOP NAV ================= */}
+      <header className="pub-nav" ref={headRef}>
+        <Link to="/" className="pub-logo" aria-label="GetInRoute home">GetInRoute<span className="grad-text">.</span></Link>
+        <nav className="pub-links" aria-label="Primary">
+          {NAV.map((n) => (
+            <button key={n.id} type="button" className="pub-link" onClick={() => go(n.id)}>{n.label}</button>
+          ))}
+        </nav>
+        <div className="pub-nav-cta">
+          <Link to="/login" className="btn btn-sm pub-login"><LogIn size={15} /> Login</Link>
+          <a className="request-demo" href="#contact" onClick={(e) => { e.preventDefault(); go('contact'); }}>Request Demo</a>
         </div>
+        <button className="pub-burger" aria-label="Toggle menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+          {menuOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+        {menuOpen && (
+          <div className="pub-mobile" role="menu">
+            {NAV.map((n) => (
+              <button key={n.id} type="button" onClick={() => go(n.id)}>{n.label}</button>
+            ))}
+            <Link to="/login" onClick={() => setMenuOpen(false)}><LogIn size={15} /> Login</Link>
+            <Link to="/register-company" onClick={() => setMenuOpen(false)}><UserPlus size={15} /> Request Demo</Link>
+          </div>
+        )}
       </header>
 
-      {/* HERO */}
-      <section className="hero">
-        <h1>GetInRoute<span className="grad-text">.</span></h1>
-        <h2 style={{ margin: '8px 0 6px', fontSize: 'clamp(26px,4vw,40px)', fontWeight: 800 }}>
-          Employee cab tracking, <span className="grad-text">reimagined</span>
-        </h2>
-        <p>One platform for admin, employees, and drivers — route planning, live tracking, speed alerts, schedules, check-ins, and trip feedback.</p>
-        <div className="hero-btns" style={{ flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
-          <Link to="/login" className="btn btn-primary"><LogIn size={17} /> Admin Login</Link>
-          <Link to="/vendor-login" className="btn" style={{ background: 'rgba(124,58,237,.22)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,.45)' }}><Truck size={17} /> Vendor Login</Link>
-          <Link to="/employee-login" className="btn" style={{ background: 'rgba(16,185,129,.2)', color: '#10b981', border: '1px solid rgba(16,185,129,.4)' }}><Users size={17} /> Employee Login</Link>
-          <Link to="/register" className="btn" style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: '1px solid rgba(255,255,255,.25)' }}><UserPlus size={17} /> Register</Link>
-          <Link to="/register-company" className="btn" style={{ background: 'rgba(124,58,237,.25)', color: '#a78bfa', border: '1px solid rgba(124,58,237,.4)' }}><Building2 size={17} /> Register Company</Link>
-        </div>
-      </section>
-
-      {/* FEATURES */}
-      <section className="features">
-        {FEATURES.map((f, i) => (
-          <div className="feature" key={i}>
-            <div className={`ico ${f.color}`} style={{ width: 46, height: 46, borderRadius: 13, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.icon}</div>
-            <h3>{f.title}</h3>
-            <p>{f.text}</p>
+      {/* ================= HERO ================= */}
+      <section className="hero pub-hero" id="top">
+        <div className="pub-hero-grid">
+          <div>
+            <p className="pub-eyebrow"><span className="dot-pulse" /> Intelligent Employee Transportation — GetInRoute</p>
+            <h1>
+              Intelligent Employee Transportation.<br />
+              <span className="grad-text">Powered by AI.</span>&nbsp;Designed for Safety.<br />
+              Built for Operations.
+            </h1>
+            <p className="pub-hero-desc">
+              GetInRoute helps companies manage employees, drivers, vehicles, routes and transportation operations from one intelligent platform.
+            </p>
+            <div className="hero-btns" style={{ justifyContent: 'flex-start' }}>
+              <a className="btn btn-primary" href="#contact" onClick={(e) => { e.preventDefault(); go('contact'); }}><UserPlus size={17} /> Request a Demo</a>
+              <button type="button" className="btn" style={{ background: 'rgba(255,255,255,.06)', color: '#e2f3ff', border: '1px solid rgba(255,255,255,.15)' }} onClick={() => go('platform')}>Explore Platform</button>
+              <Link to="/apps" className="btn" style={{ background: 'rgba(14,165,233,.15)', color: '#7dd3fc', border: '1px solid rgba(14,165,233,.35)' }}><Download size={17} /> Download Apps</Link>
+            </div>
           </div>
-        ))}
+          <div className="pub-hero-visual" aria-hidden="true">
+            {/* Admin Command Center visualization (illustrative, no fake data) */}
+            <div className="live-dashboard-preview">
+              <div className="live-dash-head">
+                <span className="live-dot" /> <span className="live-dash-title">Command Center — illustrative live view</span>
+              </div>
+              <div className="live-map-placeholder">
+                <svg viewBox="0 0 400 160" width="400" height="160" fill="none">
+                  <path d="M20 140 C 70 110, 60 60, 120 60 S 240 30, 260 70 S 340 20, 380 20" stroke="#22d3ee" strokeWidth="2.5" strokeDasharray="5 7" />
+                  <circle cx="20" cy="140" r="6" fill="#0b1120" stroke="#22d3ee" strokeWidth="2" />
+                  <circle cx="120" cy="60" r="5" fill="#0b1120" stroke="#f59e0b" strokeWidth="2" />
+                  <circle cx="260" cy="70" r="5" fill="#0b1120" stroke="#22d3ee" strokeWidth="2" />
+                  <circle cx="380" cy="20" r="6" fill="#0b1120" stroke="#10b981" strokeWidth="2" />
+                  <circle cx="80" cy="120" r="4" fill="#ef4444" />
+                  <circle cx="300" cy="45" r="4" fill="#22d3ee" />
+                </svg>
+              </div>
+              <div className="live-stat-row">
+                <div className="live-stat"><div className="live-stat-num">Live</div><div className="live-stat-lbl">Trips</div></div>
+                <div className="live-stat"><div className="live-stat-num">ETA</div><div className="live-stat-lbl">Alerts</div></div>
+                <div className="live-stat"><div className="live-stat-num">AI</div><div className="live-stat-lbl">Recommendations</div></div>
+                <div className="live-stat"><div className="live-stat-num">Safe</div><div className="live-stat-lbl">Status</div></div>
+              </div>
+            </div>
+            <div className="route-card">
+              <div className="rc-head">
+                <span className="rc-code">TRIP · GR-2481</span>
+                <span className="rc-pill"><span className="dot-pulse" /> On route</span>
+              </div>
+              <svg className="route-svg" viewBox="0 0 340 220" fill="none" role="presentation">
+                <path className="route-path-bg" d="M30 190 C 80 150, 60 90, 120 80 S 220 40, 250 90 S 300 40, 310 30" strokeLinecap="round" />
+                <path className="route-path" d="M30 190 C 80 150, 60 90, 120 80 S 220 40, 250 90 S 300 40, 310 30" strokeLinecap="round" />
+                <circle className="stop-dot start" cx="30" cy="190" r="6" />
+                <circle className="stop-dot" cx="120" cy="80" r="4.5" />
+                <circle className="stop-dot" cx="250" cy="90" r="4.5" />
+                <circle className="stop-dot end" cx="310" cy="30" r="6" />
+                <g className="mover">
+                  <circle r="6" fill="#f5f7ff" stroke="#0ea5e9" strokeWidth="2.5">
+                    <animateMotion dur="5s" repeatCount="indefinite" path="M30 190 C 80 150, 60 90, 120 80 S 220 40, 250 90 S 300 40, 310 30" />
+                  </circle>
+                </g>
+              </svg>
+              <div className="rc-foot">
+                <div className="rf-item"><MapPin size={13} /><span className="rf-label">Pickup</span><span className="rf-value">Sector 12 Hub</span></div>
+                <div className="rf-item"><MapPin size={13} /><span className="rf-label">Drop-off</span><span className="rf-value">Tech Park East</span></div>
+                <div className="rf-item"><Clock size={13} /><span className="rf-label">ETA</span><span className="rf-value">08:42</span></div>
+              </div>
+            </div>
+            <div className="rc-note">Journey visualization — routes are modelled from your real trips.</div>
+          </div>
+        </div>
+        <div className="pub-trust">
+          {TRUST.map((t, i) => <span key={i}>{t.icon} {t.text}</span>)}
+        </div>
       </section>
 
-      {/* SAFETY SECTION */}
-      <section style={{ padding: '60px 20px', maxWidth: 960, margin: '0 auto' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800, marginBottom: 8 }}>
-          <ShieldCheck size={28} style={{ verticalAlign: 'middle', marginRight: 8 }} />
-          Employee Safety & Compliance
-        </h2>
-        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,.65)', maxWidth: 600, margin: '0 auto 36px', lineHeight: 1.6 }}>
-          GetInRoute is built for India's OSH Rules 2026. Every safety feature — SOS alerts, SafeDrop, night drops, escorts, speed monitoring — included in every plan.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+      {/* ================= PLATFORM ================= */}
+      <section className="pub-section" id="platform">
+        <h2 className="pub-h2">GETINROUTE PLATFORM</h2>
+        <p className="pub-sub">One operating system for employee transportation.</p>
+        <div className="pub-grid-3" style={{ marginBottom: 28 }}>
+          {SOLUTIONS.slice(0, 4).map((s, i) => (
+            <div className="pub-card" key={i}>
+              <div className="pub-card-ico ico-indigo">{s.icon}</div>
+              <h3>{s.title}</h3>
+              <p>{s.text}</p>
+              <Link to={s.to} className="pub-cta">{s.cta} <ChevronRight size={16} /></Link>
+            </div>
+          ))}
+        </div>
+        <div className="pub-grid-3">
+          {PLATFORM_FEATURES.map((f, i) => (
+            <div className="pub-card" key={i}>
+              <div className="pub-card-ico" style={{ background: 'rgba(14,165,233,.12)', color: '#38bdf8' }}>{f.icon}</div>
+              <h3>{f.title}</h3>
+              <p>{f.text}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ================= SOLUTIONS ================= */}
+      <section className="pub-section" id="solutions">
+        <h2 className="pub-h2">BUILT FOR EVERYONE IN THE JOURNEY</h2>
+        <p className="pub-sub">Admin command center, employee, driver, parent and school experiences — all connected.</p>
+        <div className="pub-grid-3">
+          <div className="pub-card"><div className="pub-card-ico ico-indigo"><ShieldCheck size={22} /></div><h3>Admin</h3><p>Transportation command center — trips, vehicles, drivers, routes, alerts and AI from one dashboard.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-green"><Users size={22} /></div><h3>Employee</h3><p>Booking, trip tracking, notifications and safety in the palm of every employee.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-amber"><Navigation size={22} /></div><h3>Driver</h3><p>Trips, navigation, boarding, OTP verification, GPS reporting and on-road safety.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-violet"><School size={22} /></div><h3>Parent</h3><p>Student transport visibility, notifications, live tracking and safety confirmations.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-pink"><School size={22} /></div><h3>School</h3><p>Student transportation management with attendance, routes and safety for every journey.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-blue"><BarChart3 size={22} /></div><h3>Management</h3><p>Analytics, costs, utilization and intelligence for leadership oversight.</p></div>
+        </div>
+      </section>
+
+      {/* ================= FEATURES ================= */}
+      <section className="pub-section" id="features">
+        <h2 className="pub-h2">ENTERPRISE FEATURES, COMPLETE CONTROL</h2>
+        <p className="pub-sub">Every capability the operation needs — without switching tools.</p>
+        <div className="pub-grid-3">
+          <div className="pub-card"><div className="pub-card-ico ico-indigo"><Route size={22} /></div><h3>Route Management</h3><p>Unlimited stops, zones, sequences and per-route speed limits.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-green"><CheckCircle2 size={22} /></div><h3>Check-in / Check-out</h3><p>Swipe or OTP boarding with employee confirmation and no-show handling.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-violet"><MessageCircle size={22} /></div><h3>In-Trip Chat</h3><p>Drivers, employees and admins stay in sync through built-in messaging.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-amber"><LifeBuoy size={22} /></div><h3>Support Desk</h3><p>Tickets, comments, escalation and full lifecycle for driver and employee support.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-pink"><Wallet size={22} /></div><h3>Billing & Subscriptions</h3><p>Transparent rate plans, invoices and a clear subscription lifecycle.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-blue"><Gauge size={22} /></div><h3>Speed & Compliance</h3><p>Live speed monitoring, driver verification and audit-ready trip records.</p></div>
+        </div>
+      </section>
+
+      {/* ================= AI ================= */}
+      <section className="pub-section" id="ai">
+        <h2 className="pub-h2">INTELLIGENCE THAT DOESN'T JUST REPORT. IT PREDICTS.</h2>
+        <p className="pub-sub">Predictions, recommendations and explainable insight — with human approval before any action.</p>
+        <div className="pub-grid-3">
+          {AI_FEATURES.map((f, i) => (
+            <div className="pub-card" key={i}>
+              <div className="pub-card-ico ico-violet">{f.icon}</div>
+              <h3 style={{ fontSize: 15.5, fontWeight: 700, margin: '10px 0 4px', color: 'var(--text)' }}>{f.title}</h3>
+              <p style={{ fontSize: 13.5, color: 'var(--slate)', lineHeight: 1.55, margin: 0 }}>{f.text}</p>
+            </div>
+          ))}
+        </div>
+        <div className="pub-callout">
+          <b>Reasoning in action</b>
+          <p>Driver unavailable → Detects → Checks alternatives → Validates safety → Predicts impact → Recommends replacement → Requests approval → Reassigns → Notifies employees → Monitors the result.</p>
+        </div>
+      </section>
+
+      {/* ================= AUTOMATION ================= */}
+      <section className="pub-section" id="automation">
+        <h2 className="pub-h2">FROM MANUAL OPERATIONS TO INTELLIGENT AUTOMATION</h2>
+        <p className="pub-sub">Companies control exactly how much automation they allow. Rules, events, actions — all audited.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 28 }}>
+          {AUTOMATION_FLOW.map((step, i) => (
+            <React.Fragment key={i}>
+              <span className="chip" style={{ background: i % 2 === 0 ? 'rgba(14,165,233,.14)' : 'rgba(129,140,248,.14)', color: i % 2 === 0 ? '#7dd3fc' : '#a5b4fc', fontSize: 13, padding: '8px 14px' }}>{step}</span>
+              {i < AUTOMATION_FLOW.length - 1 && <ArrowRight size={16} style={{ color: 'var(--violet)' }} />}
+            </React.Fragment>
+          ))}
+        </div>
+        <div className="pub-grid-3">
+          <div className="pub-card"><div className="pub-card-ico ico-indigo"><RadioTower size={22} /></div><h3>Event Engine</h3><p>SOS, overspeed, geofence and trip events flow into one auditable stream.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-green"><Target size={22} /></div><h3>Rule Engine</h3><p>Platform or per-company rules decide what each event triggers.</p></div>
+          <div className="pub-card"><div className="pub-card-ico ico-violet"><Zap size={22} /></div><h3>Actions</h3><p>Incidents, recommendations, escalations and notifications — each logged and reversible.</p></div>
+        </div>
+      </section>
+
+      {/* ================= SAFETY ================= */}
+      <section className="pub-section" id="safety">
+        <h2 className="pub-h2"><ShieldCheck size={26} style={{ verticalAlign: 'middle', marginRight: 8 }} />SAFETY COMES BEFORE OPTIMIZATION.</h2>
+        <p className="pub-sub">Every journey is watched. Every risk is surfaced. Every event becomes a resolved, audited incident.</p>
+        <div className="pub-grid-3">
           {SAFETY_FEATURES.map((f, i) => (
-            <div key={i} style={{ background: 'rgba(255,255,255,.06)', borderRadius: 14, padding: '24px 20px', border: '1px solid rgba(255,255,255,.08)' }}>
-              <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>{f.title}</h3>
-              <p style={{ fontSize: 14, color: 'rgba(255,255,255,.6)', lineHeight: 1.5, margin: 0 }}>{f.text}</p>
+            <div className="pub-card" key={i}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>{f.title}</h3>
+              <p style={{ fontSize: 13.5, color: 'var(--slate)', lineHeight: 1.55, margin: 0 }}>{f.text}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* HOW IT WORKS */}
-      <section style={{ padding: '60px 20px', maxWidth: 900, margin: '0 auto' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800, marginBottom: 36 }}>
-          How GetInRoute Works
-        </h2>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'center' }}>
-          {[
-            { step: '1', title: 'Admin Sets Up Routes', text: 'Define zones, stops, shift timings, and speed limits. Assign employees to routes.' },
-            { step: '2', title: 'Employees Request Cabs', text: 'Employees pick zone, destination, and shift. Admin approves and allocates vehicle + driver.' },
-            { step: '3', title: 'Drivers Follow GPS Routes', text: 'Drivers see optimized stop sequence, navigate with Leaflet/OpenStreetMap, and mark arrivals.' },
-            { step: '4', title: 'Admin Monitors Everything', text: 'Live map, speed alerts, check-in stats, trip history — all on one dashboard.' }
-          ].map((s, i) => (
-            <div key={i} style={{ background: 'rgba(255,255,255,.06)', borderRadius: 14, padding: '28px 24px', flex: '1 1 200px', maxWidth: 210, textAlign: 'center', border: '1px solid rgba(255,255,255,.08)' }}>
-              <div style={{ width: 44, height: 44, borderRadius: 22, background: 'linear-gradient(135deg, #6366f1, #ec4899)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, marginBottom: 12 }}>{s.step}</div>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{s.title}</h3>
-              <p style={{ fontSize: 13, color: 'rgba(255,255,255,.55)', margin: 0, lineHeight: 1.5 }}>{s.text}</p>
+      {/* ================= APPS ================= */}
+      <section className="pub-section" id="apps">
+        <h2 className="pub-h2">ONE PLATFORM. EVERY JOURNEY.</h2>
+        <p className="pub-sub">Employee, Driver, Parent, School and Admin — one connected experience.</p>
+        <div className="pub-apps-row" style={{ marginBottom: 18 }}>
+          {Object.values(APP_LINKS).map((app) => (
+            <Link to="/apps" className="pub-app-chip" key={app.key}>
+              <div className="pub-card-ico ico-indigo">{app.key === 'school' ? <School size={22} /> : app.key === 'driver' ? <Navigation size={22} /> : app.key === 'parent' ? <Users size={22} /> : <Smartphone size={22} />}</div>
+              <div>
+                <b>{app.name.replace('GetInRoute ', '')} App</b>
+                <div className="pub-a">{app.web?.state === 'available' ? 'Sign in on web' : (app.android.state === 'available' ? 'Android APK' : 'Coming soon')}</div>
+              </div>
+            </Link>
+          ))}
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <Link to="/apps" className="btn btn-primary"><Smartphone size={17} /> Explore All Apps</Link>
+        </div>
+      </section>
+
+      {/* ================= COMMAND CENTER ================= */}
+      <section className="pub-section" id="demo">
+        <h2 className="pub-h2">COMMAND CENTER IN ACTION</h2>
+        <div className="pub-demo-tag"><AlertTriangle size={14} /> Illustrative preview — not real platform statistics</div>
+        <div className="pub-kpis">
+          {DEMO_KPIS.map((k, i) => (
+            <div className="pub-kpi" key={i}>
+              <div className="pub-kpi-num">{k.num}</div>
+              <div className="pub-kpi-lbl">{k.label}</div>
+            </div>
+          ))}
+        </div>
+        <div className="pub-demo-grid">
+          <div className="pub-demo-card">
+            <h3>Route status</h3>
+            <ul className="pub-demo-list">
+              <li><span className="pub-dot green" /> Line A — on time, 4 stops left</li>
+              <li><span className="pub-dot green" /> Line B — on time, boarding</li>
+              <li><span className="pub-dot amber" /> Line C — delayed 9 min</li>
+              <li><span className="pub-dot green" /> Line D — completed</li>
+            </ul>
+          </div>
+          <div className="pub-demo-card">
+            <h3>Incident feed <span className="pub-demo-badge">P1</span></h3>
+            <ul className="pub-demo-list">
+              <li><Siren size={14} /> SOS alert — vehicle GR-2481, Line C</li>
+              <li><AlertTriangle size={14} /> Overspeed — Tech Park East</li>
+              <li><RadioTower size={14} /> Route deviation — Line F</li>
+            </ul>
+          </div>
+          <div className="pub-demo-card">
+            <h3>AI predictions</h3>
+            <ul className="pub-demo-list">
+              <li><Sparkles size={14} /> No-show risk: 2 riders flagged</li>
+              <li><Sparkles size={14} /> Utilization forecast: 82% Line A</li>
+              <li><Sparkles size={14} /> Demand: +14% expected tomorrow</li>
+            </ul>
+          </div>
+          <div className="pub-demo-card">
+            <h3>Automation activity</h3>
+            <ul className="pub-demo-list">
+              <li><Repeat size={14} /> 3 incidents auto-created</li>
+              <li><Zap size={14} /> 2 recommendations approved</li>
+              <li><MessageCircle size={14} /> 12 notifications delivered</li>
+            </ul>
+          </div>
+        </div>
+        <div className="pub-demo-note">AI recommends. Operators decide. This preview is illustrative only.</div>
+      </section>
+
+      {/* ================= ANALYTICS ================= */}
+      <section className="pub-section" id="analytics">
+        <h2 className="pub-h2">ANALYTICS FOR LEADERSHIP</h2>
+        <p className="pub-sub">Understand the whole operation — cost, load and utilization — with real data.</p>
+        <div className="pub-grid-3">
+          {ANALYTICS_FEATURES.map((f, i) => (
+            <div className="pub-card" key={i}>
+              <div className="pub-card-ico ico-blue">{f.icon}</div>
+              <h3>{f.title}</h3>
+              <p>{f.text}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* PRICING */}
-      <section style={{ padding: '60px 20px', maxWidth: 1000, margin: '0 auto' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800, marginBottom: 8 }}>
-          Simple, Affordable Pricing
-        </h2>
-        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,.65)', maxWidth: 500, margin: '0 auto 36px' }}>
-          No per-employee fees. No hidden costs. One flat monthly price.
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'center' }}>
-          {PRICING.map((p, i) => (
-            <div key={i} style={{
-              background: p.popular ? 'linear-gradient(135deg, rgba(99,102,241,.2), rgba(236,72,153,.15))' : 'rgba(255,255,255,.06)',
-              borderRadius: 16, padding: '32px 24px', flex: '1 1 260px', maxWidth: 300, border: p.popular ? '2px solid #6366f1' : '1px solid rgba(255,255,255,.08)', position: 'relative'
-            }}>
-              {p.popular && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: '#6366f1', color: '#fff', fontSize: 11, fontWeight: 700, padding: '3px 12px', borderRadius: 20 }}>MOST POPULAR</div>}
-              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{p.name}</h3>
-              <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 2 }}>{p.price}<span style={{ fontSize: 14, fontWeight: 400, color: 'rgba(255,255,255,.5)' }}>{p.per}</span></div>
-              <p style={{ fontSize: 13, color: 'rgba(255,255,255,.5)', marginBottom: 16 }}>{p.employees}</p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {p.features.map((f, j) => (
-                  <li key={j} style={{ fontSize: 13, color: 'rgba(255,255,255,.7)', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: '#22c55e', fontSize: 14 }}>&#10003;</span> {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
+      {/* ================= INDUSTRIES ================= */}
+      <section className="pub-section" id="industries">
+        <h2 className="pub-h2">BUILT FOR EVERY OPERATION</h2>
+        <p className="pub-sub">GetInRoute adapts to the way your organization moves.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', maxWidth: 780, margin: '0 auto' }}>
+          {INDUSTRIES.map((ind, i) => (
+            <span key={i} className="chip" style={{ background: 'rgba(14,165,233,.06)', borderRadius: 12, padding: '9px 16px', fontSize: 13.5 }}>{ind}</span>
           ))}
         </div>
       </section>
 
-      {/* FAQ */}
-      <section style={{ padding: '60px 20px', maxWidth: 720, margin: '0 auto' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800, marginBottom: 36 }}>
-          Frequently Asked Questions
-        </h2>
-        {FAQ.map((item, i) => (
-          <details key={i} style={{ marginBottom: 12, background: 'rgba(255,255,255,.06)', borderRadius: 12, border: '1px solid rgba(255,255,255,.08)', overflow: 'hidden' }}>
-            <summary style={{ padding: '16px 20px', cursor: 'pointer', fontWeight: 600, fontSize: 15, listStyle: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              {item.q}
-              <ChevronRight size={18} style={{ transition: 'transform .2s' }} />
-            </summary>
-            <p style={{ padding: '0 20px 16px', fontSize: 14, color: 'rgba(255,255,255,.6)', lineHeight: 1.6, margin: 0 }}>{item.a}</p>
-          </details>
-        ))}
+      {/* ================= TRIAL / CTA ================= */}
+      <section className="pub-section" id="trial">
+        <div className="pub-trial">
+          <h2>Try GetInRoute for 10 Days</h2>
+          <p>A simple path from registration to a full working trial — with a human verifying every step.</p>
+          <ul className="pub-trial-list">
+            <li><ShieldCheck size={16} /> No upfront payment</li>
+            <li><Clock size={16} /> Trial requires owner approval</li>
+            <li><Sparkles size={16} /> Full platform access during the approved trial</li>
+            <li><Wallet size={16} /> Payment required only after the trial ends</li>
+            <li><LifeBuoy size={16} /> Payment verification is manual initially</li>
+          </ul>
+          <Link to="/register-company" className="btn btn-primary" style={{ justifyContent: 'center', minWidth: 220, marginTop: 8 }}><UserPlus size={17} /> Request Demo</Link>
+        </div>
       </section>
 
-      {/* FOUNDER */}
-      <section style={{ padding: '60px 20px', maxWidth: 800, margin: '0 auto' }}>
+      {/* ================= FOUNDER ================= */}
+      <section style={{ padding: '60px 20px', maxWidth: 800, margin: '0 auto' }} id="founder">
         <h2 style={{ textAlign: 'center', fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800, marginBottom: 36 }}>
           <User size={28} style={{ verticalAlign: 'middle', marginRight: 8 }} />
           Meet the Founder
         </h2>
-        <div style={{ background: 'rgba(255,255,255,.06)', borderRadius: 18, padding: '40px 36px', border: '1px solid rgba(255,255,255,.08)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 16 }}>
-          <div style={{ width: 96, height: 96, borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #ec4899)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 40, fontWeight: 800 }}>
-            CEP
+        <div className="founder-card" style={{ background: 'var(--card)', borderRadius: 18, padding: '40px 36px', border: '1px solid var(--line)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 16 }}>
+          <div className="founder-photo-wrap">
+            <img className="founder-photo" src="/assets/edwin-peroli.jpg" alt="C Edwin Peroli — Founder, GetInRoute" />
           </div>
           <div>
-            <h3 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 4px' }}>C Edwin Peroli</h3>
-            <p style={{ fontSize: 14, color: '#a5b4fc', margin: 0, fontWeight: 600 }}>Founder & Builder</p>
+            <h3 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 4px', color: 'var(--text)' }}>C Edwin Peroli</h3>
+            <p style={{ fontSize: 14, color: 'var(--accent)', margin: 0, fontWeight: 600 }}>Founder, GetInRoute</p>
           </div>
-          <p style={{ fontSize: 15, color: 'rgba(255,255,255,.65)', lineHeight: 1.7, maxWidth: 600, margin: 0 }}>
-            Operational Specialist at Sagility, Bengaluru. Built GetInRoute from the ground up to solve the real problems companies face managing employee transport — missed cabs, unsafe night shifts, no visibility, and expensive vendor tools.
+          <p style={{ fontSize: 15, color: 'var(--slate)', lineHeight: 1.7, maxWidth: 600, margin: 0 }}>
+            Founder and product creator of GetInRoute. Built the platform from the ground up to solve the real problems companies face managing employee transport — missed cabs, unsafe night shifts, no visibility, and expensive vendor tools.
           </p>
-          <p style={{ fontSize: 15, color: 'rgba(255,255,255,.65)', lineHeight: 1.7, maxWidth: 600, margin: 0 }}>
-            GetInRoute is designed to make corporate employee transportation affordable, safe, and easy to manage for companies of all sizes.
+          <p style={{ fontSize: 15, color: 'var(--slate)', lineHeight: 1.7, maxWidth: 600, margin: 0 }}>
+            “Building a smarter, safer and more intelligent future for employee transportation.”
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
-            <div style={{ background: 'rgba(99,102,241,.15)', borderRadius: 10, padding: '8px 16px', fontSize: 13, color: '#a5b4fc', fontWeight: 600 }}>
-              <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Sagility, Bengaluru
+            <div style={{ background: 'rgba(14,165,233,.12)', borderRadius: 10, padding: '8px 16px', fontSize: 13, color: '#7dd3fc', fontWeight: 600 }}>
+              <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Independent technology company
             </div>
-            <div style={{ background: 'rgba(16,185,129,.15)', borderRadius: 10, padding: '8px 16px', fontSize: 13, color: '#34d399', fontWeight: 600 }}>
+            <div style={{ background: 'rgba(16,185,129,.12)', borderRadius: 10, padding: '8px 16px', fontSize: 13, color: '#34d399', fontWeight: 600 }}>
               <MapPinned size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Building for India
             </div>
           </div>
         </div>
       </section>
 
-      {/* DEMO */}
+      {/* ================= DEMO ACCOUNTS ================= */}
       <section className="demo-box">
         <h2>Try it right now</h2>
         <p>Login as admin, employee, or driver with the demo accounts.</p>
@@ -204,65 +549,136 @@ export default function Landing() {
           <div className="demo-row"><code>Employee</code> <span className="sp">E1001</span> <code>Emp@123</code></div>
           <div className="demo-row"><code>Driver</code> <span className="sp">D2001</span> <code>Drive@123</code></div>
         </div>
+        <Link to="/login" className="btn btn-primary" style={{ marginTop: 18 }}><LogIn size={16} /> Choose a portal to log in</Link>
       </section>
 
-      {/* DOWNLOAD THE APP */}
-      <section style={{ padding: '60px 20px', maxWidth: 900, margin: '0 auto' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800, marginBottom: 8 }}>
-          <Smartphone size={28} style={{ verticalAlign: 'middle', marginRight: 8 }} />
-          Download the GetInRoute App
-        </h2>
-        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,.65)', maxWidth: 560, margin: '0 auto 36px', lineHeight: 1.6 }}>
-          Employees, drivers, and admins get the full experience on mobile — cab booking, live tracking, check-ins, SOS, and notifications. Pick the app you need below.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
-          <div style={{ background: 'rgba(255,255,255,.06)', borderRadius: 16, padding: '24px', border: '1px solid rgba(255,255,255,.08)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Truck size={22} color="#10b981" />
-              <h3 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>GetInRoute (Company)</h3>
+      {/* ================= FAQ ================= */}
+      <section className="pub-section" id="faq" style={{ maxWidth: 760 }}>
+        <h2 className="pub-h2">Frequently Asked Questions</h2>
+        {FAQ.map((item, i) => (
+          <details key={i} className="pub-faq">
+            <summary>{item.q}<ChevronRight size={18} /></summary>
+            <p>{item.a}</p>
+          </details>
+        ))}
+      </section>
+
+      {/* ================= CONTACT ================= */}
+      <section className="pub-section" id="contact" style={{ maxWidth: 900 }}>
+        <h2 className="pub-h2">Request a Demo</h2>
+        <p className="pub-sub">Reach the right team directly — a human reads every message.</p>
+        <div className="pub-grid-3">
+          {CONTACT_CATEGORIES.map((c, i) => (
+            <a key={i} className="pub-card pub-access" href={`mailto:hello@getinroute.in?subject=${encodeURIComponent(c.subject)}`}>
+              <div className="pub-card-ico ico-indigo">{c.icon}</div>
+              <h3>{c.title}</h3>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>hello@getinroute.in</p>
+            </a>
+          ))}
+        </div>
+        <div className="pub-contact-form">
+          <h3 style={{ marginBottom: 12 }}>Send a message</h3>
+          <div className="form-grid" style={{ marginBottom: 12 }}>
+            <div className="field"><label>Name</label><input aria-label="Name" value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} /></div>
+            <div className="field"><label>Category</label>
+              <select aria-label="Category" value={contactForm.category} onChange={(e) => setContactForm({ ...contactForm, category: e.target.value })}>
+                {CONTACT_CATEGORIES.map((c, i) => <option key={i}>{c.title}</option>)}
+                <option>General</option>
+              </select>
             </div>
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,.6)', margin: 0, lineHeight: 1.5 }}>For employees and drivers of corporate fleets. Cab booking, live GPS, check-ins, SOS, and trip chat.</p>
-            <a href="/download/GetInRoute.apk" className="btn btn-primary" style={{ textDecoration: 'none', justifyContent: 'center' }}>
-              <Download size={16} /> Android APK
-            </a>
-            <a href="/download/GetInRoute.ipa" className="btn" style={{ textDecoration: 'none', justifyContent: 'center', background: 'rgba(124,58,237,.2)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,.4)' }}>
-              <Apple size={16} /> iPhone (TestFlight)
-            </a>
           </div>
-          <div style={{ background: 'rgba(255,255,255,.06)', borderRadius: 16, padding: '24px', border: '1px solid rgba(255,255,255,.08)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <School size={22} color="#14b8a6" />
-              <h3 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>GetInRoute School</h3>
-            </div>
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,.6)', margin: 0, lineHeight: 1.5 }}>For school administrators, drivers, and transport staff. Student transport, routes, geofencing, and SOS for school fleets.</p>
-            <a href="/download/GetInRoute-School.apk" className="btn btn-primary" style={{ textDecoration: 'none', justifyContent: 'center' }}>
-              <Download size={16} /> Android APK (School)
-            </a>
+          <div className="field" style={{ marginBottom: 12 }}><label>Message</label><textarea rows={4} aria-label="Message" value={contactForm.message} onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })} /></div>
+          <a className="btn btn-primary" style={{ justifyContent: 'center' }} href={mailtoHref()}>Request Demo via email</a>
+          <p className="pub-muted-note">Opens your email app addressed to hello@getinroute.in. No fake forms, no lost messages.</p>
+        </div>
+      </section>
+
+      {/* ================= SEO TEXT ================= */}
+      <section className="pub-section" style={{ maxWidth: 800, opacity: .85 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>About GetInRoute — Intelligent Employee Transportation Management</h2>
+        <p style={{ fontSize: 14, color: 'var(--slate)', lineHeight: 1.7 }}>
+          GetInRoute is an intelligent employee transportation management platform for Indian companies. It replaces manual cab scheduling, phone-based driver coordination, and paper attendance registers with a single digital operating system. Admins manage routes, allocate cabs, track drivers on a live map, and monitor speed from one dashboard. Employees book trips, check in and out with OTP, and confirm they reached home safely. Drivers follow GPS-optimized routes and report trip status in real time, and parents and schools stay connected to every student journey.
+        </p>
+        <p style={{ fontSize: 14, color: 'var(--slate)', lineHeight: 1.7, marginTop: 12 }}>
+          GetInRoute includes live fleet tracking, intelligent routing, driver and vehicle management, safety and SOS, geofencing, overspeed monitoring, incident management, in-trip chat, automation, and predictive intelligence for no-shows, demand, utilization and ETA. The platform is cloud-hosted, uses React for web, Expo and React Native for mobile apps, Node.js and Express for the backend, and OpenStreetMap for all maps. It operates on a transparent flat monthly price with no per-employee, per-vehicle or module upsells.
+        </p>
+      </section>
+
+      {/* ================= FOOTER ================= */}
+      <footer className="pub-footer">
+        <div className="pub-footer-grid">
+          <div className="pub-footer-brand">
+            <div className="pub-logo">GetInRoute<span className="grad-text">.</span></div>
+            <p>Smarter routes. Safer journeys. Intelligent transportation operations.</p>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Platform</h4>
+            <button onClick={() => go('platform')}>Platform</button>
+            <button onClick={() => go('platform')}>Live Tracking</button>
+            <button onClick={() => go('platform')}>Route Intelligence</button>
+            <button onClick={() => go('automation')}>Automation</button>
+            <button onClick={() => go('safety')}>Safety</button>
+            <button onClick={() => go('ai')}>AI</button>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Solutions</h4>
+            <Link to="/register-company">Companies</Link>
+            <Link to="/register-company">Schools</Link>
+            <Link to="/vendor/login">Vendors</Link>
+            <Link to="/employee-login">Employees</Link>
+            <Link to="/login">Drivers</Link>
+            <Link to="/parent/register">Parents</Link>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Apps</h4>
+            <Link to="/apps">Employee</Link>
+            <Link to="/apps">Driver</Link>
+            <Link to="/apps">Parent</Link>
+            <Link to="/apps">School</Link>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Access</h4>
+            <Link to="/admin/login">Admin</Link>
+            <Link to="/company/login">Company</Link>
+            <Link to="/vendor/login">Vendor</Link>
+            <Link to="/school/login">School</Link>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Company</h4>
+            <button onClick={() => go('about')}>About</button>
+            <button onClick={() => go('founder')}>Founder</button>
+            <button onClick={() => go('contact')}>Contact</button>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Support</h4>
+            <button onClick={() => go('faq')}>Help</button>
+            <Link to="/apps">App Support</Link>
+          </div>
+          <div className="pub-footer-col">
+            <h4>Legal</h4>
+            <span>Privacy</span>
+            <span>Terms</span>
+            <span>Security</span>
           </div>
         </div>
-        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,.45)', fontSize: 12, marginTop: 18 }}>
-          Android APKs download directly. The iPhone build is distributed through the Apple App Store / TestFlight — a link appears here once the build is approved.
-        </p>
-      </section>
+        <div className="pub-footer-bottom">© {new Date().getFullYear()} GetInRoute — An intelligent employee transportation operating system.</div>
+      </footer>
 
-      {/* SEO TEXT BLOCK — hidden from users, visible to search engines */}
-      <section style={{ padding: '40px 20px', maxWidth: 800, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>About GetInRoute — Employee Transport Management Platform</h2>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,.55)', lineHeight: 1.7 }}>
-          GetInRoute is an enterprise employee transportation platform built for Indian companies. It replaces manual cab scheduling, phone-based driver coordination, and paper attendance registers with a single digital system. Admins manage routes, allocate cabs to employees, track drivers on a live map, and monitor speed — all from one dashboard. Employees use a mobile app to request cabs, check in and out, and confirm they reached home safely. Drivers follow GPS-optimized routes and report trip status in real time.
-        </p>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,.55)', lineHeight: 1.7, marginTop: 12 }}>
-          GetInRoute supports unlimited transport vendors, each with their own fleet and driver pool. Admins can manage unlimited employees and vehicles from a single account. The platform includes cab allotment, multi-route dispatch, SOS emergency alerts, SafeDrop confirmation for women employees, night-hour doorstep drops, escort management, speed monitoring, and trip history — all features required by India's OSH Rules 2026 for workplace transportation.
-        </p>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,.55)', lineHeight: 1.7, marginTop: 12 }}>
-          Unlike competitors like MoveInSync (Rs.3-10 per employee/month) and Routematic (Rs.3-150 per vehicle/month), GetInRoute charges a flat monthly fee starting at Rs.15,000/month with no per-employee or per-vehicle charges. It includes all safety features in the base plan — no module upsells. The platform is cloud-hosted on Railway (AWS), uses React Native for mobile apps (Android + iOS), Node.js/Express for the backend, and Leaflet/OpenStreetMap for all maps (no Google Maps dependency).
-        </p>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,.55)', lineHeight: 1.7, marginTop: 12 }}>
-          Founded by C Edwin Peroli, GetInRoute is designed to make corporate employee transportation affordable, safe, and easy to manage for companies of all sizes.
-        </p>
-      </section>
-
-      <footer className="footer">© {new Date().getFullYear()} GetinRoute — Fleet, employees & routes in one place.</footer>
+      {/* ================= SUPPORT FLOAT ================= */}
+      <div className="pub-help">
+        {helpOpen && (
+          <div className="pub-help-panel" role="menu" aria-label="GetInRoute Help">
+            <div className="pub-help-head"><MessageCircle size={16} /> GetInRoute Help</div>
+            <button onClick={() => go('faq')}><HelpCircle size={15} /> Help Center</button>
+            <button onClick={() => go('contact')}><LifeBuoy size={15} /> Contact Support</button>
+            <a href={mailtoHref()} onClick={() => setHelpOpen(false)}><AlertTriangle size={15} /> Report an Issue</a>
+            <Link to="/apps" onClick={() => setHelpOpen(false)}><Smartphone size={15} /> App Support</Link>
+          </div>
+        )}
+        <button className="pub-help-btn" aria-label="GetInRoute Help" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>
+          <MessageCircle size={20} />
+        </button>
+      </div>
     </div>
   );
 }

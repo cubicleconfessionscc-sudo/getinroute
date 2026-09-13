@@ -128,6 +128,127 @@ app.get('/health', (req, res) => {
   res.json({ ok: dbOk, db: dbOk ? 'up' : 'down', ts: ts() });
 });
 
+// Public, unauthenticated runtime config for the web frontends (P2 maps).
+// Google Maps key is read from the SERVER environment at runtime so the
+// frontend never needs a rebuild to pick up a key, and can be enabled purely
+// by setting the Railway variable. No secret material is exposed beyond the
+// public JS key itself, which is designed to be shipped to browsers.
+app.get('/api/config/public', (req, res) => {
+  res.json({
+    googleMapsApiKey: process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '',
+    mapsProvider: 'google'
+  });
+});
+
+/* ---------------- MOBILE VERSION / UPDATE MANAGER (spec 22/23) ----------------
+ * One endpoint the mobile apps call at startup to learn the current version,
+ * the minimum supported version, whether an update is mandatory or recommended,
+ * the store URLs and release notes. Values default to the existing APK version
+ * file so behavior stays backward compatible, and can be overridden via
+ * settings under key "mobileUpdate" (owner/admin PATCH /api/admin/settings).
+ * This is an honest answer from the server — never a fabricated download link.
+ */
+const MOBILE_UPDATE_DEFAULTS = {
+  employee: {
+    latestVersion: '1.0.4',
+    minimumSupportedVersion: '1.0.0',
+    recommendedVersion: '1.0.4',
+    mandatoryUpdate: false,
+    recommendedUpdate: false,
+    releaseNotes: 'Live tracking, OTP check-in and safety improvements.',
+    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.app', ios: null },
+    apiCompatibilityVersion: '1'
+  },
+  driver: {
+    latestVersion: '1.0.4',
+    minimumSupportedVersion: '1.0.0',
+    recommendedVersion: '1.0.4',
+    mandatoryUpdate: false,
+    recommendedUpdate: false,
+    releaseNotes: 'Trip navigation, OTP boarding and live position reporting.',
+    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.app', ios: null },
+    apiCompatibilityVersion: '1'
+  },
+  school: {
+    latestVersion: '1.0.0',
+    minimumSupportedVersion: '1.0.0',
+    recommendedVersion: '1.0.0',
+    mandatoryUpdate: false,
+    recommendedUpdate: false,
+    releaseNotes: 'GetInRoute School student transport.',
+    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.school', ios: null },
+    apiCompatibilityVersion: '1'
+  },
+  schoolDriver: {
+    latestVersion: '1.0.0',
+    minimumSupportedVersion: '1.0.0',
+    recommendedVersion: '1.0.0',
+    mandatoryUpdate: false,
+    recommendedUpdate: false,
+    releaseNotes: 'School driver trips, student status and navigation.',
+    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.school', ios: null },
+    apiCompatibilityVersion: '1'
+  },
+  parent: {
+    latestVersion: '1.0.0',
+    minimumSupportedVersion: '1.0.0',
+    recommendedVersion: '1.0.0',
+    mandatoryUpdate: false,
+    recommendedUpdate: false,
+    releaseNotes: "Track your child's school cab in real time.",
+    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.school', ios: null },
+    apiCompatibilityVersion: '1'
+  }
+};
+
+function mobileUpdateConfig(app) {
+  const appKey = MOBILE_UPDATE_DEFAULTS[app] ? app : 'employee';
+  const base = MOBILE_UPDATE_DEFAULTS[appKey];
+  let dbOverride = {};
+  try {
+    const raw = db.prepare('SELECT data FROM settings WHERE id = 1').get();
+    if (raw && raw.data) {
+      const parsed = JSON.parse(raw.data);
+      if (parsed.mobileUpdate && parsed.mobileUpdate[appKey]) dbOverride = parsed.mobileUpdate[appKey];
+    }
+  } catch (e) { /* settings may be unreadable; use defaults */ }
+  // Prefer the on-disk APK version when present — it is the ground truth for
+  // what binary is actually downloadable.
+  let apkVersion = '';
+  try {
+    apkVersion = fs.readFileSync(path.join(__dirname, 'apk-version.txt'), 'utf8').trim();
+  } catch (e) { /* no version file */ }
+  const latest = dbOverride.latestVersion || apkVersion || base.latestVersion || '1.0.0';
+  return {
+    app: appKey,
+    latestVersion: latest,
+    minimumSupportedVersion: dbOverride.minimumSupportedVersion || base.minimumSupportedVersion || '1.0.0',
+    recommendedVersion: dbOverride.recommendedVersion || base.recommendedVersion || latest,
+    mandatoryUpdate: !!(dbOverride.mandatoryUpdate === true || dbOverride.mandatoryUpdate === 'true'),
+    recommendedUpdate: !!(dbOverride.recommendedUpdate === true || dbOverride.recommendedUpdate === 'true'),
+    releaseNotes: dbOverride.releaseNotes || base.releaseNotes || '',
+    storeUrls: {
+      android: (dbOverride.storeUrls && dbOverride.storeUrls.android) || base.storeUrls.android || null,
+      ios: (dbOverride.storeUrls && dbOverride.storeUrls.ios) || base.storeUrls.ios || null
+    },
+    apiCompatibilityVersion: dbOverride.apiCompatibilityVersion || base.apiCompatibilityVersion || '1',
+    updateAvailable: !!dbOverride.recommendedUpdate,
+    releaseDate: dbOverride.releaseDate || null,
+    ts: ts()
+  };
+}
+
+app.get('/api/mobile/app-config', (req, res) => {
+  const app = String(req.query.app || 'employee').toLowerCase().replace(/[^a-z]/g, '');
+  const cfg = mobileUpdateConfig(app);
+  res.json({ ok: true, ...cfg });
+});
+
+app.get('/api/mobile/app-config/:app', (req, res) => {
+  const app = String(req.params.app).toLowerCase().replace(/[^a-z]/g, '');
+  res.json({ ok: true, ...mobileUpdateConfig(app) });
+});
+
 let io = null;
 
 const ts = () => {
@@ -175,6 +296,7 @@ function publicUser(u) {
     phone: u.phone, department: u.department, designation: u.designation,
     approved: u.approved, status: u.status, vehicle_id: u.vehicle_id, invite_code: u.invite_code || null,
     vendor_id: u.vendor_id || null,
+    company_id: u.company_id || null,
     vertical: u.vertical || 'company', school_id: u.school_id || null, driver_verified: u.driver_verified || 0,
     safety_drop_eligible: u.safety_drop_eligible ? 1 : 0,
 lat: u.lat, lng: u.lng, last_update: u.last_update, created_at: u.created_at,
@@ -294,6 +416,17 @@ function companyAdminScope(req) {
     return db.prepare('SELECT DISTINCT route_id AS rid FROM schedules WHERE route_id IS NOT NULL AND employee_id IN (' + a.join(',') + ')').all().map((r) => Number(r.rid)).join(',') || '0';
   };
   return { isOwner, cid, ids, idsList, vehList, routeList };
+}
+// Tenant guard for admin object writes (routes/vehicles). Matches GET scoping:
+// owner admins are global, non-owner admins may only touch objects reachable
+// from their own employees' schedules. Vendors have their own narrower checks.
+function canAccessAdminObject(req, kind, id) {
+  if (isVendorReq(req)) return true;
+  const sc = companyAdminScope(req);
+  if (sc.isOwner) return true;
+  if (kind === 'vehicle') return String(sc.vehList()).split(',').includes(String(id));
+  if (kind === 'route') return String(sc.routeList()).split(',').includes(String(id));
+  return false;
 }
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -536,8 +669,9 @@ app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => 
   const existing = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?) OR lower(emp_id) = lower(?)').get(email, emp_id);
   if (existing) return res.status(400).json({ error: 'Email or Employee ID already registered', message: 'Email or Employee ID already registered' });
   const hash = bcrypt.hashSync(password, 10);
-  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, company_id, invite_code) VALUES (?,?,?,?,?,?,?,?,0,?,?)`)
-    .run(role, emp_id, email, name, phone || null, department || null, designation || null, hash, companyId, invite);
+  const g = ['male', 'female', 'other'].includes(String(req.body.gender || '').toLowerCase()) ? String(req.body.gender).toLowerCase() : null;
+  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, company_id, invite_code, gender, safety_drop_eligible) VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)`)
+    .run(role, emp_id, email, name, phone || null, department || null, designation || null, hash, companyId, invite, g, g === 'female' || g === 'other' ? 1 : 0);
   const userId = Number(info.lastInsertRowid);
   if (companyId) {
     notify(companyId, 'New Registration Request', `${name} (${emp_id}) registered as ${role} for your company. Approve or reject in Admin → Approvals.`);
@@ -875,6 +1009,7 @@ app.get('/api/admin/routes', auth, role('admin', 'vendor'), (req, res) => {
   res.json(routes.map((r) => ({ ...r, stops: JSON.parse(r.stops || '[]'), employees: byRoute[r.id] || [] })));
 });
 app.put('/api/admin/routes/:id/employees', auth, role('admin'), (req, res) => {
+  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const r = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
   if (!r) return res.status(404).json({ error: 'Route not found' });
   const rawIds = req.body?.employeeIds ?? req.body?.employee_ids;
@@ -883,7 +1018,11 @@ app.put('/api/admin/routes/:id/employees', auth, role('admin'), (req, res) => {
     : [];
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
-    const found = db.prepare(`SELECT id FROM users WHERE role='employee' AND id IN (${placeholders})`).all(...ids).map((u) => Number(u.id));
+    const sc = companyAdminScope(req);
+    const where = sc.isOwner ? `role='employee' AND id IN (${placeholders})` : `role='employee' AND company_id = ? AND id IN (${placeholders})`;
+    const found = sc.isOwner
+      ? db.prepare(`SELECT id FROM users WHERE ${where}`).all(...ids).map((u) => Number(u.id))
+      : db.prepare(`SELECT id FROM users WHERE ${where}`).all(sc.cid, ...ids).map((u) => Number(u.id));
     if (!found.length) return res.status(400).json({ error: 'No valid employees selected' });
     db.prepare('DELETE FROM route_employees WHERE route_id=?').run(r.id);
     const ins = db.prepare('INSERT OR IGNORE INTO route_employees (route_id, employee_id) VALUES (?,?)');
@@ -895,6 +1034,7 @@ app.put('/api/admin/routes/:id/employees', auth, role('admin'), (req, res) => {
   }
 });
 app.delete('/api/admin/routes/:id/employees/:employeeId', auth, role('admin'), (req, res) => {
+  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   db.prepare('DELETE FROM route_employees WHERE route_id=? AND employee_id=?').run(req.params.id, req.params.employeeId);
   res.json({ ok: true });
 });
@@ -908,6 +1048,7 @@ app.post('/api/admin/routes', auth, role('admin'), (req, res) => {
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 app.put('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
+  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const { name, start_point, end_point, speed_limit, stops, status, start_lat, start_lng, end_lat, end_lng } = req.body || {};
   const r = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
   if (!r) return res.status(404).json({ error: 'Route not found' });
@@ -920,6 +1061,7 @@ app.put('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
+  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   db.prepare('DELETE FROM routes WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -945,7 +1087,7 @@ app.post('/api/admin/vehicles', auth, role('admin', 'vendor'), (req, res) => {
     const d = driver_id ? db.prepare("SELECT * FROM users WHERE id=? AND role='driver' AND vendor_id=?").get(driver_id, ctx.vid) : null;
     if (driver_id && !d) return res.status(403).json({ error: 'Not your driver' });
     const info = db.prepare('INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, speed_limit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(vehicle_name, plate, type, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), ctx.vid, speed_limit == null ? null : Number(speed_limit));
+      .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), ctx.vid, speed_limit == null ? null : Number(speed_limit));
     if (d) linkDriver(Number(info.lastInsertRowid), d.id, ctx.vid);
     return res.json({ ok: true, id: Number(info.lastInsertRowid) });
   }
@@ -955,11 +1097,12 @@ app.post('/api/admin/vehicles', auth, role('admin', 'vendor'), (req, res) => {
   if (!vehicle_name) return res.status(400).json({ error: 'Vehicle name required' });
   const d = resolveDriver(driver_id);
   const info = db.prepare('INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, speed_limit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(vehicle_name, plate, type, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), vendor_id || null, speed_limit == null ? null : Number(speed_limit));
+    .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), vendor_id || null, speed_limit == null ? null : Number(speed_limit));
   if (d) linkDriver(Number(info.lastInsertRowid), d.id, vendor_id || null);
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 app.put('/api/admin/vehicles/:id', auth, role('admin', 'vendor'), (req, res) => {
+  if (!isVendorReq(req) && !canAccessAdminObject(req, 'vehicle', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const v = isVendorReq(req)
     ? db.prepare('SELECT * FROM vehicles WHERE id = ? AND vendor_id = ?').get(req.params.id, req.user.vendor_id)
     : db.prepare('SELECT * FROM vehicles WHERE id = ?').get(req.params.id);
@@ -981,6 +1124,7 @@ app.put('/api/admin/vehicles/:id', auth, role('admin', 'vendor'), (req, res) => 
   res.json({ ok: true });
 });
 app.put('/api/admin/vehicles/:id/position', auth, role('admin', 'vendor'), (req, res) => {
+  if (!isVendorReq(req) && !canAccessAdminObject(req, 'vehicle', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   if (isVendorReq(req) && !db.prepare('SELECT id FROM vehicles WHERE id = ? AND vendor_id = ?').get(req.params.id, req.user.vendor_id)) {
     return res.status(403).json({ error: 'Not your vehicle' });
   }
@@ -989,6 +1133,7 @@ app.put('/api/admin/vehicles/:id/position', auth, role('admin', 'vendor'), (req,
   res.json({ ok: true });
 });
 app.put('/api/admin/vehicles/:id/route', auth, role('admin', 'vendor'), (req, res) => {
+  if (!isVendorReq(req) && !canAccessAdminObject(req, 'vehicle', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const { route_id } = req.body || {};
   if (isVendorReq(req)) {
     const v = db.prepare('SELECT * FROM vehicles WHERE id = ? AND vendor_id = ?').get(req.params.id, req.user.vendor_id);
@@ -1000,6 +1145,7 @@ app.put('/api/admin/vehicles/:id/route', auth, role('admin', 'vendor'), (req, re
   res.json({ ok: true });
 });
 app.put('/api/admin/vehicles/:id/speed-limit', auth, role('admin', 'vendor'), (req, res) => {
+  if (!isVendorReq(req) && !canAccessAdminObject(req, 'vehicle', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const { speed_limit } = req.body || {};
   if (speed_limit == null || Number(speed_limit) <= 0) return res.status(400).json({ error: 'Speed limit must be a positive number' });
   const v = isVendorReq(req)
@@ -1010,6 +1156,7 @@ app.put('/api/admin/vehicles/:id/speed-limit', auth, role('admin', 'vendor'), (r
   res.json({ ok: true, speed_limit: Number(speed_limit) });
 });
 app.delete('/api/admin/vehicles/:id', auth, role('admin', 'vendor'), (req, res) => {
+  if (!isVendorReq(req) && !canAccessAdminObject(req, 'vehicle', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   if (isVendorReq(req) && !db.prepare('SELECT id FROM vehicles WHERE id = ? AND vendor_id = ?').get(req.params.id, req.user.vendor_id)) {
     return res.status(403).json({ error: 'Not your vehicle' });
   }
@@ -1038,6 +1185,177 @@ app.get('/api/admin/drivers', auth, role('admin', 'vendor'), (req, res) => {
     .all(...(vendor ? [req.user.vendor_id] : []), ...(sc.isOwner ? [] : [sc.cid]));
   res.json(rows.map(publicUser));
 });
+app.get('/api/admin/drivers/all', auth, role('admin', 'vendor'), (req, res) => {
+  const vendor = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  const scWhere = sc.isOwner ? '' : ' AND u.company_id = ?';
+  const rows = db.prepare(`SELECT u.*, v.vehicle_name, v.plate FROM users u LEFT JOIN vehicles v ON v.id=u.vehicle_id WHERE u.role='driver' ${vendor ? 'AND u.vendor_id = ?' : ''}${scWhere} ORDER BY u.id DESC`)
+    .all(...(vendor ? [req.user.vendor_id] : []), ...(sc.isOwner ? [] : [sc.cid]));
+  res.json(rows.map(publicUser));
+});
+/* -------- Driver management (admin CRUD) -------- */
+app.post('/api/admin/drivers', auth, role('admin', 'vendor'), h(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  const email = String(b.email || '').trim().toLowerCase();
+  const phone = String(b.phone || '').trim();
+  const emp_id = String(b.emp_id || b.licenseNumber || '').trim();
+  const password = String(b.password || '');
+  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password are required' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const existing = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?) OR lower(emp_id) = lower(?)').get(email, emp_id);
+  if (existing) return res.status(400).json({ error: 'Email or Driver ID already registered' });
+  let companyId = null;
+  if (isVendorReq(req)) companyId = req.user.vendor_id || null;
+  else if (b.companyId) companyId = Number(b.companyId) || null;
+  let vehicleId = null;
+  if (b.vehicleId && /^\d+$/.test(String(b.vehicleId))) vehicleId = Number(b.vehicleId);
+  if (vehicleId) {
+    const v = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(vehicleId);
+    if (v && v.driver_id && Number(v.driver_id) !== 0) return res.status(400).json({ error: 'That vehicle already has a driver assigned' });
+  }
+  const hash = bcrypt.hashSync(password, 10);
+  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, password_hash, approved, status, vehicle_id, company_id, vendor_id) VALUES ('driver', ?, ?, ?, ?, ?, 1, 'active', ?, ?, ?)`)
+    .run(emp_id || genSchoolCode('D'), email, name, phone || null, hash, vehicleId, companyId, isVendorReq(req) ? req.user.vendor_id : null);
+  const id = Number(info.lastInsertRowid);
+  if (vehicleId) db.prepare('UPDATE vehicles SET driver_id=? WHERE id=?').run(id, vehicleId);
+  notify(id, 'Welcome to GetInRoute 🚐', `Hi ${name}, your driver account is ready. Download the GetInRoute Driver app to manage your trips.`);
+  authLog('admin-create-driver', { id, actor: req.user.id, domain: emailDomain(email) });
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(id);
+  res.json({ ok: true, user: publicUser(user) });
+}));
+app.put('/api/admin/drivers/:id', auth, role('admin', 'vendor'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'driver');
+  if (!u) return res.status(404).json({ error: 'Driver not found' });
+  const b = req.body || {};
+  let vehicleId = null;
+  if (b.vehicleId !== undefined && b.vehicleId !== null && b.vehicleId !== '') vehicleId = Number(b.vehicleId) || null;
+  if (vehicleId !== null) {
+    const v = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(vehicleId);
+    if (v && v.driver_id && Number(v.driver_id) !== 0 && Number(v.driver_id) !== Number(u.id)) return res.status(400).json({ error: 'That vehicle already has another driver assigned' });
+  }
+  db.prepare('UPDATE users SET name=?, phone=?, email=?, status=?, vehicle_id=?, company_id=? WHERE id=?')
+    .run(b.name ?? u.name, b.phone !== undefined ? b.phone : u.phone, b.email !== undefined ? String(b.email).toLowerCase() : u.email,
+      b.status ?? u.status, vehicleId !== null ? vehicleId : (u.vehicle_id ?? null),
+      b.companyId !== undefined ? (b.companyId ? Number(b.companyId) : null) : (u.company_id ?? null), u.id);
+  const prevVeh = u.vehicle_id;
+  if (prevVeh) db.prepare('UPDATE vehicles SET driver_id=NULL WHERE id=? AND driver_id=?').run(prevVeh, u.id);
+  if (vehicleId) db.prepare('UPDATE vehicles SET driver_id=? WHERE id=?').run(u.id, vehicleId);
+  authLog('admin-edit-driver', { id: u.id, actor: req.user.id });
+  res.json({ ok: true });
+});
+app.delete('/api/admin/drivers/:id', auth, role('admin'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'driver');
+  if (!u) return res.status(404).json({ error: 'Driver not found' });
+  if (u.vehicle_id) db.prepare('UPDATE vehicles SET driver_id=NULL WHERE id=? AND driver_id=?').run(u.vehicle_id, u.id);
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  authLog('admin-delete-driver', { id: u.id, actor: req.user.id });
+  res.json({ ok: true });
+});
+app.post('/api/admin/drivers/:id/reset-password', auth, role('admin', 'vendor'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'driver');
+  if (!u) return res.status(404).json({ error: 'Driver not found' });
+  const password = String((req.body || {}).password || '');
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  db.prepare('UPDATE users SET password_hash=?, reset_token=NULL WHERE id=?').run(bcrypt.hashSync(password, 10), u.id);
+  authLog('admin-reset-driver-password', { id: u.id, actor: req.user.id });
+  res.json({ ok: true });
+});
+
+/* -------- Parent management (admin CRUD, school vertical) -------- */
+app.get('/api/admin/parents', auth, role('admin'), (req, res) => {
+  const q = String((req.query.search || '') + '').trim();
+  const like = q ? ` AND (u.name LIKE '%'||?||'%' OR u.email LIKE '%'||?||'%' OR u.phone LIKE '%'||?||'%')` : '';
+  const args = q ? [q, q, q] : [];
+  const rows = db.prepare(`SELECT u.*, sc.name AS school_name,
+      (SELECT COUNT(*) FROM parent_children pc WHERE pc.parent_id=u.id) AS children_count
+    FROM users u LEFT JOIN schools sc ON sc.id=u.school_id
+    WHERE u.role='parent'${like} ORDER BY u.id DESC`).all(...args);
+  res.json(rows.map((p) => ({
+    ...publicUser(p),
+    children_count: p.children_count,
+    school_name: p.school_name || null,
+    children: db.prepare("SELECT c.student_id, c.relation, s.name AS student_name FROM parent_children c JOIN users s ON s.id=c.student_id WHERE c.parent_id=?").all(p.id)
+  })));
+});
+app.post('/api/admin/parents', auth, role('admin'), h(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  const email = String(b.email || '').trim().toLowerCase();
+  const password = String(b.password || '');
+  const phone = String(b.phone || '').trim();
+  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password are required' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  if (existing) return res.status(400).json({ error: 'An account with this email already exists' });
+  let schoolId = null;
+  if (b.schoolId && /^\d+$/.test(String(b.schoolId))) schoolId = Number(b.schoolId);
+  const hash = bcrypt.hashSync(password, 10);
+  const empId = genSchoolCode('PAR');
+  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, password_hash, approved, status, invite_code, vertical, school_id) VALUES ('parent', ?, ?, ?, ?, ?, 1, 'active', ?, 'school', ?)`)
+    .run(empId, email, name, phone || null, hash, genInviteCode(name || 'PARENT'), schoolId);
+  const pid = Number(info.lastInsertRowid);
+  if (b.studentIds && Array.isArray(b.studentIds)) {
+    for (const sidRaw of b.studentIds) {
+      const sid = Number(sidRaw);
+      if (!sid) continue;
+      const st = db.prepare('SELECT * FROM users WHERE id=? AND role=?').get(sid, 'student');
+      if (st) db.prepare('INSERT OR IGNORE INTO parent_children (parent_id, student_id, relation) VALUES (?,?,?)').run(pid, sid, b.relation || 'guardian');
+    }
+  }
+  notify(pid, 'Welcome to GetinRoute Schools 🎒', `Hi ${name}, your Parent account is ready. Link your child to start tracking their journeys.`);
+  authLog('admin-create-parent', { id: pid, actor: req.user.id });
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(pid);
+  res.json({ ok: true, user: publicUser(user) });
+}));
+app.put('/api/admin/parents/:id', auth, role('admin'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'parent');
+  if (!u) return res.status(404).json({ error: 'Parent not found' });
+  const b = req.body || {};
+  db.prepare('UPDATE users SET name=?, phone=?, email=?, status=?, school_id=? WHERE id=?')
+    .run(b.name ?? u.name, b.phone !== undefined ? b.phone : u.phone,
+      b.email !== undefined ? String(b.email).toLowerCase() : u.email,
+      b.status ?? u.status, b.schoolId !== undefined ? (b.schoolId ? Number(b.schoolId) : null) : (u.school_id ?? null), u.id);
+  authLog('admin-edit-parent', { id: u.id, actor: req.user.id });
+  res.json({ ok: true });
+});
+app.delete('/api/admin/parents/:id', auth, role('admin'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'parent');
+  if (!u) return res.status(404).json({ error: 'Parent not found' });
+  db.prepare('DELETE FROM parent_children WHERE parent_id=?').run(u.id);
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  authLog('admin-delete-parent', { id: u.id, actor: req.user.id });
+  res.json({ ok: true });
+});
+app.post('/api/admin/parents/:id/reset-password', auth, role('admin'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'parent');
+  if (!u) return res.status(404).json({ error: 'Parent not found' });
+  const password = String((req.body || {}).password || '');
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  db.prepare('UPDATE users SET password_hash=?, reset_token=NULL WHERE id=?').run(bcrypt.hashSync(password, 10), u.id);
+  authLog('admin-reset-parent-password', { id: u.id, actor: req.user.id });
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/parents/:id/link-student', auth, role('admin'), (req, res) => {
+  const p = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'parent');
+  if (!p) return res.status(404).json({ error: 'Parent not found' });
+  const sid = Number((req.body || {}).studentId);
+  const relation = String((req.body || {}).relation || 'guardian');
+  const st = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(sid, 'student');
+  if (!st) return res.status(400).json({ error: 'Student not found' });
+  db.prepare('INSERT OR IGNORE INTO parent_children (parent_id, student_id, relation) VALUES (?,?,?)').run(p.id, sid, relation);
+  authLog('admin-link-parent-student', { parent: p.id, student: sid, actor: req.user.id });
+  res.json({ ok: true });
+});
+app.delete('/api/admin/parents/:id/link-student/:studentId', auth, role('admin'), (req, res) => {
+  const p = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'parent');
+  if (!p) return res.status(404).json({ error: 'Parent not found' });
+  db.prepare('DELETE FROM parent_children WHERE parent_id=? AND student_id=?').run(p.id, Number(req.params.studentId));
+  authLog('admin-unlink-parent-student', { parent: p.id, student: Number(req.params.studentId), actor: req.user.id });
+  res.json({ ok: true });
+});
+
 app.put('/api/admin/users/:id', auth, role('admin', 'vendor'), (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
@@ -1045,10 +1363,14 @@ app.put('/api/admin/users/:id', auth, role('admin', 'vendor'), (req, res) => {
     if (!vendorOwnsUser(u, vendorCtx(req))) return res.status(403).json({ error: 'Not in your assigned locations' });
   }
   const b = req.body || {};
-  db.prepare('UPDATE users SET name=?, phone=?, department=?, designation=?, status=?, vendor_id=?, safety_drop_eligible=? WHERE id=?')
+  // Auto-enable night safety drop whenever gender is female/other.
+  const g = b.gender !== undefined ? (['male', 'female', 'other'].includes(String(b.gender).toLowerCase()) ? String(b.gender).toLowerCase() : null) : u.gender;
+  const autoSafety = (g === 'female' || g === 'other') ? 1 : undefined;
+  const safetyVal = autoSafety !== undefined ? autoSafety : (b.safety_drop_eligible !== undefined ? (b.safety_drop_eligible ? 1 : 0) : (u.safety_drop_eligible || 0));
+  db.prepare('UPDATE users SET name=?, phone=?, department=?, designation=?, status=?, gender=?, vendor_id=?, safety_drop_eligible=? WHERE id=?')
     .run(b.name ?? u.name, b.phone ?? u.phone, b.department ?? u.department, b.designation ?? u.designation, b.status ?? u.status,
-      isVendorReq(req) ? u.vendor_id : (b.vendor_id !== undefined ? (b.vendor_id || null) : u.vendor_id),
-      b.safety_drop_eligible !== undefined ? (b.safety_drop_eligible ? 1 : 0) : (u.safety_drop_eligible || 0), u.id);
+      g, isVendorReq(req) ? u.vendor_id : (b.vendor_id !== undefined ? (b.vendor_id || null) : u.vendor_id),
+      safetyVal, u.id);
   res.json({ ok: true });
 });
 app.delete('/api/admin/users/:id', auth, role('admin'), (req, res) => {
@@ -1156,7 +1478,9 @@ app.post('/api/admin/approvals/:id', auth, role('admin'), h(async (req, res) => 
 }));
 
 app.get('/api/admin/schedules', auth, role('admin', 'vendor'), (req, res) => {
+  const sc = companyAdminScope(req);
   const venWhere = isVendorReq(req) ? 'WHERE v.vendor_id = ' + (Number(req.user.vendor_id) || -1) : '';
+  const adminWhere = (!isVendorReq(req) && !sc.isOwner) ? `WHERE s.employee_id IN (${sc.idsList()})` : '';
   const rows = db.prepare(`
     SELECT s.*, u.name AS employee_name, u.emp_id, u.phone AS employee_phone,
       v.vehicle_name, v.plate, v.line, v.trip, v.driver_name, v.driver_phone,
@@ -1167,7 +1491,7 @@ app.get('/api/admin/schedules', auth, role('admin', 'vendor'), (req, res) => {
     LEFT JOIN vehicles v ON v.id = s.vehicle_id
     LEFT JOIN users d ON d.role = 'driver' AND d.vehicle_id = s.vehicle_id
     LEFT JOIN routes r ON r.id = s.route_id
-    ${venWhere}
+    ${venWhere || adminWhere}
     ORDER BY s.date DESC, s.pickup_time`).all();
   res.json(rows);
 });
@@ -1261,11 +1585,15 @@ app.delete('/api/company/me/nodal-points/:id', auth, role('admin'), (req, res) =
 app.get('/api/admin/users', auth, role('admin', 'vendor'), (req, res) => {
   const roleFilter = req.query.role;
   const q = `%${req.query.q || ''}%`;
+  const sc = companyAdminScope(req);
+  // Non-owner admins must not see other companies' users. Legacy unbound rows
+  // (company_id NULL) stay visible so single-company workspaces keep working.
+  const scWhere = (!isVendorReq(req) && !sc.isOwner) ? ' AND (company_id IS NULL OR company_id = ' + sc.cid + ')' : '';
   let rows;
   if (roleFilter) {
-    rows = db.prepare(`SELECT * FROM users WHERE role = ? AND (name LIKE ? OR emp_id LIKE ? OR email LIKE ?) ORDER BY id`).all(roleFilter, q, q, q);
+    rows = db.prepare(`SELECT * FROM users WHERE role = ? AND (name LIKE ? OR emp_id LIKE ? OR email LIKE ?)${scWhere} ORDER BY id`).all(roleFilter, q, q, q);
   } else {
-    rows = db.prepare(`SELECT * FROM users WHERE name LIKE ? OR emp_id LIKE ? OR email LIKE ? ORDER BY id`).all(q, q, q);
+    rows = db.prepare(`SELECT * FROM users WHERE name LIKE ? OR emp_id LIKE ? OR email LIKE ?${scWhere} ORDER BY id`).all(q, q, q);
   }
   if (isVendorReq(req)) {
     const ctx = vendorCtx(req);
@@ -1357,6 +1685,143 @@ app.get('/api/admin/no-shows', auth, role('admin', 'vendor'), (req, res) => {
     }
   }
   res.json(noShows);
+});
+
+/* ---------------- NO-SHOW ENFORCEMENT (persisted log + auto-suspension + admin review) ---------------- */
+function localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function dateOffsetDays(n) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return localDateStr(d);
+}
+function activeSuspensionOf(employeeId) {
+  return db.prepare("SELECT * FROM employee_suspensions WHERE employee_id=? AND status='suspended' ORDER BY id DESC LIMIT 1").get(employeeId) || null;
+}
+function noShowCountFor(employeeId) {
+  const settings = loadSettings() || {};
+  const windowDays = Number(settings.noShowWindowDays) || 90;
+  const row = db.prepare('SELECT COUNT(*) AS c FROM employee_no_show_log WHERE employee_id=? AND date >= ?')
+    .get(employeeId, dateOffsetDays(-windowDays));
+  return row ? Number(row.c) : 0;
+}
+function recordNoShow({ scheduleId, employeeId, actorId, actorRole, reason, ip, auto, autoDate }) {
+  const s = scheduleId ? db.prepare('SELECT * FROM schedules WHERE id=?').get(scheduleId) : null;
+  if (s && s.employee_id && !employeeId) employeeId = s.employee_id;
+  if (!employeeId) return { ok: false, error: 'Employee required' };
+  const date = (s && s.date) || autoDate || dateOnly();
+  const existing = scheduleId
+    ? db.prepare('SELECT id FROM employee_no_show_log WHERE employee_id=? AND date=? AND schedule_id=?').get(employeeId, date, scheduleId)
+    : db.prepare('SELECT id FROM employee_no_show_log WHERE employee_id=? AND date=? AND schedule_id IS NULL').get(employeeId, date);
+  if (existing) return { ok: false, error: 'No-show already recorded', id: existing.id };
+  const emp = db.prepare('SELECT * FROM users WHERE id=?').get(employeeId);
+  if (!emp) return { ok: false, error: 'Employee not found' };
+  const veh = s && s.vehicle_id ? db.prepare('SELECT vendor_id FROM vehicles WHERE id=?').get(s.vehicle_id) : null;
+  const info = db.prepare(`INSERT INTO employee_no_show_log (employee_id, schedule_id, date, time, vehicle_id, company_id, vendor_id, marked_by, marked_by_role, reason, ip)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(employeeId, scheduleId || null, date,
+      (s && (s.pickup_time || s.login_time || s.drop_time || s.logout_time)) || null,
+      (s && s.vehicle_id) || null, emp.company_id || 0, (veh && veh.vendor_id) || 0,
+      actorId || null, actorRole || 'system', reason || (auto ? 'No check-in on scheduled day' : 'Marked by admin'), ip || null);
+  const logId = Number(info.lastInsertRowid);
+  authLog(auto ? 'no-show-auto-recorded' : 'no-show-marked', { noShowLog: logId, employee: employeeId, schedule: scheduleId || null, actor: actorId, reason });
+
+  const settings = loadSettings() || {};
+  const threshold = Number(settings.noShowCountBeforeSuspension) || 3;
+  if (settings.noShowAutoSuspend !== false && !activeSuspensionOf(employeeId)) {
+    const count = noShowCountFor(employeeId);
+    if (count >= threshold) {
+      db.prepare(`INSERT INTO employee_suspensions (employee_id, company_id, trigger_type, no_show_count, threshold, status, reason, suspended_by, suspended_by_role, updated_at)
+        VALUES (?,?,?,?,?, 'suspended', ?, ?, ?, ?)`)
+        .run(employeeId, emp.company_id || 0, 'no_show', count, threshold,
+          `Auto-suspended after ${count} no-show${count > 1 ? 's' : ''} (threshold ${threshold})`, actorId || null, actorRole || 'system', ts());
+      authLog('no-show-auto-suspended', { employee: employeeId, count, threshold, actor: actorId });
+      const admins = companyAdminsOf(employeeId);
+      for (const a of admins) {
+        notify(a.id, 'Transport Suspension', `${emp.name || 'Employee'} was auto-suspended after ${count} no-shows. Review under Employees → Suspensions.`);
+        sendMail({ to: a.email, subject: `[GetInRoute] Transport suspended — ${emp.name || 'Employee'}`, html: `<p>${emp.name || 'Employee'} (no-shows: ${count}) has been suspended from company transport automatically.</p><p>Review and reinstate in the admin portal under <strong>Employees → Suspensions</strong>.</p>` }).catch(() => {});
+      }
+      notify(employeeId, 'Transport Suspended', `Your company transport has been temporarily suspended after ${count} no-show${count > 1 ? 's' : ''}. Please contact your transport admin to reinstate.`);
+      return { ok: true, id: logId, suspended: true, noShowCount: count, threshold };
+    }
+    return { ok: true, id: logId, suspended: false, noShowCount: count, threshold };
+  }
+  return { ok: true, id: logId, suspended: false, noShowCount: noShowCountFor(employeeId), threshold };
+}
+function runNoShowSweep() {
+  try {
+    const today = dateOnly();
+    const rows = db.prepare(`
+      SELECT s.id, s.employee_id, s.date
+      FROM schedules s
+      LEFT JOIN checkins c ON c.schedule_id = s.id AND c.type = 'checkin'
+      WHERE s.date < ? AND s.status IN ('confirmed','in_progress') AND c.id IS NULL
+    `).all(today);
+    let recorded = 0;
+    let suspended = 0;
+    for (const r of rows) {
+      const already = db.prepare('SELECT id FROM employee_no_show_log WHERE employee_id=? AND date=? AND schedule_id=?').get(r.employee_id, r.date, r.id);
+      if (already) continue;
+      const res = recordNoShow({ scheduleId: r.id, employeeId: r.employee_id, actorRole: 'system', auto: true, reason: 'No check-in on scheduled day', autoDate: r.date });
+      if (res && res.ok) { recorded++; if (res.suspended) suspended++; }
+    }
+    if (recorded) console.log(`[noShowSweep] recorded ${recorded} no-shows (${suspended} suspended)`);
+  } catch (e) { console.error('[noShowSweep]', e.message); }
+}
+
+app.post('/api/admin/no-shows/mark', auth, role('admin'), (req, res) => {
+  const scheduleId = Number((req.body || {}).scheduleId);
+  const s = db.prepare('SELECT * FROM schedules WHERE id=?').get(scheduleId);
+  if (!s) return res.status(404).json({ error: 'Schedule not found' });
+  const result = recordNoShow({ scheduleId, actorId: req.user.id, actorRole: req.user.role, reason: String((req.body || {}).reason || 'Marked by admin'), ip: req.ip });
+  if (!result.ok) return res.status(409).json(result);
+  res.json(result);
+});
+app.get('/api/admin/no-shows/log', auth, role('admin', 'vendor'), (req, res) => {
+  const empId = Number(req.query.employee_id || 0);
+  const rows = db.prepare(`
+    SELECT l.*, u.name AS emp_name, u.emp_id AS emp_emp_id, u.department,
+      v.vehicle_name, v.plate, m.name AS marked_by_name, m.role AS marked_by_actual_role
+    FROM employee_no_show_log l
+    LEFT JOIN users u ON u.id = l.employee_id
+    LEFT JOIN vehicles v ON v.id = l.vehicle_id
+    LEFT JOIN users m ON m.id = l.marked_by
+    WHERE (? = 0 OR l.employee_id = ?)
+    ORDER BY l.id DESC LIMIT 500
+  `).all(empId, empId);
+  res.json(rows);
+});
+app.get('/api/admin/suspensions', auth, role('admin', 'vendor'), (req, res) => {
+  const rows = db.prepare(`
+    SELECT s.*, u.name AS emp_name, u.emp_id AS emp_emp_id, u.department, u.email,
+      (SELECT COUNT(*) FROM employee_no_show_log l WHERE l.employee_id = s.employee_id) AS total_no_shows
+    FROM employee_suspensions s
+    LEFT JOIN users u ON u.id = s.employee_id
+    WHERE s.status = 'suspended'
+    ORDER BY s.id DESC
+  `).all();
+  res.json(rows);
+});
+app.post('/api/admin/employees/:id/suspension/reactivate', auth, role('admin'), (req, res) => {
+  const empId = Number(req.params.id);
+  const emp = db.prepare('SELECT * FROM users WHERE id=? AND role=?').get(empId, 'employee');
+  if (!emp) return res.status(404).json({ error: 'Employee not found' });
+  const susp = activeSuspensionOf(empId);
+  if (!susp) return res.status(409).json({ error: 'Employee is not currently suspended' });
+  const adminReason = String((req.body || {}).adminReason || 'Reinstated by admin');
+  db.prepare(`UPDATE employee_suspensions SET status='reactivated', reviewed_by=?, reviewed_at=?, admin_reason=?, updated_at=? WHERE id=?`)
+    .run(req.user.id, ts(), adminReason, ts(), susp.id);
+  authLog('no-show-reactivated', { employee: empId, suspension: susp.id, actor: req.user.id, reason: adminReason });
+  notify(empId, 'Transport Reinstated', `Your company transport access has been reinstated. Reason: ${adminReason}`);
+  const admins = companyAdminsOf(empId);
+  for (const a of admins) {
+    notify(a.id, 'Transport Reinstated', `${emp.name || 'Employee'} was reinstated. Reason: ${adminReason}`);
+  }
+  res.json({ ok: true, id: susp.id, status: 'reactivated' });
 });
 
 /* ---------------- TRIPS / CAB RUNS ---------------- */
@@ -1804,6 +2269,12 @@ app.post('/api/schedules', auth, h(async (req, res) => {
   const emp = req.user.role === 'employee' ? req.user : null;
   const empId = emp ? emp.id : (b.employee_id || req.user.id);
   if (!empId) return res.status(400).json({ error: 'Employee required' });
+
+  // No-show auto-suspension gate: suspended employees cannot book transport
+  // until an admin reactivates them (admins/vendors booking on their behalf still allowed).
+  if (req.user.role !== 'admin' && req.user.role !== 'vendor' && activeSuspensionOf(empId)) {
+    return res.status(403).json({ error: 'Your transport is temporarily suspended after repeated no-shows. Please contact your transport admin to reinstate access.' });
+  }
 
   // Mobile app posts { dates:[...], direction, startTime, slotLabel, nextDay }.
   // Web quick-book posts { slotLabel, direction }. Older clients posted raw rows.
@@ -2740,77 +3211,162 @@ app.post('/api/me/notifications/read', auth, (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------------- EXPORTS (CSV) ---------------- */
+/* ---------------- EXPORTS (CSV + XLSX) ---------------- */
 
 const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const csv = (headers, rows) => [headers.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
 
-function exportRoute(req, res) {
-  const kind = req.params.kind;
-  let content = '';
-  if (kind === 'employees') {
-    const rows = db.prepare("SELECT emp_id, name, email, phone, department, designation, approved, status, created_at FROM users WHERE role='employee' ORDER BY id").all();
-    content = csv(['Employee ID', 'Name', 'Email', 'Phone', 'Department', 'Designation', 'Approved', 'Status', 'Registered'], rows.map(Object.values));
-  } else if (kind === 'drivers') {
-    const rows = db.prepare("SELECT u.emp_id, u.name, u.phone, v.vehicle_name, v.plate, v.line, v.trip, u.approved FROM users u LEFT JOIN vehicles v ON v.id=u.vehicle_id WHERE u.role='driver' AND u.last_login IS NOT NULL ORDER BY u.id").all();
-    content = csv(['Driver ID', 'Name', 'Phone', 'Vehicle', 'Plate', 'Line', 'Trip', 'Approved'], rows.map(Object.values));
-  } else if (kind === 'vehicles') {
-    const rows = db.prepare('SELECT vehicle_name, plate, type, capacity, line, trip, driver_name, driver_phone, status, live_status FROM vehicles ORDER BY line, trip').all();
-    content = csv(['Vehicle', 'Plate', 'Type', 'Capacity', 'Line', 'Trip', 'Driver', 'Phone', 'Status', 'Live status'], rows.map(Object.values));
-  } else if (kind === 'schedules') {
-    const rows = db.prepare(`
+// Table-driven export definitions shared by the CSV and XLSX endpoints. Each
+// `rows` returns an array of arrays in `headers` order.
+const EXPORT_KINDS = {
+  employees: {
+    headers: ['Employee ID', 'Name', 'Email', 'Phone', 'Department', 'Designation', 'Approved', 'Status', 'Registered'],
+    rows: () => db.prepare("SELECT emp_id, name, email, phone, department, designation, approved, status, created_at FROM users WHERE role='employee' ORDER BY id").all().map(Object.values)
+  },
+  drivers: {
+    headers: ['Driver ID', 'Name', 'Phone', 'Vehicle', 'Plate', 'Line', 'Trip', 'Approved'],
+    rows: () => db.prepare("SELECT u.emp_id, u.name, u.phone, v.vehicle_name, v.plate, v.line, v.trip, u.approved FROM users u LEFT JOIN vehicles v ON v.id=u.vehicle_id WHERE u.role='driver' AND u.last_login IS NOT NULL ORDER BY u.id").all().map(Object.values)
+  },
+  vehicles: {
+    headers: ['Vehicle', 'Plate', 'Type', 'Capacity', 'Line', 'Trip', 'Driver', 'Phone', 'Status', 'Live status'],
+    rows: () => db.prepare('SELECT vehicle_name, plate, type, capacity, line, trip, driver_name, driver_phone, status, live_status FROM vehicles ORDER BY line, trip').all().map(Object.values)
+  },
+  schedules: {
+    headers: ['Date', 'Emp ID', 'Employee', 'Vehicle', 'Plate', 'Route', 'Pickup', 'Drop', 'Login', 'Logout', 'Seq', 'Status'],
+    rows: () => db.prepare(`
       SELECT s.date, u.emp_id, u.name, v.vehicle_name, v.plate, r.name AS route_name, s.pickup_time, s.drop_time, s.login_time, s.logout_time, s.sequence, s.status
-      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.date DESC`).all();
-    content = csv(['Date', 'Emp ID', 'Employee', 'Vehicle', 'Plate', 'Route', 'Pickup', 'Drop', 'Login', 'Logout', 'Seq', 'Status'], rows.map(Object.values));
-  } else if (kind === 'feedback') {
-    const rows = db.prepare('SELECT role, user_id, schedule_id, rating, message, created_at FROM feedback ORDER BY id DESC').all();
-    content = csv(['Role', 'User ID', 'Schedule ID', 'Rating', 'Message', 'Date'], rows.map(Object.values));
-  } else if (kind === 'speed-events') {
-    const rows = db.prepare('SELECT vehicle_name, driver_name, speed, speed_limit, lat, lng, created_at FROM speed_events ORDER BY id DESC').all();
-    content = csv(['Vehicle', 'Driver', 'Speed (km/h)', 'Limit (km/h)', 'Lat', 'Lng', 'Time'], rows.map(Object.values));
-  } else if (kind === 'trips') {
-    const rows = db.prepare(`
+      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.date DESC`).all().map(Object.values)
+  },
+  runs: {
+    headers: ['Date', 'Emp ID', 'Employee', 'Vehicle', 'Plate', 'Route', 'Status', 'Check-in', 'Check-out'],
+    rows: () => db.prepare(`
       SELECT s.date, u.emp_id, u.name, v.vehicle_name, r.name AS route_name, s.status,
         (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkin') AS checkin_time,
         (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkout') AS checkout_time
-      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.id DESC`).all();
-    content = csv(['Date', 'Emp ID', 'Employee', 'Vehicle', 'Route', 'Status', 'Check-in', 'Check-out'], rows.map(Object.values));
-  } else if (kind === 'sms-log') {
-    const rows = db.prepare('SELECT to_phone, message, provider, status, created_at FROM sms_log ORDER BY id DESC').all();
-    content = csv(['Phone', 'Message', 'Provider', 'Status', 'Time'], rows.map(Object.values));
-  } else if (kind === 'checkin-logs') {
-    let query = `SELECT c.time, u.name AS emp_name, u.emp_id, d.name AS driver_name, v.vehicle_name, v.plate, c.type, c.method
-      FROM checkins c LEFT JOIN users u ON u.id = c.user_id LEFT JOIN schedules s ON s.id = c.schedule_id
-      LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN users d ON d.role='driver' AND d.vehicle_id = s.vehicle_id WHERE 1=1`;
-    const params = [];
-    if (req.query.date) { query += ' AND date(c.time) = ?'; params.push(req.query.date); }
-    if (req.query.eventType) { query += ' AND c.type = ?'; params.push(req.query.eventType); }
-    query += ' ORDER BY c.id DESC LIMIT 5000';
-    const rows = db.prepare(query).all(...params);
-    content = csv(['Time', 'Employee', 'Employee ID', 'Driver', 'Vehicle', 'Event', 'Method'],
-      rows.map((r) => [r.time, r.emp_name, r.emp_id, r.driver_name, r.vehicle_name || r.plate, r.type === 'checkin' ? 'Check-In' : 'Check-Out', r.method || 'swipe']));
-  } else if (kind === 'no-shows') {
-    const targetDate = req.query.date || dateOnly();
-    const scheduled = db.prepare(`SELECT s.*, u.name AS emp_name, u.emp_id, u.phone, v.vehicle_name, v.plate, v.driver_name
-      FROM schedules s JOIN users u ON u.id = s.employee_id LEFT JOIN vehicles v ON v.id = s.vehicle_id
-      WHERE s.date = ? AND s.status IN ('confirmed','in_progress')`).all(targetDate);
-    const out = [];
-    for (const s of scheduled) {
-      const ci = db.prepare("SELECT id FROM checkins WHERE schedule_id = ? AND type = 'checkin'").get(s.id);
-      if (!ci) out.push([targetDate, s.emp_name, s.emp_id, s.phone, s.login_time || s.pickup_time || '—', s.vehicle_name || '—', s.driver_name || '—']);
+      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.id DESC`).all()
+      .map((r) => [r.date, r.emp_id, r.name, r.vehicle_name, r.plate ?? null, r.route_name, r.status, r.checkin_time, r.checkout_time])
+  },
+  feedback: {
+    headers: ['Role', 'User ID', 'Schedule ID', 'Rating', 'Message', 'Date'],
+    rows: () => db.prepare('SELECT role, user_id, schedule_id, rating, message, created_at FROM feedback ORDER BY id DESC').all().map(Object.values)
+  },
+  'speed-events': {
+    headers: ['Vehicle', 'Driver', 'Speed (km/h)', 'Limit (km/h)', 'Lat', 'Lng', 'Time'],
+    rows: () => db.prepare('SELECT vehicle_name, driver_name, speed, speed_limit, lat, lng, created_at FROM speed_events ORDER BY id DESC').all().map(Object.values)
+  },
+  trips: {
+    headers: ['Date', 'Emp ID', 'Employee', 'Vehicle', 'Route', 'Status', 'Check-in', 'Check-out'],
+    rows: () => db.prepare(`
+      SELECT s.date, u.emp_id, u.name, v.vehicle_name, r.name AS route_name, s.status,
+        (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkin') AS checkin_time,
+        (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkout') AS checkout_time
+      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.id DESC`).all()
+      .map((r) => [r.date, r.emp_id, r.name, r.vehicle_name, r.route_name, r.status, r.checkin_time, r.checkout_time])
+  },
+  'sms-log': {
+    headers: ['Phone', 'Message', 'Provider', 'Status', 'Time'],
+    rows: () => db.prepare('SELECT to_phone, message, provider, status, created_at FROM sms_log ORDER BY id DESC').all().map(Object.values)
+  },
+  'checkin-logs': {
+    headers: ['Time', 'Employee', 'Employee ID', 'Driver', 'Vehicle', 'Event', 'Method'],
+    rows: (req) => {
+      let query = `SELECT c.time, u.name AS emp_name, u.emp_id, d.name AS driver_name, v.vehicle_name, v.plate, c.type, c.method
+        FROM checkins c LEFT JOIN users u ON u.id = c.user_id LEFT JOIN schedules s ON s.id = c.schedule_id
+        LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN users d ON d.role='driver' AND d.vehicle_id = s.vehicle_id WHERE 1=1`;
+      const params = [];
+      if (req.query.date) { query += ' AND date(c.time) = ?'; params.push(req.query.date); }
+      if (req.query.eventType) { query += ' AND c.type = ?'; params.push(req.query.eventType); }
+      query += ' ORDER BY c.id DESC LIMIT 5000';
+      const rows = db.prepare(query).all(...params);
+      return rows.map((r) => [r.time, r.emp_name, r.emp_id, r.driver_name, r.vehicle_name || r.plate, r.type === 'checkin' ? 'Check-In' : 'Check-Out', r.method || 'swipe']);
     }
-    content = csv(['Date', 'Employee', 'ID', 'Phone', 'Slot', 'Vehicle', 'Driver'], out);
-  } else if (kind === 'tracking') {
-    const rows = db.prepare(`SELECT name, emp_id, phone, department, home_address, lat, lng, last_update FROM users WHERE role='employee' ORDER BY name`).all();
-    content = csv(['Employee', 'ID', 'Phone', 'Department', 'Address', 'Lat', 'Lng', 'Last Update'], rows.map(Object.values));
-  } else {
-    return res.status(404).json({ error: 'Unknown export type' });
+  },
+  'no-shows': {
+    headers: ['Date', 'Employee', 'ID', 'Phone', 'Shift', 'Slot', 'Vehicle', 'Driver'],
+    rows: (req) => {
+      const targetDate = req.query.date || dateOnly();
+      const scheduled = db.prepare(`SELECT s.*, u.name AS emp_name, u.emp_id, u.phone, v.vehicle_name, v.plate, v.driver_name
+        FROM schedules s JOIN users u ON u.id = s.employee_id LEFT JOIN vehicles v ON v.id = s.vehicle_id
+        WHERE s.date = ? AND s.status IN ('confirmed','in_progress')`).all(targetDate);
+      const out = [];
+      for (const s of scheduled) {
+        const ci = db.prepare("SELECT id FROM checkins WHERE schedule_id = ? AND type = 'checkin'").get(s.id);
+        if (!ci) {
+          const slot = s.login_time || s.pickup_time || '—';
+          const hour = /^\s*\d{1,2}/.exec(String(slot)) ? Number(/^\s*\d{1,2}/.exec(String(slot))[0]) : 24;
+          out.push([targetDate, s.emp_name, s.emp_id, s.phone, hour < 12 ? 'Day' : 'Night', slot, s.vehicle_name || '—', s.driver_name || '—']);
+        }
+      }
+      return out;
+    }
+  },
+  tracking: {
+    headers: ['Employee', 'ID', 'Phone', 'Department', 'Address', 'Lat', 'Lng', 'Last Update'],
+    rows: () => db.prepare(`SELECT name, emp_id, phone, department, home_address, lat, lng, last_update FROM users WHERE role='employee' ORDER BY name`).all().map(Object.values)
   }
+};
+
+function exportRoute(req, res) {
+  const kind = req.params.kind;
+  const spec = EXPORT_KINDS[kind];
+  if (!spec) return res.status(404).json({ error: 'Unknown export type' });
+  const rows = spec.rows(req);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="getinroute-${kind}-${dateOnly()}.csv"`);
-  res.send('\uFEFF' + content);
+  res.send('\uFEFF' + csv(spec.headers, rows));
 }
+
+function exportXlsxRoute(req, res) {
+  const kind = req.params.kind;
+  const spec = EXPORT_KINDS[kind];
+  if (!spec) return res.status(404).json({ error: 'Unknown export type' });
+  try {
+    const XLSX = require('xlsx');
+    const rows = spec.rows(req);
+    const ws = XLSX.utils.aoa_to_sheet([spec.headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Data');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="getinroute-${kind}-${dateOnly()}.xlsx"`);
+    res.send(buf);
+  } catch (e) {
+    console.error('[export:xlsx]', e.message);
+    res.status(500).json({ error: 'Excel export failed', detail: e.message });
+  }
+}
+
+app.get('/api/admin/export/:kind.xlsx', auth, role('admin'), exportXlsxRoute);
 app.get('/api/admin/export/:kind', auth, role('admin'), exportRoute);
+
+// Analytics report exports (reuse the V3 report generators).
+function reportExportRoute(req, res, isXlsx) {
+  const kind = req.params.kind;
+  try {
+    const ops = require('./v3/ops');
+    const out = ops.report(req.user && req.user.company_id, kind);
+    const rows = (out && out.rows) || [];
+    const headers = rows.length ? Object.keys(rows[0]) : ['empty'];
+    const body = rows.map((r) => headers.map((h) => r[h]));
+    if (isXlsx) {
+      const XLSX = require('xlsx');
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Data');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="getinroute-report-${kind}-${dateOnly()}.xlsx"`);
+      return res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="getinroute-report-${kind}-${dateOnly()}.csv"`);
+    res.send('\uFEFF' + csv(headers, body));
+  } catch (e) {
+    console.error('[export:report]', kind, e.message);
+    res.status(500).json({ error: 'Report export failed', detail: e.message });
+  }
+}
+app.get('/api/admin/export/report/:kind.xlsx', auth, role('admin'), (req, res) => reportExportRoute(req, res, true));
+app.get('/api/admin/export/report/:kind', auth, role('admin'), (req, res) => reportExportRoute(req, res, false));
 app.get('/api/employee/export-history', auth, role('employee', 'admin'), (req, res) => {
   const rows = db.prepare(`
     SELECT s.date, v.vehicle_name, v.plate, r.name AS route_name, s.pickup_time, s.drop_time, s.status,
@@ -3957,15 +4513,16 @@ app.delete('/api/admin/sms-log', auth, role('admin'), (req, res) => {
 /* ---------------- EMPLOYEE CREATE / REACTIVATE ---------------- */
 
 app.post('/api/admin/employees', auth, role('admin', 'vendor'), h(async (req, res) => {
-  const { name, email, phone, department, designation, password } = req.body || {};
+  const { name, email, phone, department, designation, password, gender } = req.body || {};
   if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password are required' });
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (existing) return res.status(400).json({ error: 'Email already registered' });
   const emp_id = 'E' + crypto.randomBytes(3).toString('hex').toUpperCase();
-  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, status${isVendorReq(req) ? ', vendor_id' : ''}) VALUES ('employee', ?, ?, ?, ?, ?, ?, ?, 1, 'active'${isVendorReq(req) ? ', ?' : ''})`)
-    .run(...(isVendorReq(req)
-      ? [emp_id, email, name, phone || null, department || 'General', designation || null, bcrypt.hashSync(password, 10), req.user.vendor_id]
-      : [emp_id, email, name, phone || null, department || 'General', designation || null, bcrypt.hashSync(password, 10)]));
+  const g = ['male', 'female', 'other'].includes(String(gender || '').toLowerCase()) ? String(gender).toLowerCase() : null;
+  // Night-safety drop is auto-enabled for female/other passengers.
+  const nev = isVendorReq(req) ? req.user.vendor_id : req.user.id;
+  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, status, gender, safety_drop_eligible${isVendorReq(req) ? ', vendor_id' : ', company_id'}) VALUES ('employee', ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?, ?)`)
+    .run(emp_id, email, name, phone || null, department || 'General', designation || null, bcrypt.hashSync(password, 10), g, g === 'female' || g === 'other' ? 1 : 0, nev);
   res.json({ ok: true, id: Number(info.lastInsertRowid), emp_id });
 }));
 
@@ -4142,7 +4699,29 @@ app.post('/api/trips/:id/checkout', auth, role('employee', 'admin'), (req, res) 
   else db.prepare("UPDATE schedules SET status='completed' WHERE id=?").run(s.id);
   res.json({ ok: true, message: 'Checked out. See you tomorrow!' });
 });
-app.post('/api/trips/:id/safedrop', auth, (req, res) => res.json({ ok: true, message: 'Safe drop confirmed' }));
+app.post('/api/trips/:id/safedrop', auth, (req, res) => {
+  const tripId = Number(req.params.id) || 0;
+  const s = db.prepare('SELECT * FROM schedules WHERE id=?').get(tripId);
+  if (!s) return res.status(404).json({ message: 'Trip not found' });
+  if (req.user.role !== 'admin') {
+    if (req.user.role === 'employee' && Number(s.employee_id) !== Number(req.user.id)) return res.status(403).json({ message: 'Not your trip' });
+    if (req.user.role === 'driver' && Number(s.vehicle_id) !== Number(req.user.vehicle_id)) return res.status(403).json({ message: 'Not your vehicle' });
+    if (!['employee', 'driver', 'admin', 'vendor'].includes(req.user.role)) return res.status(403).json({ message: 'Not allowed' });
+  }
+  let alert = db.prepare("SELECT * FROM safety_alerts WHERE schedule_id=? AND status IN ('pending','alert') ORDER BY id DESC LIMIT 1").get(s.id);
+  if (!alert) {
+    const done = db.prepare("SELECT * FROM safety_alerts WHERE schedule_id=? AND status='confirmed' AND action='passenger_confirmed' ORDER BY id DESC LIMIT 1").get(s.id);
+    if (done) return res.json({ ok: true, status: 'confirmed', message: 'Safe drop already confirmed' });
+    if (!safetyDropRequired(s)) return res.json({ ok: true, status: 'none', message: 'No active safety confirmation for this trip' });
+    alert = ensureSafetyAlert(s);
+    if (!alert) return res.json({ ok: true, status: 'none', message: 'No active safety confirmation for this trip' });
+  }
+  db.prepare("UPDATE safety_alerts SET status='confirmed', action='passenger_confirmed', note='I reached safely (passenger confirmation)', updated_at=? WHERE id=?").run(ts(), alert.id);
+  db.prepare("UPDATE schedules SET safety_status='confirmed' WHERE id=?").run(s.id);
+  addTripEvent(s.id, 'safety_confirmed', { alertId: Number(alert.id) });
+  if (io) emitToAdmins('safety:resolved', { alertId: Number(alert.id), schedule_id: s.id, result: 'confirmed' });
+  res.json({ ok: true, status: 'confirmed', message: 'Safe drop confirmed' });
+});
 
 app.get('/api/trips/assigned', auth, role('driver'), (req, res) => {
   const vid = req.user.vehicle_id;
@@ -4491,6 +5070,86 @@ app.post('/api/school/students', auth, schoolAdmin, (req, res) => {
   res.json({ ok: true, id: uid });
 });
 
+/* ---- School student Excel import (spec 30/31): preview → validate → confirm ---- */
+function normalizeStudentRow(obj) {
+  const pick = (...keys) => keys.find((k) => obj[k] != null && String(obj[k]).trim() !== '') || null;
+  const g = (k) => (obj[k] != null ? String(obj[k]).trim() : null);
+  return {
+    name: g(pick('name', 's_name', 'student name', 'full name')) || null,
+    email: (g(pick('email', 's_email', 'student email', 'e-mail')) || '').toLowerCase() || null,
+    phone: g(pick('phone', 'phone number', 's_phone', 'contact')) || null,
+    class_grade: g(pick('class', 'class_grade', 'classgrade', 'grade', 'standard')) || null,
+    section: g(pick('section', 'sec', 'division')) || null,
+    guardian_name_1: g(pick('guardian', 'guardian_name', 'guardian name', 'parent name', 'guardian_name_1')) || null,
+    guardian_phone_1: g(pick('guardian_phone', 'guardian phone', 'guardian_phone_1', 'parent phone', 'parent_phone')) || null,
+    emergency_name: g(pick('emergency', 'emergency_name', 'emergency name', 'emergency contact')) || null,
+    emergency_phone: g(pick('emergency_phone', 'emergency phone', 'emergency_phone_1')) || null,
+    education_level: g(pick('education_level', 'education level', 'level')) === 'college' ? 'college' : 'school'
+  };
+}
+
+app.post('/api/school/students/import/preview', auth, schoolAdmin, (req, res) => {
+  try {
+    const { sid } = schoolScope(req);
+    const { base64 } = req.body || {};
+    if (!base64) return res.status(400).json({ error: 'Upload a base64-encoded Excel file in req.body.base64' });
+    const XLSX = require('xlsx');
+    let wb;
+    try { wb = XLSX.read(String(base64), { type: 'base64', cellDates: false }); }
+    catch (e) { return res.status(400).json({ error: 'Invalid Excel file', detail: e.message }); }
+    const sheet = wb.Sheets[wb.SheetNames?.[0]];
+    if (!sheet) return res.status(400).json({ error: 'No sheets found' });
+    const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (!raw.length) return res.status(400).json({ error: 'Sheet is empty' });
+    const headers = raw[0].map((h) => String(h).trim().toLowerCase());
+    const rows = [];
+    const emailSeen = new Map();
+    const existingEmails = new Set(
+      db.prepare("SELECT lower(email) e FROM users WHERE school_id=? AND email IS NOT NULL AND email != ''").all(sid).map((r) => r.e)
+    );
+    for (let i = 1; i < raw.length; i++) {
+      const vals = raw[i];
+      const obj = {};
+      for (let j = 0; j < headers.length; j++) obj[headers[j]] = vals[j] != null ? String(vals[j]).trim() : '';
+      const mapped = normalizeStudentRow(obj);
+      const errs = [];
+      if (!mapped.name) errs.push('name is required');
+      if (mapped.email) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mapped.email)) errs.push('invalid email');
+        else if (existingEmails.has(mapped.email)) errs.push('email already exists in school');
+        else if (emailSeen.has(mapped.email)) errs.push('duplicate email in file');
+        else emailSeen.set(mapped.email, i);
+      }
+      if (mapped.phone && !/^\+?[\d\s\-]{7,15}$/.test(mapped.phone)) errs.push('invalid phone format');
+      rows.push({ row: i, ...mapped, errors: errs });
+    }
+    const validCount = rows.filter((r) => !r.errors.length).length;
+    res.json({ ok: true, sheetName: wb.SheetNames[0], totalRows: rows.length, validCount, invalidCount: rows.length - validCount, rows });
+  } catch (e) { res.status(500).json({ error: 'Preview failed', detail: e.message }); }
+});
+
+app.post('/api/school/students/import/confirm', auth, schoolAdmin, (req, res) => {
+  try {
+    const { sid } = schoolScope(req);
+    const { rows } = req.body || {};
+    if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'Provide validated rows to import' });
+    const results = { imported: 0, skipped: 0, errors: [] };
+    for (const r of rows) {
+      if (!r || !r.name) { results.skipped++; results.errors.push({ row: r?.row || '?', error: 'missing name' }); continue; }
+      if (r.email && db.prepare('SELECT id FROM users WHERE lower(email)=? AND school_id=?').get(r.email.toLowerCase(), sid)) {
+        results.skipped++; results.errors.push({ row: r.row, error: 'duplicate email', email: r.email }); continue;
+      }
+      try {
+        insertStudent(sid, r);
+        results.imported++;
+      } catch (e) {
+        results.skipped++; results.errors.push({ row: r.row, error: e.message });
+      }
+    }
+    res.json({ ok: true, ...results });
+  } catch (e) { res.status(500).json({ error: 'Import failed', detail: e.message }); }
+});
+
 app.post('/api/school/students/import', auth, schoolAdmin, (req, res) => {
   const { sid } = schoolScope(req);
   const list = Array.isArray(req.body) ? req.body : ((req.body || {}).students);
@@ -4804,7 +5463,7 @@ app.post('/api/school/vehicles', auth, schoolAdmin, (req, res) => {
   if (driver_id && !d) return res.status(403).json({ error: 'Driver must belong to this school' });
   const info = db.prepare(`INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vertical, school_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(vehicle_name, plate, type, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null,
+    .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null,
       d ? d.name : null, d ? d.phone : null, 'school', sid);
   if (d) linkDriver(Number(info.lastInsertRowid), d.id, null);
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
@@ -5206,6 +5865,7 @@ function runCompanySweep() {
       console.log(`[missed] ${kind} fired for schedule ${s.id} -> ${admins.map((a) => a.email).join(', ')}`);
     }
   } catch (e) { console.error('[companySweep]', e.message); }
+  runNoShowSweep();
 }
 const companySweepTimer = setInterval(runCompanySweep, 5 * 60 * 1000);
 if (companySweepTimer.unref) companySweepTimer.unref();
@@ -5229,6 +5889,9 @@ function runRealtimeSweep() {
 const realtimeSweepTimer = setInterval(runRealtimeSweep, 60 * 1000);
 if (realtimeSweepTimer.unref) realtimeSweepTimer.unref();
 
+/* ---------------- V3 ADDITIVE MODULES (Map Engine + Subscription + Intelligence + Billing + etc.) ---- */
+try { require('./v3').mountV3({ app, db, io: io || null, auth, role, guard, ownerOnly }); } catch (e) { console.error('[v3] init failed:', e.message); }
+
 /* ---------------- STATIC FRONTEND ---------------- */
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -5237,10 +5900,47 @@ const ADMIN_DIR = path.join(PUBLIC_DIR, 'admin');
 const SPA_INDEX = path.join(ADMIN_DIR, 'index.html');
 const WEBSITE_INDEX = path.join(WEBSITE_DIR, 'index.html');
 
-const SPA_ROUTES = ['/admin', '/login', '/employee-login', '/owner', '/register', '/register-company', '/forgot-password', '/reset-password', '/app', '/driver', '/employee', '/cs', '/vendor-login', '/vendor-portal', '/school', '/parent'];
+const SPA_ROUTES = ['/', '/admin', '/login', '/admin/login', '/company/login', '/vendor/login', '/school/login', '/apps', '/get-started', '/platform', '/solutions', '/about', '/contact', '/employee-login', '/owner', '/register', '/register-company', '/forgot-password', '/reset-password', '/app', '/driver', '/employee', '/cs', '/vendor-login', '/vendor-portal', '/school', '/parent'];
 
-/* App binary downloads (APK / IPA) for the landing page "Download the App" section. */
+/* App binary downloads (APK / IPA) for the landing page "Download the App" section.
+   Binaries too large for `railway up` (>100 MB cap) are staged one-per-deploy into
+   the persistent /data volume (Railway) and served from there; the packaged
+   public/download copy is the fallback (local dev). */
 const DOWNLOAD_DIR = path.join(PUBLIC_DIR, 'download');
+const apkVolumeDir = (() => {
+  if (process.env.APK_VOLUME_DIR) return process.env.APK_VOLUME_DIR;
+  if (process.platform !== 'win32' && fs.existsSync('/data') && fs.statSync('/data').isDirectory()) return path.join('/data', 'apk');
+  return null;
+})();
+if (apkVolumeDir) {
+  try {
+    fs.mkdirSync(apkVolumeDir, { recursive: true });
+    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk')];
+    for (const src of staged) {
+      const dst = path.join(apkVolumeDir, path.basename(src));
+      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    }
+    console.log('[apk-bootstrap] volume=' + apkVolumeDir + ' total=' + fs.readdirSync(apkVolumeDir).join(','));
+  } catch (e) { console.error('[apk-bootstrap]', e.message); }
+}
+const binDownload = (res, file, fallback) => {
+  const candidates = [];
+  if (apkVolumeDir) candidates.push(path.join(apkVolumeDir, file));
+  candidates.push(path.join(fallback, file));
+  for (const p of candidates) {
+    if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+      if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      else if (p.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
+      else if (p.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Content-Disposition', 'attachment');
+      return res.sendFile(p);
+    }
+  }
+  return res.status(404).json({ error: 'Not found' });
+};
+app.get('/download/GetInRoute.apk', (req, res) => binDownload(res, 'GetInRoute.apk', DOWNLOAD_DIR));
+app.get('/download/GetInRouteSchool.apk', (req, res) => binDownload(res, 'GetInRouteSchool.apk', DOWNLOAD_DIR));
 app.use('/download', express.static(DOWNLOAD_DIR, {
   setHeaders: (res, p) => {
     if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
@@ -5258,7 +5958,7 @@ if (fs.existsSync(WEBSITE_DIR)) {
   });
   app.use('/admin/assets', express.static(path.join(ADMIN_DIR, 'assets'), { maxAge: '30d', immutable: true }));
   app.use('/assets', express.static(path.join(ADMIN_DIR, 'assets'), { maxAge: '30d', immutable: true }));
-  app.use(express.static(WEBSITE_DIR, { index: 'index.html', setHeaders: (res, p) => { if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));
+  app.use(express.static(WEBSITE_DIR, { index: false, setHeaders: (res, p) => { if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io')) return next();
     const isSpa = SPA_ROUTES.some((r) => req.path === r || req.path.startsWith(r + '/'));

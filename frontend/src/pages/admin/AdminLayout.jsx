@@ -5,10 +5,12 @@ import { useInterval, useToast } from '../../components/ui';
 import { useSocketEvent } from '../../socket';
 import { api } from '../../api';
 import ErrorBoundary from '../../components/ErrorBoundary';
+import { useNoindex } from '../../components/Noindex';
 import {
   LayoutDashboard, MapPinned, Route as RouteIcon, Truck, Users, ClipboardCheck,
   CalendarClock, FileSpreadsheet, Bell, LogOut, Menu, X, MessageCircle, MessageSquare, History,
-  Settings, ShieldAlert, UserX, Building2, Shield, Ticket, HeadphonesIcon, School, ParkingCircle, XCircle, Database
+  Settings, ShieldAlert, UserX, Building2, Shield, Ticket, HeadphonesIcon, School, ParkingCircle, XCircle, Database,
+  CreditCard, Flag, ShieldCheck, Brain, BarChart3, FileText, DollarSign, Send, Activity, Zap
 } from 'lucide-react';
 
 const NAV_OWNER = [
@@ -18,12 +20,25 @@ const NAV_OWNER = [
   ]},
   { label: 'Platform', items: [
     { to: '/admin/company-approvals', icon: <Building2 size={18} />, text: 'Company Approvals' },
+    { to: '/admin/subscription', icon: <CreditCard size={18} />, text: 'Subscription Center' },
+    { to: '/admin/feature-flags', icon: <Flag size={18} />, text: 'Feature Flags' },
     { to: '/admin/schools', icon: <School size={18} />, text: 'Schools' },
     { to: '/admin/admin-accounts', icon: <Shield size={18} />, text: 'Admin Accounts' },
     { to: '/admin/approvals', icon: <Users size={18} />, text: 'Drivers & Employees' },
     { to: '/admin/employees', icon: <Users size={18} />, text: 'All Users' }
   ]},
+  { label: 'Intelligence', items: [
+    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center' },
+    { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
+    { to: '/admin/intelligence', icon: <Brain size={18} />, text: 'AI Intelligence' },
+    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' }
+  ]},
   { label: 'Configuration', items: [
+    { to: '/admin/policies', icon: <ShieldCheck size={18} />, text: 'Policies' },
+    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents' },
+    { to: '/admin/billing', icon: <DollarSign size={18} />, text: 'Billing' },
+    { to: '/admin/notification-templates', icon: <Bell size={18} />, text: 'Notification Templates' },
+    { to: '/admin/reports', icon: <BarChart3 size={18} />, text: 'Analytics Reports' },
     { to: '/admin/settings', icon: <Settings size={18} />, text: 'Settings' },
     { to: '/admin/cs', icon: <HeadphonesIcon size={18} />, text: 'CS & Owner Portal' },
     { to: '/admin/raw-data', icon: <Database size={18} />, text: 'Raw Data' }
@@ -40,6 +55,7 @@ const NAV_ADMIN = [
     { to: '/admin/vehicles', icon: <Truck size={18} />, text: 'Vehicles & Drivers' },
     { to: '/admin/employees', icon: <Users size={18} />, text: 'Employees' },
     { to: '/admin/approvals', icon: <ClipboardCheck size={18} />, text: 'Approvals' },
+    { to: '/admin/drivers', icon: <Truck size={18} />, text: 'Driver Accounts' },
     { to: '/admin/schedules', icon: <CalendarClock size={18} />, text: 'Schedules' },
     { to: '/admin/trips', icon: <History size={18} />, text: 'All Trips' },
     { to: '/admin/vendors', icon: <Building2 size={18} />, text: 'Vendor Management' }
@@ -56,11 +72,24 @@ const NAV_ADMIN = [
   ]},
   { label: 'Reports', items: [
     { to: '/admin/exports', icon: <FileSpreadsheet size={18} />, text: 'Export Spreadsheets' },
+    { to: '/admin/reports', icon: <BarChart3 size={18} />, text: 'Analytics Reports' },
     { to: '/admin/notifications', icon: <Bell size={18} />, text: 'Notifications' },
+    { to: '/admin/notification-templates', icon: <Send size={18} />, text: 'Notification Templates' },
     { to: '/admin/checkin-logs', icon: <ShieldAlert size={18} />, text: 'Check-In/Out Logs' },
     { to: '/admin/no-shows', icon: <UserX size={18} />, text: 'No-Show Report' }
   ]},
+  { label: 'Intelligence', items: [
+    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center' },
+    { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
+    { to: '/admin/intelligence', icon: <Brain size={18} />, text: 'AI Intelligence' },
+    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' },
+    { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator' }
+  ]},
   { label: 'Configuration', items: [
+    { to: '/admin/policies', icon: <ShieldCheck size={18} />, text: 'Policies' },
+    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents' },
+    { to: '/admin/billing', icon: <DollarSign size={18} />, text: 'Billing' },
+    { to: '/admin/feature-flags', icon: <Flag size={18} />, text: 'Feature Flags' },
     { to: '/admin/settings', icon: <Settings size={18} />, text: 'Settings' }
   ]}
 ];
@@ -75,7 +104,8 @@ const NAV_VENDOR = [
     { to: '/admin/vehicles', icon: <Truck size={18} />, text: 'Vehicles & Drivers' },
     { to: '/admin/employees', icon: <Users size={18} />, text: 'Employees' },
     { to: '/admin/schedules', icon: <CalendarClock size={18} />, text: 'Schedules' },
-    { to: '/admin/trips', icon: <History size={18} />, text: 'All Trips' }
+    { to: '/admin/trips', icon: <History size={18} />, text: 'All Trips' },
+    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents' }
   ]},
   { label: 'Operations', items: [
     { to: '/admin/parking-lines', icon: <ParkingCircle size={18} />, text: 'Parking Lines' },
@@ -86,10 +116,17 @@ const NAV_VENDOR = [
     { to: '/admin/chat', icon: <MessageCircle size={18} />, text: 'Messages' },
     { to: '/admin/sms-log', icon: <MessageSquare size={18} />, text: 'SMS Log' },
     { to: '/admin/tickets', icon: <Ticket size={18} />, text: 'Support Tickets' }
+  ]},
+  { label: 'Intelligence', items: [
+    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center' },
+    { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
+    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' },
+    { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator' }
   ]}
 ];
 
 export default function AdminLayout() {
+  useNoindex(); // keep private dashboards out of search engine indexes
   const { user, logout } = useAuth();
   const toast = useToast();
   const [unread, setUnread] = useState(0);
