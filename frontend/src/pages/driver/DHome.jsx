@@ -18,10 +18,35 @@ export default function DHome() {
   const [data, setData] = useState(null);
   const [sending, setSending] = useState(false);
   const [otpMap, setOtpMap] = useState({});
+  const [standInput, setStandInput] = useState('');
   const load = () => api.get('/api/driver/today').then(setData).catch(() => {});
   useEffect(() => { load(); }, []);
   useInterval(load, 5000);
   useSocketEvent('run:nextStop', () => load());
+
+  const currentStand = () => String(standInput ? standInput : (data?.vehicle?.stand || '')).trim().toUpperCase();
+
+  const setStand = async () => {
+    const v = currentStand();
+    if (!/^L(?:[1-9]|[1-5][0-9]|60)$/.test(v)) return toast('Enter a stand slot like L12 (L1 to L60).', 'err');
+    try {
+      const r = await api.put('/api/driver/standing-point', { standingPoint: v });
+      toast(r?.standingPoint ? `Stand set to ${r.standingPoint}` : 'Stand updated');
+      setStandInput('');
+      load();
+    } catch (e) { toast(e.message || 'Could not update stand', 'err'); }
+  };
+
+  const reportParkingLine = async () => {
+    const v = currentStand();
+    if (!/^L(?:[1-9]|[1-5][0-9]|60)$/.test(v)) return toast('Set a stand slot first (L1 to L60).', 'err');
+    try {
+      const r = await api.post('/api/driver/parking-line', { line: v });
+      toast(r?.line ? `Parking line reported · ${r.line}` : 'Parking line reported');
+      setStandInput('');
+      load();
+    } catch (e) { toast(e.message || 'Could not report parking line', 'err'); }
+  };
 
   if (!data) return <div className="m-card"><div className="empty">No vehicle assigned to you yet.</div></div>;
   if (!data.route) return <div className="m-card"><div className="empty">No route assigned to your vehicle yet. Admin will allocate one.</div></div>;
@@ -99,6 +124,30 @@ export default function DHome() {
           {(Array.isArray(data.route.stops) ? data.route.stops : []).map((s, i) => (
             <div key={s.sequence} className={`seg ${i < Math.max(0, sequenceLen - 1) ? 'done' : i === Math.max(0, sequenceLen - 1) ? 'now' : ''}`} />
           ))}
+        </div>
+      </div>
+
+      <div className="m-card">
+        <div className="m-label">My cab position</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
+          <span className="chip"><MapPin size={13} /> {data.vehicle?.vehicle_name || 'My cab'}</span>
+          {data.vehicle.plate && <span className="chip">{data.vehicle.plate}</span>}
+          {data.vehicle.stand
+            ? <span className="chip">Stand {data.vehicle.stand}</span>
+            : <span className="chip">Stand not set</span>}
+          {(data.vehicle.line || data.vehicle.trip) && <span className="chip">Line {data.vehicle.line || '—'} · Trip #{data.vehicle.trip || '—'}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            value={standInput}
+            onChange={(e) => setStandInput(e.target.value.toUpperCase().replace(/[^L0-9]/g, '').slice(0, 3))}
+            placeholder="L12"
+            aria-label="Stand slot"
+            style={{ width: 88, textAlign: 'center', fontSize: 16, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, fontFamily: 'var(--font-mono)' }}
+          />
+          <button className="btn btn-outline" onClick={setStand}>Set stand</button>
+          <button className="btn btn-outline" onClick={reportParkingLine}>Report parking line</button>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>Slots L1–L60. &quot;Report parking line&quot; logs an entry for the yard manager.</span>
         </div>
       </div>
 

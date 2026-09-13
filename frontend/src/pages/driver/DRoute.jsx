@@ -12,6 +12,9 @@ export default function DRoute() {
   if (!data?.route) return <div className="m-card"><div className="empty">No route assigned yet.</div></div>;
 
   const vehicles = data.vehicle?.lat ? [data.vehicle] : [];
+  const schedules = Array.isArray(data.schedules) ? data.schedules : [];
+  const stops = Array.isArray(data.route.stops) ? data.route.stops : [];
+  const ridersAt = (seq) => schedules.filter((s) => s.sequence === seq);
 
   return (
     <div>
@@ -20,22 +23,22 @@ export default function DRoute() {
       </div>
       <div className="m-card">
         <div className="m-label">Pickup / drop sequence</div>
-        {(Array.isArray(data.route.stops) ? data.route.stops : []).map((stop, i) => {
-          const atStop = (Array.isArray(data.schedules) ? data.schedules : []).filter((s) => ((Array.isArray(data.route.stops) ? data.route.stops : [])[Math.max(0, (Array.isArray(data.schedules) ? data.schedules : []).length - 1)]?.sequence || 1) === stop.sequence);
+        {stops.map((stop, i) => {
+          const riders = ridersAt(stop.sequence);
           return (
             <div key={stop.sequence} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ width: 26, height: 26, borderRadius: '50%', background: i === 0 ? '#10b981' : 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12 }}>{stop.sequence}</div>
-                {i < (Array.isArray(data.route.stops) ? data.route.stops : []).length - 1 && <div style={{ width: 2, height: '100%', background: '#e2e8f0', margin: '0 auto' }} />}
+                {i < stops.length - 1 && <div style={{ width: 2, height: '100%', background: '#e2e8f0', margin: '0 auto' }} />}
               </div>
               <div style={{ flex: 1, paddingBottom: 4 }}>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{stop.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {i === 0 ? 'Start point' : i === data.route.stops.length - 1 ? 'End / drop point' : 'Pickup stop'}
+                  {i === 0 ? 'Start point' : i === stops.length - 1 ? 'End / drop point' : 'Pickup stop'}
                 </div>
-                {atStop.length > 0 && (
+                {riders.length > 0 && (
                   <div style={{ marginTop: 6 }}>
-                    {(Array.isArray(data.schedules) ? data.schedules : []).filter((s) => s.sequence === stop.sequence).map((s) => {
+                    {riders.map((s) => {
                       const c = (Array.isArray(s.checkins) ? s.checkins : []).find((x) => x.type === 'checkin');
                       return (
                         <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>

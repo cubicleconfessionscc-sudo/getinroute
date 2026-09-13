@@ -41,17 +41,25 @@ export default function VendorPortal() {
   };
   const save = async () => {
     if (!form.vehicle_name) return toast('Vehicle name required');
-    if (editing) await api.put(`/api/vendor/vehicles/${editing}`, form);
-    else await api.post('/api/vendor/vehicles', form);
-    toast(editing ? 'Vehicle updated' : 'Vehicle added');
-    setModal(false);
-    load();
+    try {
+      if (editing) await api.put(`/api/vendor/vehicles/${editing}`, form);
+      else await api.post('/api/vendor/vehicles', form);
+      toast(editing ? 'Vehicle updated' : 'Vehicle added');
+      setModal(false);
+      load();
+    } catch (e) {
+      toast(e.message || 'Could not save vehicle', 'err');
+    }
   };
   const del = async (v) => {
     if (!confirm(`Remove ${v.vehicle_name}?`)) return;
-    await api.del(`/api/admin/vehicles/${v.id}`);
-    toast('Removed');
-    load();
+    try {
+      await api.del(`/api/admin/vehicles/${v.id}`);
+      toast('Removed');
+      load();
+    } catch (e) {
+      toast(e.message || 'Could not remove vehicle', 'err');
+    }
   };
 
   return (
@@ -71,7 +79,13 @@ export default function VendorPortal() {
         <div className="stat"><div className="ico ico-red"><AlertTriangle size={20} /></div><div className="num">{stats?.alerts_today ?? '—'}</div><div className="lbl">Speed Alerts</div></div>
       </div>
 
-      <h3 style={{ margin: '18px 0 10px', fontSize: 15 }}>My Fleet</h3>
+      <h3 style={{ margin: '18px 0 10px', fontSize: 15 }}>
+        My Fleet{' '}
+        <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>
+          ({vehicles.length} / 100 vehicles)
+        </span>
+        {vehicles.length >= 90 && <Badge color="amber">near the 100-vehicle cap</Badge>}
+      </h3>
       <div className="card">
         <div className="table-wrap">
           <table className="tbl">

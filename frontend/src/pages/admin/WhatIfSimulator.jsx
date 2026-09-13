@@ -4,14 +4,28 @@ import { Brain, CarFront, RotateCcw } from 'lucide-react';
 
 const inr = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 const DEFAULT_S = { empDelta: 0, vehicles: 0, shift: 1, branches: 0, traffic: 0, shortage: 0, routes: 0 };
+const DEFAULT_BASELINE = { employees: 850, vehicles: 24, routes: 18, drivers: 26, cost: 1450000, onTime: 92, eta: 28, utilization: 76 };
+const pickLive = (r) => {
+  const b = {};
+  if (r) {
+    if (Number.isFinite(Number(r.employees)) && Number(r.employees) > 0) b.employees = Number(r.employees);
+    if (Number.isFinite(Number(r.vehicles)) && Number(r.vehicles) > 0) b.vehicles = Number(r.vehicles);
+    if (Number.isFinite(Number(r.routes))) b.routes = Number(r.routes);
+    if (Number.isFinite(Number(r.drivers))) b.drivers = Number(r.drivers);
+  }
+  return b;
+};
 
 export default function WhatIfSimulator() {
-  const [baseline, setBaseline] = useState({ employees: 850, vehicles: 24, routes: 18, drivers: 26, cost: 1450000, onTime: 92, eta: 28, utilization: 76 });
+  const [baseline, setBaseline] = useState(DEFAULT_BASELINE);
   const [live, setLive] = useState(null);
   const [s, setS] = useState(DEFAULT_S);
 
   useEffect(() => {
-    api.get('/api/admin/stats').then((r) => setLive(r || null)).catch(() => {});
+    api.get('/api/admin/stats').then((r) => {
+      setLive(r || null);
+      setBaseline((b) => ({ ...b, ...pickLive(r), source: r && r.employees != null ? 'live' : b.source }));
+    }).catch(() => {});
   }, []);
 
   const est = useMemo(() => {
@@ -65,7 +79,7 @@ export default function WhatIfSimulator() {
           <h1 className="page-title">What-If Simulator <span className="pill-whatif">Digital Twin</span></h1>
           <p className="page-sub">Model the impact of operational changes on your fleet — without touching live operations. Projections are estimates based on your real configuration.</p>
         </div>
-        <button className="btn btn-ghost" onClick={() => { setS(DEFAULT_S); setBaseline((b) => ({ ...b })); }}><RotateCcw size={15} /> Reset</button>
+        <button className="btn btn-ghost" onClick={() => { setS(DEFAULT_S); setBaseline({ ...DEFAULT_BASELINE, ...(live ? pickLive(live) : {}) }); }}><RotateCcw size={15} /> Reset</button>
       </div>
 
       <div className="grid2" style={{ gridTemplateColumns: 'minmax(300px, 400px) 1fr', gap: 16 }}>
@@ -137,7 +151,7 @@ export default function WhatIfSimulator() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <CarFront size={17} style={{ color: 'var(--accent)' }} />
               <h3 style={{ margin: 0 }}>Projected Impact</h3>
-              {live?.employees != null && <span className="chip chip-cyan" style={{ marginLeft: 'auto' }}>Live baseline • {live.employees} employees</span>}
+              {live?.employees != null && <span className="chip chip-cyan" style={{ marginLeft: 'auto' }}>Live baseline • {live.employees} employees · {live.vehicles} vehicles · {live.routes} routes</span>}
             </div>
             <div className="whatif-rows">
               {row('Employee count', baseline.employees, est.employees)}
