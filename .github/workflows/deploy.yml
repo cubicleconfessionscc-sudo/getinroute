@@ -21,16 +21,18 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
+      - name: Install Railway CLI (pinned 5.30.4)
+        run: npm install -g @railway/cli@5.30.4
 
       - name: Restore Railway session
         env:
           RAILWAY_CONFIG: ${{ secrets.RAILWAY_CONFIG }}
         run: |
           mkdir -p "$HOME/.railway"
-          echo "$RAILWAY_CONFIG" | base64 -d > "$HOME/.railway/config.json"
+          printf '%s' "$RAILWAY_CONFIG" | base64 -d > "$HOME/.railway/config.json"
           chmod 600 "$HOME/.railway/config.json"
+          wc -c "$HOME/.railway/config.json"
+          python3 -c "import json,sys;json.load(open(sys.argv[1]));print('config json OK')" "$HOME/.railway/config.json"
           railway whoami
 
       - name: Deploy to Railway (production)
@@ -39,5 +41,4 @@ jobs:
           railway up --detach \
             --project df871066-14b2-4fbc-b218-1782d72063be \
             --environment production \
-            --service getinroute-app \
-            --message "deploy $(git rev-parse --short HEAD)"
+            --service getinroute-app
