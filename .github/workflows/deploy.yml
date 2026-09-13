@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch: {}
 
@@ -20,6 +21,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Stage admin assets into backend
+        run: |
+          rm -rf backend/public/admin
+          mkdir -p backend/public/admin
+          cp -r frontend/dist/. backend/public/admin/
 
       - name: Install Railway CLI (pinned 5.30.4)
         run: npm install -g @railway/cli@5.30.4
