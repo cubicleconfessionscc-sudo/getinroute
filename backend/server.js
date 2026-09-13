@@ -5956,6 +5956,14 @@ if (fs.existsSync(WEBSITE_DIR)) {
     res.type('application/manifest+json');
     res.sendFile(path.join(WEBSITE_DIR, 'manifest.webmanifest'));
   });
+  const SW_FILE = path.join(ADMIN_DIR, 'sw.js');
+  if (fs.existsSync(SW_FILE)) {
+    app.get('/sw.js', (req, res) => {
+      res.type('application/javascript');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.sendFile(SW_FILE);
+    });
+  }
   app.use('/admin/assets', express.static(path.join(ADMIN_DIR, 'assets'), { maxAge: '30d', immutable: true }));
   app.use('/assets', express.static(path.join(ADMIN_DIR, 'assets'), { maxAge: '30d', immutable: true }));
   app.use(express.static(WEBSITE_DIR, { index: false, setHeaders: (res, p) => { if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));

@@ -47,7 +47,9 @@ export function clearToken() {
   localStorage.removeItem(LEGACY_KEY);
 }
 
-async function request(path, { method = 'GET', body, params } = {}) {
+const REQUEST_TIMEOUT_MS = 20000;
+
+async function request(path, { method = 'GET', body, params, timeout = REQUEST_TIMEOUT_MS } = {}) {
   let url = path;
   if (params) {
     const qs = new URLSearchParams(params).toString();
@@ -57,7 +59,22 @@ async function request(path, { method = 'GET', body, params } = {}) {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: ctrl ? ctrl.signal : undefined
+    });
+  } catch (err) {
+    if (ctrl && ctrl.signal.aborted) throw new Error('Request timed out');
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
@@ -100,7 +117,17 @@ export async function downloadCsv(path, filename) {
 
 export async function downloadFile(path, filename) {
   const token = getToken();
-  const res = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS) : null;
+  let res;
+  try {
+    res = await fetch(path, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl ? ctrl.signal : undefined });
+  } catch (err) {
+    if (ctrl && ctrl.signal.aborted) throw new Error('Download timed out');
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!res.ok) throw new Error('Download failed');
   const blob = await res.blob();
   const a = document.createElement('a');
