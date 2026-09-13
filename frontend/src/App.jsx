@@ -47,7 +47,6 @@ import SchoolManagement from './pages/admin/SchoolManagement';
 import ParkingLinesPage from './pages/admin/ParkingLinesPage';
 import CancellationsPage from './pages/admin/CancellationsPage';
 import SafetyPage from './pages/admin/SafetyPage';
-import VendorPortal from './pages/admin/VendorPortal';
 import VendorLogin from './pages/VendorLogin';
 
 import SubscriptionCommandCenter from './pages/admin/SubscriptionCommandCenter';

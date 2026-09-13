@@ -89,7 +89,14 @@ export default function VehiclesPage() {
           <div className="page-title">Vehicles & Drivers</div>
           <div className="page-sub">Allocate vehicles to lines 1–10 and trips 1–2, and manage driver & cab details.</div>
         </div>
-        <button className="btn btn-primary" onClick={() => openEdit(null)}><Plus size={16} /> Add vehicle</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {isVendor && (
+            <span className={`chip ${vehicles.length >= 90 ? 'chip-amber' : ''}`}>
+              {vehicles.length} / 100 vendor vehicles{vehicles.length >= 90 ? ' · near cap' : ''}
+            </span>
+          )}
+          <button className="btn btn-primary" onClick={() => openEdit(null)}><Plus size={16} /> Add vehicle</button>
+        </div>
       </div>
 
       {drivers.length > 0 && (
