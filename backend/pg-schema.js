@@ -150,6 +150,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   drop_mode TEXT DEFAULT 'door',
   missed_email_sent INTEGER DEFAULT 0,
   missed_email_type TEXT,
+  archived_at TEXT,
+  archived_by BIGINT,
   PRIMARY KEY (id)
 );
 
@@ -167,6 +169,8 @@ CREATE TABLE IF NOT EXISTS checkins (
   confirmed INTEGER DEFAULT 0,
   otp_expires TEXT,
   otp_attempts INTEGER DEFAULT 0,
+  archived_at TEXT,
+  archived_by BIGINT,
   PRIMARY KEY (id)
 );
 
@@ -201,6 +205,8 @@ CREATE TABLE IF NOT EXISTS speed_events (
   lat DOUBLE PRECISION,
   lng DOUBLE PRECISION,
   created_at TEXT DEFAULT log_now(),
+  archived_at TEXT,
+  archived_by BIGINT,
   PRIMARY KEY (id)
 );
 
@@ -459,6 +465,8 @@ CREATE TABLE IF NOT EXISTS location_history (
   speed DOUBLE PRECISION DEFAULT 0,
   source TEXT DEFAULT 'gps',
   created_at TEXT DEFAULT log_now(),
+  archived_at TEXT,
+  archived_by BIGINT,
   PRIMARY KEY (id)
 );
 
@@ -503,6 +511,8 @@ CREATE TABLE IF NOT EXISTS safety_alerts (
   resolved_by BIGINT,
   resolved_by_role TEXT,
   action TEXT,
+  archived_at TEXT,
+  archived_by BIGINT,
   PRIMARY KEY (id)
 );
 
@@ -516,6 +526,8 @@ CREATE TABLE IF NOT EXISTS trip_events (
   kind TEXT NOT NULL,
   meta TEXT,
   created_at TEXT DEFAULT log_now(),
+  archived_at TEXT,
+  archived_by BIGINT,
   PRIMARY KEY (id)
 );
 

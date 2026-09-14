@@ -42,7 +42,7 @@ export default function OwnerLogin() {
         <form onSubmit={submit}>
           <div className="field" style={{ marginBottom: 14 }}>
             <label>Email</label>
-            <input value={form.identifier} onChange={(e) => setForm({ ...form, identifier: e.target.value })} placeholder="owner@getinroute.in" required autoComplete="username" />
+            <input value={form.identifier} onChange={(e) => setForm({ ...form, identifier: e.target.value })} placeholder="getinroute0@gmail.com" required autoComplete="username" />
           </div>
           <div className="field" style={{ marginBottom: 16 }}>
             <label>Password</label>

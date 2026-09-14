@@ -11,6 +11,7 @@ const { Server } = require('socket.io');
 const db = require('./db');
 const { initMailer, sendMail } = require('./mailer');
 const { sendSms } = require('./sms');
+const { archiveRecords, unarchiveRecords } = require('./v3/archive');
 
 const app = express();
 app.disable('x-powered-by');
@@ -2384,8 +2385,8 @@ app.delete('/api/schedules/:id', auth, (req, res) => {
   const s = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Not found' });
   if (req.user.role === 'employee' && s.employee_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
-  db.prepare('DELETE FROM schedules WHERE id = ?').run(s.id);
-  res.json({ ok: true });
+  const out = archiveRecords({ table: 'schedules', ids: [s.id], actorId: req.user.id, actorRole: req.user.role, reason: 'employee_cancel', companyId: req.user.company_id });
+  res.json({ ok: out.ok, archived: out.changed > 0 });
 });
 
 app.post('/api/admin/schedules', auth, role('admin', 'vendor'), h(async (req, res) => {
@@ -2463,8 +2464,8 @@ app.put('/api/admin/schedules/:id', auth, role('admin', 'vendor'), (req, res) =>
   res.json({ ok: true });
 });
 app.delete('/api/admin/schedules/:id', auth, role('admin'), (req, res) => {
-  db.prepare('DELETE FROM schedules WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+  const out = archiveRecords({ table: 'schedules', ids: [req.params.id], actorId: req.user.id, actorRole: req.user.role, reason: 'admin_delete', companyId: req.user.company_id });
+  res.status(out.ok ? 200 : 400).json(out.ok ? { ok: true, archived: out.changed > 0 } : out);
 });
 
 // Approve an employee-requested schedule: apply any admin edits, auto-assign a
@@ -2633,8 +2634,8 @@ app.put('/api/admin/speed-limit/:routeId', auth, role('admin', 'vendor'), (req, 
 });
 
 app.delete('/api/admin/speed-events/:id', auth, role('admin'), (req, res) => {
-  db.prepare('DELETE FROM speed_events WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+  const out = archiveRecords({ table: 'speed_events', ids: [req.params.id], actorId: req.user.id, actorRole: req.user.role, reason: 'admin_delete', companyId: req.user.company_id });
+  res.json({ ok: out.ok, archived: out.changed > 0 });
 });
 
 app.get('/api/admin/notifications', auth, role('admin', 'vendor'), (req, res) => {
@@ -3612,7 +3613,12 @@ function recordGpsHistory(subject, subjectId, lat, lng, speed) {
 function pruneLocationHistory() {
   try {
     const days = Number(process.env.LOCATION_HISTORY_RETAIN_DAYS) || 90;
-    db.prepare("DELETE FROM location_history WHERE created_at < datetime('now','localtime',?)").run(`-${days} days`);
+    // Retention: soft-archive (not hard delete) so authorised AI + reports can
+    // still read historical GPS while live tracking reads skip archived rows.
+    const res = db.prepare("UPDATE location_history SET archived_at = COALESCE(archived_at, datetime('now','localtime')) WHERE created_at < datetime('now','localtime',?) AND archived_at IS NULL").run(`-${days} days`);
+    if ((res && Number(res.changes || 0)) > 0) {
+      try { require('./v3/core').audit({ actor_id: null, actor_role: 'system', action: 'archive:location_history:retention', category: 'records', entity_type: 'location_history', result: 'archived', new_value: { days, reason: 'retention_prune' } }); } catch (e) {}
+    }
   } catch (e) { console.error('[gps-history] prune failed:', e.message); }
 }
 const pruneHistoryTimer = setInterval(pruneLocationHistory, 24 * 60 * 60 * 1000);
@@ -4524,12 +4530,15 @@ app.post('/api/alerts', auth, (req, res) => {
 /* ---------------- SPEED EVENTS DELETE ---------------- */
 
 app.delete('/api/admin/speed-events/:id', auth, role('admin'), (req, res) => {
-  db.prepare('DELETE FROM speed_events WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+  const out = archiveRecords({ table: 'speed_events', ids: [req.params.id], actorId: req.user.id, actorRole: req.user.role, reason: 'admin_delete', companyId: req.user.company_id });
+  res.json({ ok: out.ok, archived: out.changed > 0 });
 });
 app.delete('/api/admin/speed-events', auth, role('admin'), (req, res) => {
-  db.prepare("DELETE FROM speed_events WHERE date(created_at) = ?").run(dateOnly());
-  res.json({ ok: true });
+  const today = db.prepare("SELECT GROUP_CONCAT(id) AS ids FROM speed_events WHERE date(created_at) = ?").get(dateOnly());
+  const list = today && today.ids ? String(today.ids).split(',').map(Number) : [];
+  if (!list.length) return res.json({ ok: true, archived: 0 });
+  const out = archiveRecords({ table: 'speed_events', ids: list, actorId: req.user.id, actorRole: req.user.role, reason: 'clear_today', companyId: req.user.company_id });
+  res.json({ ok: out.ok, archived: out.changed });
 });
 
 /* ---------------- SMS LOG DELETE ---------------- */
@@ -4667,7 +4676,7 @@ app.post('/api/support/contact', auth, h(async (req, res) => {
   if (!message) return res.status(400).json({ message: 'Message required' });
   const s = loadSettings();
   notify(adminId(), 'Support Request', `${req.user.name} (${req.user.emp_id}): ${String(message).slice(0, 200)}`);
-  sendMail({ to: s.company?.supportEmail || 'support@getinroute.in', subject: `[GetInRoute] Support request from ${req.user.name}`, html: `<p><b>${req.user.name}</b> (${req.user.emp_id}, ${req.user.email}) wrote:</p><p>${String(message).replace(/</g, '&lt;')}</p>` }).catch(() => {});
+  sendMail({ to: s.company?.supportEmail || 'getinroute0@gmail.com', subject: `[GetInRoute] Support request from ${req.user.name}`, html: `<p><b>${req.user.name}</b> (${req.user.emp_id}, ${req.user.email}) wrote:</p><p>${String(message).replace(/</g, '&lt;')}</p>` }).catch(() => {});
   res.json({ ok: true, message: 'Sent to support. We will get back to you soon.' });
 }));
 
@@ -4675,7 +4684,7 @@ app.get('/api/support/config', auth, (req, res) => {
   const s = loadSettings();
   res.json({
     helplinePhone: s.sosNumber || s.company?.contactPhone || '',
-    supportEmail: s.company?.supportEmail || 'support@getinroute.in',
+    supportEmail: s.company?.supportEmail || 'getinroute0@gmail.com',
     whatsapp: s.supportWhatsapp || ''
   });
 });
@@ -5668,8 +5677,10 @@ app.put('/api/school/schedules/:id', auth, schoolAdmin, (req, res) => {
 });
 app.delete('/api/school/schedules/:id', auth, schoolAdmin, (req, res) => {
   const { sid } = schoolScope(req);
-  db.prepare("DELETE FROM schedules WHERE id=? AND vertical='school' AND school_id=?").run(req.params.id, sid);
-  res.json({ ok: true });
+  const s = db.prepare("SELECT id FROM schedules WHERE id=? AND vertical='school' AND school_id=?").get(req.params.id, sid);
+  if (!s) return res.status(404).json({ error: 'Not found' });
+  const out = archiveRecords({ table: 'schedules', ids: [s.id], actorId: req.user.id, actorRole: req.user.role, reason: 'school_delete', companyId: req.user.company_id });
+  res.json({ ok: out.ok, archived: out.changed > 0 });
 });
 
 app.get('/api/school/tracking', auth, schoolAdmin, (req, res) => {
@@ -5956,6 +5967,7 @@ if (apkVolumeDir) {
     console.log('[apk-bootstrap] volume=' + apkVolumeDir + ' total=' + fs.readdirSync(apkVolumeDir).join(','));
   } catch (e) { console.error('[apk-bootstrap]', e.message); }
 }
+const APK_BASE_URL = (process.env.APK_BASE_URL || 'https://github.com/cubicleconfessionscc-sudo/getinroute/releases/download/apps-v1').replace(/\/$/, '');
 const binDownload = (res, file, fallback) => {
   const candidates = [];
   if (apkVolumeDir) candidates.push(path.join(apkVolumeDir, file));
@@ -5970,7 +5982,18 @@ const binDownload = (res, file, fallback) => {
       return res.sendFile(p);
     }
   }
-  return res.status(404).json({ error: 'Not found' });
+  // Binaries larger than the deploy upload cap are not bundled in the app image;
+  // serve them from the canonical GitHub Release asset so the download URL still works.
+  http.get(`${APK_BASE_URL}/${encodeURIComponent(file)}`, (up) => {
+    if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); return res.status(404).json({ error: 'Not found' }); }
+    if (file.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    else if (file.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
+    else if (file.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('Content-Length', up.headers['content-length'] || undefined);
+    up.pipe(res);
+  }).on('error', () => res.status(404).json({ error: 'Not found' }));
 };
 app.get('/download/GetInRoute.apk', (req, res) => binDownload(res, 'GetInRoute.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteSchool.apk', (req, res) => binDownload(res, 'GetInRouteSchool.apk', DOWNLOAD_DIR));

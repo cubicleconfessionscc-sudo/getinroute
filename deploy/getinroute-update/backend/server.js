@@ -3659,7 +3659,7 @@ app.post('/api/support/contact', auth, h(async (req, res) => {
   if (!message) return res.status(400).json({ message: 'Message required' });
   const s = loadSettings();
   notify(adminId(), 'Support Request', `${req.user.name} (${req.user.emp_id}): ${String(message).slice(0, 200)}`);
-  sendMail({ to: s.company?.supportEmail || 'support@getinroute.in', subject: `[GetInRoute] Support request from ${req.user.name}`, html: `<p><b>${req.user.name}</b> (${req.user.emp_id}, ${req.user.email}) wrote:</p><p>${String(message).replace(/</g, '&lt;')}</p>` }).catch(() => {});
+  sendMail({ to: s.company?.supportEmail || 'getinroute0@gmail.com', subject: `[GetInRoute] Support request from ${req.user.name}`, html: `<p><b>${req.user.name}</b> (${req.user.emp_id}, ${req.user.email}) wrote:</p><p>${String(message).replace(/</g, '&lt;')}</p>` }).catch(() => {});
   res.json({ ok: true, message: 'Sent to support. We will get back to you soon.' });
 }));
 
@@ -3667,7 +3667,7 @@ app.get('/api/support/config', auth, (req, res) => {
   const s = loadSettings();
   res.json({
     helplinePhone: s.sosNumber || s.company?.contactPhone || '',
-    supportEmail: s.company?.supportEmail || 'support@getinroute.in',
+    supportEmail: s.company?.supportEmail || 'getinroute0@gmail.com',
     whatsapp: s.supportWhatsapp || ''
   });
 });

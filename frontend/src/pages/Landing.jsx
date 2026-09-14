@@ -186,7 +186,7 @@ export default function Landing() {
 
   const mailtoHref = () => {
     const s = encodeURIComponent(`GetInRoute enquiry — ${contactForm.category}${contactForm.name ? ` (${contactForm.name})` : ''}\n${contactForm.message}`);
-    return `mailto:hello@getinroute.in?subject=${encodeURIComponent(contactForm.category)}&body=${s}`;
+    return `mailto:getinroute0@gmail.com?subject=${encodeURIComponent(contactForm.category)}&body=${s}`;
   };
 
   return (
@@ -569,10 +569,10 @@ export default function Landing() {
         <p className="pub-sub">Reach the right team directly — a human reads every message.</p>
         <div className="pub-grid-3">
           {CONTACT_CATEGORIES.map((c, i) => (
-            <a key={i} className="pub-card pub-access" href={`mailto:hello@getinroute.in?subject=${encodeURIComponent(c.subject)}`}>
+            <a key={i} className="pub-card pub-access" href={`mailto:getinroute0@gmail.com?subject=${encodeURIComponent(c.subject)}`}>
               <div className="pub-card-ico ico-indigo">{c.icon}</div>
               <h3>{c.title}</h3>
-              <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>hello@getinroute.in</p>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>getinroute0@gmail.com</p>
             </a>
           ))}
         </div>
@@ -589,7 +589,7 @@ export default function Landing() {
           </div>
           <div className="field" style={{ marginBottom: 12 }}><label>Message</label><textarea rows={4} aria-label="Message" value={contactForm.message} onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })} /></div>
           <a className="btn btn-primary" style={{ justifyContent: 'center' }} href={mailtoHref()}>Request Demo via email</a>
-          <p className="pub-muted-note">Opens your email app addressed to hello@getinroute.in. No fake forms, no lost messages.</p>
+          <p className="pub-muted-note">Opens your email app addressed to getinroute0@gmail.com. No fake forms, no lost messages.</p>
         </div>
       </section>
 

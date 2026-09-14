@@ -166,7 +166,7 @@ t('transportManager verified-data intents', () => {
   const r1 = intel.transportManager('How many vehicles available?', { companyId: 1 });
   if (r1.intent !== 'vehicle_available') throw new Error('intent=' + r1.intent);
   const r2 = intel.transportManager('what is the meaning of life', { companyId: 1 });
-  if (r2.intent !== 'unknown' || !r2.manual_review_required) throw new Error('unknown should be manual');
+  if (r2.intent !== 'unknown' || r2.manual_review_required !== false || r2.source !== 'verified_system_data' || !r2.answer || !r2.answer.data) throw new Error('unknown should return verified snapshot, not manual: ' + JSON.stringify(r2).slice(0, 300));
 });
 t('employeeAssistant renders assignment', () => {
   const r = intel.employeeAssistant('where is my cab', { userId: 2 });

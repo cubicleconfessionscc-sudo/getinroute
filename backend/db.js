@@ -10,7 +10,7 @@ if (USE_PG) {
   // database already has its own settings row; this seed is idempotent and is
   // never touched again afterwards.
   const FRESH_SETTINGS = {
-    company: { name: 'GetinRoute', contactPhone: '', supportEmail: 'support@getinroute.in', domain: '', inviteCode: '' },
+    company: { name: 'GetinRoute', contactPhone: '', supportEmail: 'getinroute0@gmail.com', domain: '', inviteCode: '' },
     vehicleTypes: [
       { label: 'Sedan', slug: 'sedan', seats: 4 },
       { label: 'SUV', slug: 'suv', seats: 6 },
@@ -50,6 +50,19 @@ if (USE_PG) {
   // Idempotent column ensures an already-migrated PG database gets P1.6 columns.
   try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS safety_drop_eligible INTEGER DEFAULT 0;"); } catch (e) {}
+  // Soft-delete/archive columns (idempotent; safe on already-migrated databases).
+  try { pgdb.exec("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE checkins ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE checkins ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE speed_events ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE speed_events ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE safety_alerts ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE safety_alerts ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE trip_events ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE trip_events ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));
@@ -133,7 +146,9 @@ CREATE TABLE IF NOT EXISTS schedules (
   sequence INTEGER,
   status TEXT DEFAULT 'scheduled',
   approved INTEGER DEFAULT 1,
-  created_at TEXT DEFAULT (datetime('now','localtime'))
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  archived_at TEXT,
+  archived_by INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS checkins (
@@ -143,7 +158,9 @@ CREATE TABLE IF NOT EXISTS checkins (
   type TEXT CHECK (type IN ('checkin','checkout')),
   lat REAL,
   lng REAL,
-  time TEXT DEFAULT (datetime('now','localtime'))
+  time TEXT DEFAULT (datetime('now','localtime')),
+  archived_at TEXT,
+  archived_by INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS feedback (
@@ -174,7 +191,9 @@ CREATE TABLE IF NOT EXISTS speed_events (
   speed_limit REAL,
   lat REAL,
   lng REAL,
-  created_at TEXT DEFAULT (datetime('now','localtime'))
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  archived_at TEXT,
+  archived_by INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS parking_events (
@@ -323,7 +342,7 @@ CREATE TABLE IF NOT EXISTS nodal_points (
 `);
 
 const DEFAULT_SETTINGS = {
-  company: { name: 'GetinRoute', contactPhone: '', supportEmail: 'support@getinroute.in', domain: '', inviteCode: '' },
+  company: { name: 'GetinRoute', contactPhone: '', supportEmail: 'getinroute0@gmail.com', domain: '', inviteCode: '' },
   vehicleTypes: [
     { label: 'Sedan', slug: 'sedan', seats: 4 },
     { label: 'SUV', slug: 'suv', seats: 6 },
@@ -600,6 +619,21 @@ try { db.exec(`ALTER TABLE address_updates ADD COLUMN pickup_radius REAL;`); } c
 try { db.exec(`ALTER TABLE schedules ADD COLUMN missed_email_sent INTEGER DEFAULT 0;`); } catch (e) {}
 try { db.exec(`ALTER TABLE schedules ADD COLUMN missed_email_type TEXT;`); } catch (e) {}
 
+// Soft-delete/archive columns (retention + audit friendly soft deletes so
+// historical attendance/trip/safety/GPS records stay readable by AI + reports).
+try { db.exec(`ALTER TABLE schedules ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE schedules ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE checkins ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE checkins ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE speed_events ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE speed_events ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE safety_alerts ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE safety_alerts ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE trip_events ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE trip_events ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE location_history ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE location_history ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+
 // Realtime GPS usage + health monitoring (adaptive ping, stale detection, and
 // usage counter vs the free-tier message budget). All added additively.
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN connected INTEGER DEFAULT 0;`); } catch (e) {}
@@ -669,7 +703,9 @@ db.exec(`
     lng REAL NOT NULL,
     speed REAL DEFAULT 0,
     source TEXT DEFAULT 'gps',
-    created_at TEXT DEFAULT (datetime('now','localtime'))
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    archived_at TEXT,
+    archived_by INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_location_history_subject ON location_history(subject, subject_id, id);
 `);
@@ -723,7 +759,9 @@ db.exec(`
     resolved_at TEXT,
     resolved_by INTEGER,
     resolved_by_role TEXT,
-    action TEXT
+    action TEXT,
+    archived_at TEXT,
+    archived_by INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_safety_alerts_status ON safety_alerts(status, created_at);
   CREATE INDEX IF NOT EXISTS idx_safety_alerts_schedule ON safety_alerts(schedule_id);
@@ -742,7 +780,9 @@ db.exec(`
     date TEXT,
     kind TEXT NOT NULL,
     meta TEXT,
-    created_at TEXT DEFAULT (datetime('now','localtime'))
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    archived_at TEXT,
+    archived_by INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_trip_events_schedule ON trip_events(schedule_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_trip_events_kind ON trip_events(kind, created_at);

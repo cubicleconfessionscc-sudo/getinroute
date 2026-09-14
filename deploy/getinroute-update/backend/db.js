@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS nodal_points (
 `);
 
 const DEFAULT_SETTINGS = {
-  company: { name: 'GetinRoute', contactPhone: '', supportEmail: 'support@getinroute.in', domain: '', inviteCode: '' },
+  company: { name: 'GetinRoute', contactPhone: '', supportEmail: 'getinroute0@gmail.com', domain: '', inviteCode: '' },
   vehicleTypes: [
     { label: 'Sedan', slug: 'sedan', seats: 4 },
     { label: 'SUV', slug: 'suv', seats: 6 },

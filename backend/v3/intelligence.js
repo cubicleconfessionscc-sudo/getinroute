@@ -220,58 +220,289 @@ function anomalyScan(companyId, date) {
 }
 
 /* ---------------- AI TRANSPORT MANAGER (V3 §26) ---------------- */
-// Natural-language questions → verified-data intents. Never hallucinates.
-function transportManager(question, { companyId }) {
-  const q = String(question || '').toLowerCase();
-  const has = (t) => q.includes(t);
+// Natural-language questions → verified-data intents. Read-only, parameterized,
+// tenant-scoped (company_id when available). Never hallucinates: every number is
+// computed from real DB records or explicitly marked as estimate.
+const MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+function monthRange(label) {
+  // label: 'YYYY-MM' → { from: 'YYYY-MM-01', to: today or month end }
+  const nowD = now().slice(0, 10);
+  const ym = String(label || '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(ym)) return { from: ym + '-01', to: nowD };
+  return { from: `${ym}-01`, to: nowD.slice(0, 7) === ym ? nowD : `${ym}-${new Date(Number(ym.slice(0,4)), Number(ym.slice(5,7)), 0).getDate()}` };
+}
+
+function tenantScope(scope, alias = 'u') {
+  return scope != null ? {
+    sql: ` AND (${alias}.company_id IS ? OR ? IS NULL)`,
+    params: [scope, scope]
+  } : { sql: '', params: [] };
+}
+
+// Attendance: distinct employees with a scheduled trip vs distinct employees who checked in.
+function attendanceReport({ scope, from, to, mode = 'day' }) {
+  const t = tenantScope(scope, 'u');
+  const scheduled = db.prepare(`SELECT COUNT(DISTINCT s.employee_id) AS n FROM schedules s
+    JOIN users u ON u.id = s.employee_id
+    WHERE s.date >= ? AND s.date <= ? AND s.status NOT IN ('cancelled')${t.sql}`)
+    .get(from, to, ...t.params).n || 0;
+  const checkedIn = db.prepare(`SELECT COUNT(DISTINCT c.user_id) AS n FROM checkins c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.type = 'checkin' AND c.schedule_date >= ? AND c.schedule_date <= ?${t.sql}`)
+    .get(from, to, ...t.params).n || 0;
+  const absent = db.prepare(`SELECT s.employee_id, u.name AS emp_name, s.date FROM schedules s
+    JOIN users u ON u.id = s.employee_id
+    LEFT JOIN checkins c ON c.schedule_id = s.id AND c.type = 'checkin'
+    WHERE s.date >= ? AND s.date <= ? AND s.status NOT IN ('cancelled') AND c.id IS NULL${t.sql}
+    ORDER BY s.date DESC LIMIT 8`)
+    .all(from, to, ...t.params).map((r) => ({ employee: r.emp_name, date: r.date }));
+  const pct = scheduled > 0 ? Math.round((checkedIn / scheduled) * 100) : 0;
+  return {
+    what: `${mode === 'day' ? 'Today' : 'Selected period'} attendance: ${pct}% (${checkedIn} of ${scheduled} scheduled employee${scheduled === 1 ? '' : 's'})`,
+    why: 'Computed from verified schedules and check-in records',
+    data: { scheduled, checked_in: checkedIn, attendance_pct: pct, missed: absent.length, recent_misses: absent.slice(0, 5) },
+    confidence: { base: scheduled ? 94 : 40, sufficient: !!(scheduled || checkedIn) },
+    action: 'Open Attendance / Trips for details'
+  };
+}
+
+// On-time / punctuality: check-ins after the scheduled pickup (or login) slot.
+function lateReport({ scope, date }) {
+  const t = tenantScope(scope, 'u');
+  const d = date || now().slice(0, 10);
+  const late = db.prepare(`SELECT c.id, u.name AS emp_name, c.time AS checked_in,
+      s.login_time, s.pickup_time, s.route_id
+    FROM checkins c
+    JOIN schedules s ON s.id = c.schedule_id
+    JOIN users u ON u.id = c.user_id
+    WHERE c.type = 'checkin' AND substr(c.time, 1, 10) = ?${t.sql}
+      AND ((s.login_time IS NOT NULL AND substr(c.time, 12, 5) > substr(s.login_time, 1, 5))
+        OR (s.login_time IS NULL AND s.pickup_time IS NOT NULL AND substr(c.time, 12, 5) > substr(s.pickup_time, 1, 5)))
+    ORDER BY c.time DESC LIMIT 10`).all(d, ...t.params);
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM checkins c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.type = 'checkin' AND substr(c.time, 1, 10) = ?${t.sql}`).get(d, ...t.params).n || 0;
+  return {
+    what: `${late.length} late check-in${late.length === 1 ? '' : 's'} on ${d} (of ${total} total check-ins)`,
+    why: 'Compared check-in timestamps against each employee\'s scheduled login/pickup slot',
+    data: { total_check_ins: total, late: late.map((r) => ({ employee: r.emp_name, checked_in: r.checked_in, expected: r.login_time || r.pickup_time })) },
+    confidence: { base: total ? 92 : 35, sufficient: !!total },
+    action: 'Open Attendance page for the roster'
+  };
+}
+
+// No-shows from the persisted enforcement log.
+function noShowReport({ scope, from, to }) {
+  const t = tenantScope(scope, 'l');
+  const rows = db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT employee_id) AS employees FROM employee_no_show_log l
+    WHERE l.date >= ? AND l.date <= ?${t.sql}`).get(from, to, ...t.params);
+  const top = db.prepare(`SELECT l.employee_id, u.name AS emp_name, u.department, COUNT(*) AS n
+    FROM employee_no_show_log l
+    JOIN users u ON u.id = l.employee_id
+    WHERE l.date >= ? AND l.date <= ?${t.sql}
+    GROUP BY l.employee_id, u.name, u.department ORDER BY n DESC LIMIT 5`).all(from, to, ...t.params);
+  const n = rows.n || 0;
+  return {
+    what: `${n} no-show${n === 1 ? '' : 's'} recorded (${rows.employees || 0} employee${(rows.employees || 0) === 1 ? '' : 's'})`,
+    why: 'From the persisted no-show log maintained by the admin/no-show sweep',
+    data: { total: n, employees: rows.employees || 0, top: top.map((r) => ({ employee: r.emp_name, department: r.department, count: r.n })) },
+    confidence: { base: n ? 96 : 60, sufficient: true },
+    action: 'Open Employees → No-shows for the drill-down'
+  };
+}
+
+// Month-end style summary: trips, attendance, punctuality, no-shows, fleet usage.
+function monthSummary({ scope, ym }) {
+  const { from, to } = monthRange(ym);
+  if (from > to) return { what: 'No data for that month.', why: null, data: {}, confidence: { base: 0, sufficient: false }, action: 'Ask for a different month' };
+  const t = tenantScope(scope, 'u');
+  const trips = db.prepare(`SELECT COUNT(*) AS total,
+      SUM(CASE WHEN s.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN s.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN s.status NOT IN ('cancelled','completed') THEN 1 ELSE 0 END) AS active
+    FROM schedules s JOIN users u ON u.id = s.employee_id
+    WHERE s.date >= ? AND s.date <= ?${t.sql}`).get(from, to, ...t.params);
+  const attend = attendanceReport({ scope, from, to, mode: 'month' });
+  const noshow = noShowReport({ scope, from, to });
+  const employees = db.prepare(`SELECT COUNT(*) AS n FROM users u WHERE u.role = 'employee' AND u.status = 'active'${t.sql}`).get(...t.params).n || 0;
+  const vehicles = db.prepare(`SELECT COUNT(*) AS n FROM vehicles WHERE vertical = 'company'`).get().n || 0;
+  return {
+    what: `Summary for ${ym}: ${trips.total || 0} trips (${trips.completed || 0} completed, ${trips.cancelled || 0} cancelled), attendance ${attend.data.attendance_pct}%, ${noshow.data.total} no-show${noshow.data.total === 1 ? '' : 's'}`,
+    why: 'Aggregated from verified schedules, check-ins, and the no-show log',
+    data: {
+      period: { from, to }, trips: trips.total || 0, completed: trips.completed || 0, cancelled: trips.cancelled || 0, active: trips.active || 0,
+      employees, vehicles_used: vehicles, attendance_pct: attend.data.attendance_pct, no_shows: noshow.data.total, top_no_shows: noshow.data.top
+    },
+    confidence: { base: (trips.total || 0) + (attend.data.checked_in || 0) ? 94 : 40, sufficient: !!((trips.total || 0) || attend.data.scheduled) },
+    action: 'Open Reports for the detailed breakdown'
+  };
+}
+
+// Single-employee profile: attendance, no-shows, suspensions, recent trips.
+function employeeProfile({ scope, userId, from, to, name }) {
+  const ts = tenantScope(scope, 'u');
+  const emp = userId
+    ? db.prepare(`SELECT id, name, emp_id, role, department, designation, status FROM users WHERE id = ? AND role = 'employee'`).get(userId)
+    : (db.prepare(`SELECT id, name, emp_id, role, department, designation, status FROM users WHERE role = 'employee' AND (emp_id = ? OR name = ?)${ts.sql} LIMIT 1`).get(name || '', name || '', ...ts.params)
+      || db.prepare(`SELECT id, name, emp_id, role, department, designation, status FROM users WHERE role = 'employee' AND name LIKE ?${ts.sql} LIMIT 1`).get(`%${name || ''}%`, ...ts.params));
+  if (!emp) return { what: `No verified employee matches "${name || userId || ''}".`, why: null, data: null, confidence: { base: 0, sufficient: false }, action: 'Check the employee ID or name and try again' };
+  const t = tenantScope(scope, 'u');
+  const daysScheduled = db.prepare(`SELECT COUNT(DISTINCT s.date) AS n FROM schedules s JOIN users u ON u.id = s.employee_id
+    WHERE s.employee_id = ? AND s.date >= ? AND s.date <= ? AND s.status NOT IN ('cancelled')${t.sql}`).get(emp.id, from, to, ...t.params).n || 0;
+  const daysChecked = db.prepare(`SELECT COUNT(DISTINCT c.schedule_date) AS n FROM checkins c WHERE c.user_id = ? AND c.type = 'checkin' AND c.schedule_date >= ? AND c.schedule_date <= ?`).get(emp.id, from, to).n || 0;
+  const noshows = db.prepare(`SELECT COUNT(*) AS n FROM employee_no_show_log WHERE employee_id = ? AND date >= ? AND date <= ?`).get(emp.id, from, to).n || 0;
+  const suspension = db.prepare(`SELECT status, reason, no_show_count, threshold FROM employee_suspensions WHERE employee_id = ? ORDER BY id DESC LIMIT 1`).get(emp.id) || null;
+  const recent = db.prepare(`SELECT s.id, s.date, s.status, s.pickup_time, s.drop_time, v.plate FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id
+    WHERE s.employee_id = ? AND s.status NOT IN ('cancelled') ORDER BY s.date DESC, s.id DESC LIMIT 5`).all(emp.id);
+  const pct = daysScheduled > 0 ? Math.round((daysChecked / daysScheduled) * 100) : 0;
+  return {
+    what: `${emp.name} (${emp.emp_id || emp.id}): ${pct}% attendance this month (${daysChecked} of ${daysScheduled} scheduled day${daysScheduled === 1 ? '' : 's'}), ${noshows} no-show${noshows === 1 ? '' : 's'}`,
+    why: 'From that employee\'s verified schedules, check-ins, and no-show log',
+    data: {
+      employee: { name: emp.name, emp_id: emp.emp_id, department: emp.department, designation: emp.designation, status: emp.status },
+      attendance_pct: pct, days_scheduled: daysScheduled, days_checked_in: daysChecked, no_shows: noshows,
+      suspension: suspension ? { status: suspension.status, reason: suspension.reason, no_show_count: suspension.no_show_count, threshold: suspension.threshold } : null,
+      recent_trips: recent.map((r) => ({ date: r.date, status: r.status, pickup_time: r.pickup_time, drop_time: r.drop_time, vehicle: r.plate }))
+    },
+    confidence: { base: daysScheduled || daysChecked ? 93 : 50, sufficient: !!daysScheduled || !!daysChecked },
+    action: 'Open the employee profile screen'
+  };
+}
+
+function transportManager(question, { companyId, userRole } = {}) {
+  const q = String(question || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const has = (...ts) => ts.some((t) => q.includes(t));
   const nowDate = now();
   const today = nowDate.slice(0, 10);
+  const ym = today.slice(0, 7);
+  const scope = companyId || null;
+  const { from } = monthRange(ym);
+  const data = (intent, answer) => ({
+    question, intent,
+    answer: { what: answer.what, why: answer.why || null, data: answer.data || null, confidence: answer.confidence || { base: 0, sufficient: false }, action: answer.action || 'Manual review' },
+    manual_review_required: !(answer.confidence && answer.confidence.sufficient), source: 'verified_system_data'
+  });
 
-  const intent = has('delay') ? 'delay' : has('vehicle') && (has('available') || has('free') || has('idle')) ? 'vehicle_available'
-    : has('driver') && (has('available') || has('who')) ? 'driver_available'
-    : has('safety') || has('alert') || has('sos') ? 'safety'
-    : has('trip') || has('route') ? 'trip_status'
-    : has('capacity') || has('waste') ? 'capacity'
-    : has('consolidat') ? 'consolidation'
-    : 'unknown';
+  // Month keyword → YYYY-MM for summary intents.
+  let targetYm = ym;
+  const monthWord = MONTHS.find((m) => q.includes(m));
+  if (monthWord) {
+    const idx = MONTHS.indexOf(monthWord) + 1;
+    const m = String(idx).padStart(2, '0');
+    targetYm = `${today.slice(0, 4)}-${m}`;
+    if (`${targetYm}-xx` > `${ym}-01`) targetYm = ym; // future month → default to current
+  }
 
-  function data(answer) {
-    return { question, intent, answer, manual_review_required: !answer.confidence.base, source: 'verified_system_data' };
+  // Employee lookup: match a real user token (name or emp id) in the question.
+  if (has('who is') || has('how is') || has('employee', 'person', 'profile', 'reliab')) {
+    const tokens = q.split(/[^a-z0-9.-]+/).filter((t) => t.length >= 3 && !['who','how','the','this','that','with','from','show','trip','trips','status','today','month','what','when','where','many','about','you','your','his','her','their','and','his','her','are','for','was','were','has','have'].includes(t));
+    let found = null;
+    for (const tok of tokens) {
+      const ts = tenantScope(scope, 'u');
+      const r = db.prepare(`SELECT u.id FROM users u WHERE u.role = 'employee' AND (u.emp_id = ? OR LOWER(u.name) = ?)${ts.sql} LIMIT 1`).get(tok, tok, ...ts.params)
+        || (tok.length >= 4 ? db.prepare(`SELECT u.id FROM users u WHERE u.role = 'employee' AND LOWER(u.name) LIKE ?${ts.sql} LIMIT 1`).get(`%${tok}%`, ...ts.params) : null);
+      if (r) { found = r.id; break; }
+    }
+    if (found) {
+      const prof = employeeProfile({ scope, userId: found, from, to: today, name: null });
+      return data('employee', prof);
+    }
+    if (has('who is') || has('how is')) {
+      return data('employee', { what: `No verified employee matches the name in your question.`, why: 'Searched the employee roster (name or employee ID) against the records', data: { searched: tokens.slice(0, 5) }, confidence: { base: 60, sufficient: true }, action: 'Confirm the spelling or employee ID and ask again' });
+    }
   }
-  switch (intent) {
-    case 'delay': {
-      const r = db.prepare(`SELECT COUNT(*) AS n FROM schedules WHERE date = ? AND status NOT IN ('cancelled','completed')`).get(today);
-      const delayed = db.prepare(`SELECT id, route_id, employee_id, pickup_time, drop_time FROM schedules WHERE date = ? AND status NOT IN ('cancelled') LIMIT 10`).all(today);
-      return data({ what: `Delayed/active trips today: ${r.n || 0}`, why: 'From verified schedule statuses', data: { active: r.n || 0, sample: delayed.length }, confidence: { base: 90, sufficient: true }, action: 'Open live tracking for details' });
-    }
-    case 'vehicle_available': {
-      const ids = db.prepare(`SELECT id FROM vehicles WHERE status = 'idle' AND vertical = 'company'`).all().map((r) => r.id);
-      return data({ what: `${ids.length} available vehicle(s)`, why: 'From the fleet status table', data: { ids }, confidence: { base: 95, sufficient: true }, action: 'Open vehicles page' });
-    }
-    case 'driver_available': {
-      const n = db.prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'driver' AND status = 'active' AND approved = 1 AND (company_id IS ? OR company_id IS NULL)`).get(companyId || null).n || 0;
-      return data({ what: `${n} active driver(s)`, why: 'From the users table (driver role, active status)', data: { n }, confidence: { base: 95, sufficient: true }, action: 'Open drivers page' });
-    }
-    case 'safety': {
-      const scan = safetyScan(companyId, today);
-      return data({ what: `${scan.count} open safety event(s) today`, why: 'Composite of SOS, overspeed, heartbeats, safety alerts', data: scan.events.slice(0, 5), confidence: { base: 95, sufficient: true }, action: 'Open Emergency/Safety console' });
-    }
-    case 'trip_status': {
-      const n = db.prepare(`SELECT status, COUNT(*) AS n FROM schedules WHERE date = ? GROUP BY status`).all(today);
-      return data({ what: 'Trip status summary for today', why: 'Grouped by verified schedule status', data: n, confidence: { base: 95, sufficient: true }, action: 'Open trips page' });
-    }
-    case 'capacity': {
-      const v = db.prepare(`SELECT AVG(capacity) AS avg_cap, COUNT(*) AS n FROM vehicles WHERE vertical = 'company'`).get();
-      const occ = db.prepare(`SELECT AVG(cnt) AS avg_occ FROM (SELECT vehicle_id, COUNT(*) cnt FROM schedules WHERE date = ? AND status NOT IN ('cancelled') GROUP BY vehicle_id)`).get(today);
-      return data({ what: `Average fleet capacity ${v.avg_cap ? Math.round(v.avg_cap) : 'n/a'} vs average occupancy ${occ.avg_occ ? Math.round(occ.avg_occ) : 'n/a'}`, why: 'From vehicle capacity and schedule occupancy', data: { avg_capacity: v.avg_cap, avg_occupancy: occ.avg_occ, vehicles: v.n }, confidence: { base: v.n ? 85 : 40, sufficient: !!v.n }, action: 'Review utilization in reports' });
-    }
-    case 'consolidation': {
-      const r = db.prepare(`SELECT route_id, COUNT(*) AS n FROM schedules WHERE date = ? AND status NOT IN ('cancelled') AND route_id IS NOT NULL GROUP BY route_id ORDER BY n ASC LIMIT 5`).all(today);
-      return data({ what: `${r.length} low-demand route(s) today — candidates for consolidation`, why: 'By per-route schedule counts', data: r, confidence: { base: r.length ? 80 : 40, sufficient: r.length > 0 }, action: 'Route intelligence review (manual approval required)' });
-    }
-    default:
-      return { question, intent: 'unknown', answer: { what: "I don't have enough verified data to answer this.", why: null, data: null, confidence: { base: 0, sufficient: false }, action: 'Manual review' }, manual_review_required: true, source: 'verified_system_data' };
+
+  // No-shows.
+  if (has('no-show', 'no show', 'missed', 'didn', 'did not show') || (has('absent') && has('many', 'who', 'count', 'how many'))) {
+    return data('no_show', noShowReport({ scope, from, to: today }));
   }
+
+  // Attendance / who came.
+  if (has('attend', 'on-time', 'on time', 'punctual', 'who came', 'present', 'came in')) {
+    if (monthWord || has('this month', 'monthly', 'last month')) {
+      const r = monthSummary({ scope, ym: targetYm });
+      r.data = r.data || {}; r.data.attendance_pct = attendanceReport({ scope, from, to: today, mode: 'day' }).data.attendance_pct; return data('attendance', r);
+    }
+    return data('attendance', attendanceReport({ scope, from: today, to: today, mode: 'day' }));
+  }
+
+  // Late / punctuality.
+  if (has('late', 'late arrivals')) {
+    return data('late', lateReport({ scope, date: has('yesterday') ? (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })() : today }));
+  }
+
+  // Month-end summary / report.
+  if (monthWord || has('summary', 'this month', 'monthly', 'report', 'overview', 'trend', 'stats', 'statistics')) {
+    return data('month_summary', monthSummary({ scope, ym: targetYm }));
+  }
+
+  // Delays (kept as the operational "idle/on-route delays" view).
+  if (has('delay')) {
+    const r = db.prepare(`SELECT COUNT(*) AS n FROM schedules WHERE date = ? AND status NOT IN ('cancelled','completed')`).get(today);
+    const delayed = db.prepare(`SELECT id, route_id, employee_id, pickup_time, drop_time FROM schedules WHERE date = ? AND status NOT IN ('cancelled') ORDER BY pickup_time ASC LIMIT 8`).all(today);
+    return data('delay', { what: `Active/pending trips today: ${r.n || 0}`, why: 'From verified schedule statuses', data: { active: r.n || 0, sample: delayed.map((x) => ({ schedule_id: x.id, route_id: x.route_id, pickup: x.pickup_time, drop: x.drop_time })) }, confidence: { base: 90, sufficient: true }, action: 'Open live tracking for details' });
+  }
+
+  // Cost / spend.
+  if (has('cost', 'spend', 'fuel', 'expense', 'budget', 'billing')) {
+    const c = costIntelligence(scope, 30);
+    return data('cost', { what: c.estimates.trips ? `Fleet cost view: ${c.estimates.trips} completed trips across ${c.estimates.vehicles} vehicles` : 'No completed trips to analyze costs from yet', why: c.reason, data: c.estimates, confidence: { base: c.score, sufficient: c.score >= 60 }, action: 'Open Billing / Reports' });
+  }
+
+  // Vehicles available.
+  if (has('vehicle', 'vehicles', 'fleet', 'cab', 'cabs') && (has('available') || has('free') || has('idle'))) {
+    const rows = db.prepare(`SELECT id, plate, capacity, driver_name, vehicle_name FROM vehicles WHERE status = 'idle' AND vertical = 'company' ORDER BY capacity DESC LIMIT 10`).all();
+    return data('vehicle_available', { what: `${rows.length} available vehicle${rows.length === 1 ? '' : 's'} (${rows.reduce((a, v) => a + (v.capacity || 0), 0)} total seats)`, why: 'From the fleet status table (state = idle, company vertical)', data: { count: rows.length, total_seats: rows.reduce((a, v) => a + (v.capacity || 0), 0), vehicles: rows.map((v) => ({ id: v.id, plate: v.plate, capacity: v.capacity, driver: v.driver_name })) }, confidence: { base: 95, sufficient: true }, action: 'Open Vehicles page' });
+  }
+
+  // Drivers available.
+  if (has('driver') && (has('available') || has('who') || has('how many') || has('active'))) {
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'driver' AND status = 'active' AND approved = 1${tenantScope(scope, 'u').sql}`).get(...tenantScope(scope, 'u').params).n || 0;
+    return data('driver_available', { what: `${n} active driver${n === 1 ? '' : 's'} ${scope != null ? '' : 'across the deployment'}`, why: 'From the users table (driver role, active + approved)', data: { n }, confidence: { base: 95, sufficient: true }, action: 'Open Drivers page' });
+  }
+
+  // Safety / SOS / alerts.
+  if (has('safety') || has('alert') || has('sos') || has('emergency')) {
+    const scan = safetyScan(scope, today);
+    return data('safety', { what: `${scan.count} open safety event${scan.count === 1 ? '' : 's'} (${scan.events.filter((e) => e.severity === 'high').length} high severity)`, why: 'Composite of SOS, overspeed, driver heartbeats, and safety alerts', data: scan.events.slice(0, 5), confidence: { base: 95, sufficient: true }, action: 'Open Emergency/Safety console' });
+  }
+
+  // Trip / route status.
+  if (has('trip') || has('route') || has('schedule')) {
+    const n = db.prepare(`SELECT s.status, COUNT(*) AS n FROM schedules s WHERE s.date = ? GROUP BY s.status ORDER BY n DESC`).all(today);
+    return data('trip_status', { what: 'Trip status summary for today', why: 'Grouped by verified schedule status', data: n, confidence: { base: 95, sufficient: true }, action: 'Open Trips page' });
+  }
+
+  // Capacity / occupancy.
+  if (has('capacity') || has('waste') || has('utiliz')) {
+    const v = db.prepare(`SELECT AVG(capacity) AS avg_cap, COUNT(*) AS n FROM vehicles WHERE vertical = 'company'`).get();
+    const occ = db.prepare(`SELECT AVG(cnt) AS avg_occ FROM (SELECT vehicle_id, COUNT(*) cnt FROM schedules WHERE date = ? AND status NOT IN ('cancelled') GROUP BY vehicle_id)`).get(today);
+    return data('capacity', { what: `Average fleet capacity ${v.avg_cap ? Math.round(v.avg_cap) : 'n/a'} vs average occupancy ${occ.avg_occ ? Math.round(occ.avg_occ) : 'n/a'}`, why: 'From vehicle capacity and schedule occupancy', data: { avg_capacity: v.avg_cap, avg_occupancy: occ.avg_occ, vehicles: v.n }, confidence: { base: v.n ? 85 : 40, sufficient: !!v.n }, action: 'Review utilization in reports' });
+  }
+
+  // Consolidation candidates.
+  if (has('consolidat')) {
+    const r = db.prepare(`SELECT route_id, COUNT(*) AS n FROM schedules WHERE date = ? AND status NOT IN ('cancelled') AND route_id IS NOT NULL GROUP BY route_id ORDER BY n ASC LIMIT 5`).all(today);
+    return data('consolidation', { what: `${r.length} low-demand route${r.length === 1 ? '' : 's'} today — candidates for consolidation`, why: 'By per-route schedule counts', data: r, confidence: { base: r.length ? 80 : 40, sufficient: r.length > 0 }, action: 'Route intelligence review (manual approval required)' });
+  }
+
+  // Default: never claim zero data for known tables. Give a verified opening summary.
+  const t = tenantScope(scope, 'u');
+  const quick = {
+    trips_today: db.prepare(`SELECT COUNT(*) AS n FROM schedules WHERE date = ? AND status NOT IN ('cancelled')`).get(today).n || 0,
+    drivers_active: db.prepare(`SELECT COUNT(*) AS n FROM users u WHERE u.role = 'driver' AND u.status = 'active' AND u.approved = 1${t.sql}`).get(...t.params).n || 0,
+    vehicles: db.prepare(`SELECT COUNT(*) AS n FROM vehicles WHERE vertical = 'company'`).get().n || 0,
+    open_safety: safetyScan(scope, today).count
+  };
+  const att = attendanceReport({ scope, from: today, to: today, mode: 'day' });
+  return data('unknown', {
+    what: `Current verified snapshot — ${quick.trips_today} trip${quick.trips_today === 1 ? '' : 's'} today, ${quick.drivers_active} active driver${quick.drivers_active === 1 ? '' : 's'}, ${quick.vehicles} vehicle${quick.vehicles === 1 ? '' : 's'}, attendance ${att.data.attendance_pct}%, ${quick.open_safety} open safety event${quick.open_safety === 1 ? '' : 's'}.`,
+    why: 'Unrecognized question — returning a verified operational snapshot instead of guessing',
+    data: quick,
+    confidence: { base: 88, sufficient: true },
+    action: 'Rephrase as attendance, no-shows, delays, vehicles, drivers, safety, costs, or a monthly summary'
+  });
 }
 
 /* ---------------- EMPLOYEE AI ASSISTANT (V3 §28) ---------------- */

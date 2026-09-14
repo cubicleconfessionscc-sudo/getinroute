@@ -12,7 +12,7 @@ import { colors, radius, spacing, font } from "../theme";
 //   - Refresh configuration (clear local config and retry)
 // Errors are always logged before this screen renders.
 export default function StartupRecoveryScreen({ stage, error, onRetry, onContinueOffline, supportEmail }) {
-  const email = supportEmail || "support@getinroute.in";
+  const email = supportEmail || "getinroute0@gmail.com";
 
   const openMail = () => {
     Linking.openURL(`mailto:${email}?subject=GetInRoute%20startup%20help&body=${encodeURIComponent(error || "")}`).catch(() => {});

@@ -13,13 +13,14 @@ const ops = require('./ops');
 const events = require('./events');
 const incidents = require('./incidents');
 const automation = require('./automation');
+const archive = require('./archive');
 
 function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   /* --- schema bootstrap (idempotent) --- */
   ensureSchema(db);
   ensureDefaults(db);
   core.setDb(db); sub.setDb(db); location.setDb(db); intelligence.setDb(db); billing.setDb(db); ops.setDb(db);
-  incidents.setDb(db); automation.setDb(db); events.setDb(db);
+  incidents.setDb(db); automation.setDb(db); events.setDb(db); archive.setDb(db);
 
   events.on('*', (payload, ctx) => {
     const outcome = automation.evaluateRules({ id: ctx.id, type: ctx.type, companyId: ctx.tenantId, payload });
@@ -105,14 +106,29 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.post('/ai/safety', auth, (req, res) => res.json(intelligence.safetyScan(req.user && req.user.company_id, req.body.date)));
   R.post('/ai/cost', auth, (req, res) => res.json(intelligence.costIntelligence(req.user && req.user.company_id, req.body.days)));
   R.post('/ai/anomaly', auth, (req, res) => res.json(intelligence.anomalyScan(req.user && req.user.company_id, req.body.date)));
-  R.post('/ai/transport-manager', auth, (req, res) => {
-    const result = intelligence.transportManager(req.body.question, { companyId: req.user && req.user.company_id });
-    core.audit({ company_id: req.user && req.user.company_id, actor_id: req.user.id, actor_role: req.user.role, action: 'ai:transport_manager_query', category: 'ai', new_value: { question: req.body.question, intent: result.intent } });
+  R.post('/ai/transport-manager', auth, role('admin', 'owner', 'vendor'), (req, res) => {
+    const question = String(((req.body || {}).question || '').trim()).slice(0, 500);
+    if (!question) return res.status(400).json({ error: 'question required' });
+    const result = intelligence.transportManager(question, { companyId: req.user && req.user.company_id, userRole: req.user.role });
+    core.audit({ company_id: req.user && req.user.company_id, actor_id: req.user.id, actor_role: req.user.role, action: 'ai:transport_manager_query', category: 'ai', new_value: { question, intent: result.intent } });
     res.json(result);
   });
   R.post('/ai/employee-assistant', auth, (req, res) => res.json(intelligence.employeeAssistant(req.body.question, { userId: req.user.id })));
   R.post('/ai/simulate', auth, role('admin','owner'), (req, res) => res.json(intelligence.simulate(req.body || {})));
   R.post('/ai/approve/:recId', auth, role('admin','owner'), (req, res) => res.json(core.approve(req.params.recId, req.user.id, req.user.role, req.body.decision || 'APPROVED', req.body.reason)));
+
+  /* ---- ARCHIVE / SOFT-DELETE (retention-safe) ---- */
+  R.get('/archive/:table', auth, role('admin', 'owner'), (req, res) => {
+    res.json(archive.listArchived({ table: req.params.table, limit: req.query.limit, offset: req.query.offset }));
+  });
+  R.post('/archive/:table', auth, role('admin', 'owner'), (req, res) => {
+    const out = archive.archiveRecords({ table: req.params.table, ids: (req.body || {}).ids, actorId: req.user.id, actorRole: req.user.role, reason: (req.body || {}).reason, companyId: req.user.company_id });
+    res.status(out.ok ? 200 : 400).json(out);
+  });
+  R.post('/archive/:table/restore', auth, role('admin', 'owner'), (req, res) => {
+    const out = archive.unarchiveRecords({ table: req.params.table, ids: (req.body || {}).ids, actorId: req.user.id, actorRole: req.user.role, reason: (req.body || {}).reason });
+    res.status(out.ok ? 200 : 400).json(out);
+  });
 
   /* ---- DOCUMENTS ---- */
   R.get('/documents/:kind/:ownerId', auth, (req, res) => res.json(ops.listDocuments(req.params.kind, req.params.ownerId)));

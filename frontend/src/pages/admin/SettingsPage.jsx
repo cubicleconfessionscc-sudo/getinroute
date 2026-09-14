@@ -171,9 +171,9 @@ export default function SettingsPage() {
           <div style={{ display: 'grid', gap: 8 }}>
             {lt.map((t, i) => (
               <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 90px 32px', gap: 6, alignItems: 'center' }}>
-                <input defaultValue={t?.label || ''} onBlur={(e) => changeSlot('loginTimes', lt)(i, 'label', e.target.value)} placeholder="Morning" style={{ fontSize: 13 }} />
-                <input type="time" defaultValue={t?.time || ''} onBlur={(e) => changeSlot('loginTimes', lt)(i, 'time', e.target.value)} style={{ fontSize: 13 }} />
-                <input type="number" min={0} defaultValue={t?.cutoffMinutes ?? 120} onBlur={(e) => changeSlot('loginTimes', lt)(i, 'cutoffMinutes', Number(e.target.value))} title="Booking cutoff (minutes before)" style={{ fontSize: 13 }} />
+                <input defaultValue={t?.label || ''} onBlur={(e) => changeSlot('loginTimes', lt)(i, 'label', e.target.value)} placeholder="Morning" style={{ fontSize: 15 }} />
+                <input type="time" defaultValue={t?.time || ''} onBlur={(e) => changeSlot('loginTimes', lt)(i, 'time', e.target.value)} style={{ fontSize: 15 }} />
+                <input type="number" min={0} defaultValue={t?.cutoffMinutes ?? 120} onBlur={(e) => changeSlot('loginTimes', lt)(i, 'cutoffMinutes', Number(e.target.value))} title="Booking cutoff (minutes before)" style={{ fontSize: 15 }} />
                 <button className="btn btn-sm btn-ghost" onClick={() => removeSlot('loginTimes', lt)(i)} title="Remove slot"><X size={14} /></button>
               </div>
             ))}
@@ -189,9 +189,9 @@ export default function SettingsPage() {
           <div style={{ display: 'grid', gap: 8 }}>
             {ot.map((t, i) => (
               <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 90px 32px', gap: 6, alignItems: 'center' }}>
-                <input defaultValue={t?.label || ''} onBlur={(e) => changeSlot('logoutTimes', ot)(i, 'label', e.target.value)} placeholder="Evening" style={{ fontSize: 13 }} />
-                <input type="time" defaultValue={t?.time || ''} onBlur={(e) => changeSlot('logoutTimes', ot)(i, 'time', e.target.value)} style={{ fontSize: 13 }} />
-                <input type="number" min={0} defaultValue={t?.cutoffMinutes ?? 120} onBlur={(e) => changeSlot('logoutTimes', ot)(i, 'cutoffMinutes', Number(e.target.value))} title="Booking cutoff (minutes before)" style={{ fontSize: 13 }} />
+                <input defaultValue={t?.label || ''} onBlur={(e) => changeSlot('logoutTimes', ot)(i, 'label', e.target.value)} placeholder="Evening" style={{ fontSize: 15 }} />
+                <input type="time" defaultValue={t?.time || ''} onBlur={(e) => changeSlot('logoutTimes', ot)(i, 'time', e.target.value)} style={{ fontSize: 15 }} />
+                <input type="number" min={0} defaultValue={t?.cutoffMinutes ?? 120} onBlur={(e) => changeSlot('logoutTimes', ot)(i, 'cutoffMinutes', Number(e.target.value))} title="Booking cutoff (minutes before)" style={{ fontSize: 15 }} />
                 <button className="btn btn-sm btn-ghost" onClick={() => removeSlot('logoutTimes', ot)(i)} title="Remove slot"><X size={14} /></button>
               </div>
             ))}
@@ -228,15 +228,15 @@ export default function SettingsPage() {
               <input placeholder="Type name (e.g. Sedan)" value={v.label || ''} onChange={(e) => {
                 const next = vt.map((x, idx) => idx === i ? { ...x, label: e.target.value } : x);
                 setS((prev) => ({ ...prev, vehicleTypes: next }));
-              }} onBlur={() => update({ vehicleTypes: vt })} style={{ fontSize: 13 }} />
+              }} onBlur={() => update({ vehicleTypes: vt })} style={{ fontSize: 15 }} />
               <input placeholder="Vendor name (optional)" value={v.vendor || ''} onChange={(e) => {
                 const next = vt.map((x, idx) => idx === i ? { ...x, vendor: e.target.value } : x);
                 setS((prev) => ({ ...prev, vehicleTypes: next }));
-              }} onBlur={() => update({ vehicleTypes: vt })} style={{ fontSize: 13 }} />
+              }} onBlur={() => update({ vehicleTypes: vt })} style={{ fontSize: 15 }} />
               <input type="number" placeholder="Seats" value={v.seats ?? 4} onChange={(e) => {
                 const next = vt.map((x, idx) => idx === i ? { ...x, seats: Number(e.target.value) } : x);
                 setS((prev) => ({ ...prev, vehicleTypes: next }));
-              }} onBlur={() => update({ vehicleTypes: vt })} style={{ fontSize: 13 }} />
+              }} onBlur={() => update({ vehicleTypes: vt })} style={{ fontSize: 15 }} />
               <button className="btn btn-sm btn-ghost" title="Remove type" onClick={() => {
                 const next = vt.filter((_, idx) => idx !== i);
                 setS((prev) => ({ ...prev, vehicleTypes: next }));
@@ -310,7 +310,7 @@ export default function SettingsPage() {
           </span>
         </Field>
         <Field label="Eligible employees">
-          <a href="/admin/employees" style={{ fontSize: 13, color: 'var(--primary)' }}>Open Employees → mark "safety drop eligible" per employee →</a>
+          <a href="/admin/employees" style={{ fontSize: 15, fontWeight: 600, color: 'var(--primary)' }}>Open Employees → mark "safety drop eligible" per employee →</a>
         </Field>
       </Section>
 
@@ -342,7 +342,7 @@ export default function SettingsPage() {
               <div key={np._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#f8fafc', borderRadius: 10, border: '1px solid var(--line)' }}>
                 <MapPin size={16} color="#4f46e5" />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{np.label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>{np.label}</div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {np.address || `${np.lat}, ${np.lng}`}
                     {np.radiusMeters ? ` · ${np.radiusMeters}m radius` : ''}
@@ -408,7 +408,7 @@ export default function SettingsPage() {
             <span className="hint">Remind idle drivers to update their status after this interval.</span>
           </Field>
           <Field label="Check-in method">
-            <select defaultValue={s.checkInMethod || 'swipe'} onChange={(e) => update({ checkInMethod: e.target.value })} style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--line)', borderRadius: 8, fontSize: 13 }}>
+            <select defaultValue={s.checkInMethod || 'swipe'} onChange={(e) => update({ checkInMethod: e.target.value })} style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--line)', borderRadius: 8, fontSize: 15 }}>
               <option value="swipe">Swipe</option>
               <option value="otp">OTP</option>
               <option value="both">Both (OTP fallback)</option>
@@ -474,7 +474,7 @@ function Section({ icon, title, children, action }) {
     <div style={{ marginBottom: 28 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <div style={{ color: '#4f46e5' }}>{icon}</div>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', margin: 0 }}>{title}</h3>
+        <h3 style={{ fontSize: 17, fontWeight: 700, color: '#1e293b', margin: 0 }}>{title}</h3>
         {action && <div style={{ marginLeft: 'auto' }}>{action}</div>}
       </div>
       <div style={{ background: '#fff', border: '1px solid var(--border, #e2e8f0)', borderRadius: 10, padding: '12px 16px' }}>
@@ -487,7 +487,7 @@ function Section({ icon, title, children, action }) {
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4, color: '#334155' }}>{label}</label>
+      <label style={{ display: 'block', fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#334155' }}>{label}</label>
       {children}
       {React.Children.toArray(children).find((c) => c?.props?.className === 'hint')}
     </div>
