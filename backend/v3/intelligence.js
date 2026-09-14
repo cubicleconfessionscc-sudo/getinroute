@@ -75,7 +75,7 @@ function vehicleAllocation({ routeId, date, companyId }) {
 function backupVehicle(primaryVehicleId) {
   const v = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(primaryVehicleId);
   if (!v) return { result: null, reason: 'Primary vehicle not found' };
-  const backup = db.prepare(`SELECT * FROM vehicles WHERE status = 'idle' AND route_id IS NOT ? AND (v.capacity >= ? OR v.capacity IS NULL) AND id != ? ORDER BY capacity ASC LIMIT 1`)
+  const backup = db.prepare(`SELECT * FROM vehicles v WHERE v.status = 'idle' AND (v.route_id IS NULL OR v.route_id != ?) AND (v.capacity >= ? OR v.capacity IS NULL) AND v.id != ? ORDER BY v.capacity ASC LIMIT 1`)
     .get(v.route_id, v.capacity || 0, primaryVehicleId);
   const c = conf({
     score: backup ? 0.85 : 0.3,
@@ -178,7 +178,7 @@ function safetyScan(companyId, date) {
   const events = [];
   const overspeed = db.prepare(`SELECT * FROM speed_events WHERE date(created_at) = date('now','localtime') ORDER BY created_at DESC LIMIT 50`).all();
   events.push(...overspeed.map((e) => ({ kind: 'overspeed', vehicle_id: e.vehicle_id, speed: e.speed, limit: e.speed_limit, when: e.created_at, severity: e.speed - e.speed_limit > 15 ? 'high' : 'medium' })));
-  const sos = db.prepare(`SELECT * FROM sos_events WHERE status = 'open' AND school_id IS ? ORDER BY created_at DESC LIMIT 50`).all(null);
+  const sos = db.prepare(`SELECT * FROM sos_events WHERE status = 'open' AND school_id IS NULL ORDER BY created_at DESC LIMIT 50`).all();
   events.push(...sos.map((e) => ({ kind: 'sos', student_id: e.student_id, vehicle_id: e.vehicle_id, when: e.created_at, severity: 'high' })));
   const offline = db.prepare(`SELECT * FROM driver_heartbeats WHERE connected = 0 AND created_at > ? ORDER BY last_ping ASC LIMIT 50`).all(now());
   events.push(...offline.map((e) => ({ kind: 'gps_offline', driver_id: e.user_id, when: e.last_ping, severity: 'medium' })));
@@ -235,7 +235,7 @@ function monthRange(label) {
 
 function tenantScope(scope, alias = 'u') {
   return scope != null ? {
-    sql: ` AND (${alias}.company_id IS ? OR ? IS NULL)`,
+    sql: ` AND (? IS NULL OR ${alias}.company_id = ?)`,
     params: [scope, scope]
   } : { sql: '', params: [] };
 }

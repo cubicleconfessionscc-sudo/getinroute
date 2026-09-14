@@ -165,10 +165,13 @@ function translateDateDialect(sql) {
   out = out.replace(/datetime\('now','localtime'\)/g, 'log_now()');
   out = out.replace(/datetime\('now'\)/g, 'log_now()');
   out = out.replace(/date\('now','localtime',\s*'-(\d+)\s+(days?)'\)/g, "to_char((now() AT TIME ZONE app_tz()) - interval '$1 $2', 'YYYY-MM-DD')");
+  out = out.replace(/date\('now','localtime',\s*\?\)/g, "to_char((now() AT TIME ZONE app_tz()) + (?)::interval, 'YYYY-MM-DD')");
   out = out.replace(/date\('now','localtime'\)/g, 'log_today()');
   out = out.replace(/date\('now'\)/g, 'log_today()');
   out = out.replace(/\bdate\(([A-Za-z_][A-Za-z0-9_]*\.\w+)\)/g, 'left($1, 10)');
   out = out.replace(/\bdate\(([A-Za-z_][A-Za-z0-9_]*)\)/g, 'left($1, 10)');
+  out = out.replace(/date\(\s*\?\s*\)/g, 'left(?, 10)');
+  out = out.replace(/julianday\(\s*([^()]*?)\s*\)/g, "(extract(epoch from to_timestamp($1, 'YYYY-MM-DD HH24:MI:SS'))/86400.0)");
   out = out.replace(/time\('now','localtime'\)/g, "(now() AT TIME ZONE app_tz())::time");
   out = out.replace(/\btime\(([^()]*)\)/g, '(($1)::time)');
   out = out.replace(/\blast_insert_rowid\(\)/g, 'lastval()::bigint');
@@ -334,3 +337,4 @@ function splitStatements(sql) {
 }
 
 module.exports = db_pg;
+module.exports.preparePGLite = preparePGLite;

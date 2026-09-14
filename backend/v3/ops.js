@@ -105,7 +105,7 @@ function report(companyId, kind) {
     case 'safety':
       return { rows: db.prepare(`SELECT v.plate, sp.speed, sp.speed_limit, sp.lat, sp.lng, sp.created_at FROM speed_events sp LEFT JOIN vehicles v ON v.id = sp.vehicle_id ORDER BY sp.id DESC LIMIT 200`).all() };
     case 'financial':
-      return { rows: db.prepare('SELECT * FROM billing_records WHERE (company_id IS ? OR ? IS NULL) ORDER BY id DESC LIMIT 200').all(companyId || null, companyId || null) };
+      return { rows: db.prepare('SELECT * FROM billing_records WHERE (? IS NULL OR company_id = ?) ORDER BY id DESC LIMIT 200').all(companyId || null, companyId || null) };
     default:
       return { rows: [] };
   }
@@ -139,15 +139,15 @@ function globalSearch(q, { companyId, role } = {}) {
     try { push(category, fn()); } catch (e) { if (process.env.DEBUG_GLOBAL_SEARCH) console.error(`[search:${category}]`, e.message); }
   };
   if (["admin", "owner"].includes(role)) {
-    run("employees", () => db.prepare("SELECT id, name, email, emp_id, phone FROM users WHERE role='employee' AND (company_id IS ? OR ? IS NULL) AND (name LIKE ? OR email LIKE ? OR emp_id LIKE ?) LIMIT 10").all(companyId || null, companyId || null, like, like, like));
-    run("drivers",   () => db.prepare("SELECT id, name, email, phone FROM users WHERE role='driver' AND (company_id IS ? OR ? IS NULL) AND (name LIKE ? OR email LIKE ?) LIMIT 10").all(companyId || null, companyId || null, like, like));
+    run("employees", () => db.prepare("SELECT id, name, email, emp_id, phone FROM users WHERE role='employee' AND (? IS NULL OR company_id = ?) AND (name LIKE ? OR email LIKE ? OR emp_id LIKE ?) LIMIT 10").all(companyId || null, companyId || null, like, like, like));
+    run("drivers",   () => db.prepare("SELECT id, name, email, phone FROM users WHERE role='driver' AND (? IS NULL OR company_id = ?) AND (name LIKE ? OR email LIKE ?) LIMIT 10").all(companyId || null, companyId || null, like, like));
     run("vehicles",  () => db.prepare("SELECT id, vehicle_name, plate, type FROM vehicles WHERE vertical='company' AND (vehicle_name LIKE ? OR plate LIKE ?) LIMIT 10").all(like, like));
     run("routes",    () => db.prepare("SELECT id, name FROM routes WHERE vertical='company' AND name LIKE ? LIMIT 10").all(like));
     run("vendors",   () => db.prepare("SELECT id, name, phone FROM vendors WHERE (name LIKE ? OR phone LIKE ?) LIMIT 10").all(like, like));
   }
   run("trips", () => db.prepare("SELECT s.id, s.date, s.status, s.route_id, v.vehicle_name, v.plate FROM schedules s LEFT JOIN vehicles v ON v.id=s.vehicle_id WHERE (s.date >= date('now','localtime')) AND (s.route_id IN (SELECT id FROM routes WHERE vertical='company')) AND (s.status LIKE ? OR v.vehicle_name LIKE ? OR v.plate LIKE ?) LIMIT 10")
     .all(like, like, like));
-  run("incidents", () => db.prepare("SELECT id, kind, severity, status, priority_score FROM operational_incidents WHERE (company_id IS ? OR ? IS NULL) AND (kind LIKE ? OR status LIKE ?) ORDER BY priority_score DESC LIMIT 10").all(companyId || null, companyId || null, like, like));
+  run("incidents", () => db.prepare("SELECT id, kind, severity, status, priority_score FROM operational_incidents WHERE (? IS NULL OR company_id = ?) AND (kind LIKE ? OR status LIKE ?) ORDER BY priority_score DESC LIMIT 10").all(companyId || null, companyId || null, like, like));
   run("tickets", () => db.prepare("SELECT id, subject, status FROM tickets WHERE (subject LIKE ? OR description LIKE ?) ORDER BY id DESC LIMIT 10").all(like, like));
   return { kinds: [...new Set(results.map((r) => r.category))], rows: results };
 }
@@ -172,7 +172,7 @@ function dailyBrief(companyId) {
   const today = (new Date()).toISOString().slice(0, 10);
   const riskRoutes = db.prepare("SELECT r.id, r.name, COUNT(s.id) AS active FROM routes r JOIN schedules s ON s.route_id=r.id WHERE s.date=? AND s.status='confirmed' AND r.vertical='company' GROUP BY r.id HAVING active > 0 LIMIT 10").all(today);
   const vehiclesDown = db.prepare("SELECT COUNT(*) AS n FROM vehicles WHERE status != 'active' AND vertical='company'").get();
-  const openIncidents = db.prepare("SELECT COUNT(*) AS n FROM operational_incidents WHERE status NOT IN ('resolved','reviewed') AND (company_id IS ? OR ? IS NULL)").get(companyId || null, companyId || null);
+  const openIncidents = db.prepare("SELECT COUNT(*) AS n FROM operational_incidents WHERE status NOT IN ('resolved','reviewed') AND (? IS NULL OR company_id = ?)").get(companyId || null, companyId || null);
   const overdueDocs = db.prepare("SELECT COUNT(*) AS n FROM vehicle_documents WHERE expiry_date < date('now','localtime')").get();
   const alerts = db.prepare("SELECT COUNT(*) AS n FROM safety_alerts WHERE status='open' AND date(created_at)=date('now','localtime')").get();
   const summary = [];

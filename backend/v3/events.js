@@ -109,7 +109,7 @@ function deserialize(r) {
 
 function recentEvents(tenantId, limit = 100, since = null) {
   if (!_db) return [];
-  let q = "SELECT * FROM operational_events WHERE (tenant_id IS ? OR ? IS NULL)";
+  let q = "SELECT * FROM operational_events WHERE (? IS NULL OR tenant_id = ?)";
   const args = [tenantId || null, tenantId || null];
   if (since) { q += " AND created_at > ?"; args.push(since); }
   q += " ORDER BY id DESC LIMIT ?";
@@ -120,7 +120,7 @@ function recentEvents(tenantId, limit = 100, since = null) {
 function eventStats(tenantId) {
   if (!_db) return {};
   const tid = tenantId || null;
-  const rows = _db.prepare("SELECT type, status, COUNT(*) AS n FROM operational_events WHERE (tenant_id IS ? OR ? IS NULL) AND created_at > datetime('now','localtime','-24 hours') GROUP BY type, status")
+  const rows = _db.prepare("SELECT type, status, COUNT(*) AS n FROM operational_events WHERE (? IS NULL OR tenant_id = ?) AND created_at > datetime('now','localtime','-24 hours') GROUP BY type, status")
     .all(tid, tid);
   const counts = {};
   for (const r of rows) {

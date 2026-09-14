@@ -64,7 +64,7 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
 
   /* ---- POLICIES ---- */
   R.get('/policies', auth, role('admin'), (req, res) => {
-    res.json(db.prepare('SELECT * FROM policy_rules WHERE (company_id IS ? OR ? IS NULL) ORDER BY vertical, rule_key')
+    res.json(db.prepare('SELECT * FROM policy_rules WHERE (? IS NULL OR company_id = ?) ORDER BY vertical, rule_key')
       .all(req.query.company_id || null, req.query.company_id || null));
   });
   R.put('/policies', auth, role('admin'), (req, res) => {
@@ -137,7 +137,7 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.post('/documents/:kind/:docId/verify', auth, (req, res) => res.json(ops.verifyDocument(req.params.kind, req.params.docId, req.user.id, req.body.decision, req.body.reason)));
 
   /* ---- BILLING ---- */
-  R.get('/billing/rates', auth, (req, res) => res.json(db.prepare('SELECT * FROM billing_rates WHERE (company_id IS ? OR ? IS NULL) ORDER BY rate_key').all(req.query.company_id || null, req.query.company_id || null)));
+  R.get('/billing/rates', auth, (req, res) => res.json(db.prepare('SELECT * FROM billing_rates WHERE (? IS NULL OR company_id = ?) ORDER BY rate_key').all(req.query.company_id || null, req.query.company_id || null)));
   R.put('/billing/rates', auth, role('admin'), (req, res) => { billing.upsertRate(req.body); res.json({ ok: true }); });
   R.post('/billing/record', auth, role('admin'), (req, res) => res.json(billing.createRecord({ ...req.body, createdBy: req.user && req.user.id })));
   R.post('/billing/invoice', auth, role('admin'), (req, res) => res.json(billing.generateInvoice({ ...req.body, createdBy: req.user && req.user.id })));
@@ -149,7 +149,7 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.get('/audit/logs', auth, (req, res) => {
     const ucId = req.user && req.user.company_id || null;
     const cat = req.query.category || null;
-    res.json(db.prepare('SELECT * FROM audit_logs WHERE (company_id IS ? OR ? IS NULL) AND (category IS ? OR ? IS NULL) ORDER BY id DESC LIMIT 200')
+    res.json(db.prepare('SELECT * FROM audit_logs WHERE (? IS NULL OR company_id = ?) AND (? IS NULL OR category = ?) ORDER BY id DESC LIMIT 200')
       .all(ucId, ucId, cat, cat));
   });
 
@@ -194,7 +194,7 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.put('/automation/rules', auth, role('admin','owner'), (req, res) => res.json(automation.upsertRule({ ...req.body, owner_id: req.user && req.user.id, owner_role: req.user && req.user.role })));
   R.post('/automation/rules/:id/toggle', auth, role('admin','owner'), (req, res) => res.json(automation.toggleRule(req.params.id, req.body.enabled)));
   R.get('/automation/executions', auth, (req, res) => {
-    const rows = db.prepare('SELECT * FROM automation_executions WHERE (company_id IS ? OR ? IS NULL) ORDER BY id DESC LIMIT 100')
+    const rows = db.prepare('SELECT * FROM automation_executions WHERE (? IS NULL OR company_id = ?) ORDER BY id DESC LIMIT 100')
       .all(req.user && req.user.company_id || null, req.user && req.user.company_id || null);
     res.json(rows);
   });
