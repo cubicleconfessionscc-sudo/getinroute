@@ -27,22 +27,27 @@ for (const d of srcDirs) {
 for (const f of ['server.js', 'db.js', 'pgdb.js']) files.push(path.join(ROOT, f));
 
 const idiom = /\bIS\s+(NOT\s+)?\?/i;
+// A bare `? IS NULL` binds a placeholder whose type can never be inferred by
+// PostgreSQL ("could not determine data type of parameter $n"). Any null-guard
+// must anchor the param, e.g. `(? || '') IS NULL`.
+const bareNull = /\?\s+IS\s+NULL/i;
 let statics = [];
 for (const f of files) {
   const src = fs.readFileSync(f, 'utf8');
-  let i = 0;
   // only look inside string literals; cheap line-based report is enough
   src.split('\n').forEach((ln, n) => {
     const m = idiom.exec(ln);
     if (m) statics.push(`${path.relative(ROOT, f)}:${n + 1}: ${ln.trim().slice(0, 120)}`);
+    const m2 = bareNull.exec(ln);
+    if (m2) statics.push(`${path.relative(ROOT, f)}:${n + 1} (bare ? IS NULL): ${ln.trim().slice(0, 120)}`);
   });
 }
 if (statics.length) {
   bad += statics.length;
-  console.log(FAIL, 'static IS ? idiom');
+  console.log(FAIL, 'static idiom');
   for (const s of statics) console.log('  ', s);
 } else {
-  console.log('static ok   no `IS ?` / `IS NOT ?` idioms anywhere');
+  console.log('static ok   no `IS ?`, `IS NOT ?` or bare `? IS NULL` anywhere');
 }
 
 // ---------- translation + pg-mem parse sweep ----------

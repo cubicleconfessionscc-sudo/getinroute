@@ -59,7 +59,7 @@ function createRecord({ companyId, vendorId, scheduleId, vehicleId, recordType =
 }
 
 function generateInvoice({ companyId, vendorId, periodStart, periodEnd, createdBy }) {
-  const records = db.prepare(`SELECT * FROM billing_records WHERE company_id = ? AND status = 'DRAFT' AND (? IS NULL OR vendor_id = ?) AND trip_date >= ? AND trip_date <= ?`).all(companyId, vendorId || null, vendorId || null, periodStart, periodEnd);
+  const records = db.prepare(`SELECT * FROM billing_records WHERE company_id = ? AND status = 'DRAFT' AND ((? || '') IS NULL OR vendor_id = ?) AND trip_date >= ? AND trip_date <= ?`).all(companyId, vendorId || null, vendorId || null, periodStart, periodEnd);
   if (!records.length) return { ok: false, error: 'No draft billing records in period' };
   const gross = records.reduce((a, r) => a + r.gross_amount, 0);
   const tax = records.reduce((a, r) => a + r.tax, 0);
@@ -98,9 +98,9 @@ function reconcile({ invoiceId, paymentDate, amount, verifiedBy, notes }) {
 
 function list({ companyId, kind = 'records', vendorId, from, to }) {
   if (kind === 'invoices') {
-    return db.prepare('SELECT * FROM billing_invoices WHERE company_id = ? AND (? IS NULL OR vendor_id = ?) ORDER BY id DESC LIMIT 200').all(companyId, vendorId || null, vendorId || null);
+    return db.prepare('SELECT * FROM billing_invoices WHERE company_id = ? AND ((? || \'\') IS NULL OR vendor_id = ?) ORDER BY id DESC LIMIT 200').all(companyId, vendorId || null, vendorId || null);
   }
-  return db.prepare('SELECT * FROM billing_records WHERE company_id = ? AND (? IS NULL OR vendor_id = ?) AND (trip_date >= ? OR ? = \'\') AND (trip_date <= ? OR ? = \'\') ORDER BY id DESC LIMIT 500').all(
+  return db.prepare('SELECT * FROM billing_records WHERE company_id = ? AND ((? || \'\') IS NULL OR vendor_id = ?) AND (trip_date >= ? OR ? = \'\') AND (trip_date <= ? OR ? = \'\') ORDER BY id DESC LIMIT 500').all(
     companyId, vendorId || null, vendorId || null, from || '', from || '', to || '', to || '');
 }
 

@@ -72,7 +72,7 @@ const DEFAULT_POLICIES = {
 };
 
 function getPolicy(companyId, vertical, key) {
-  let v = db.prepare('SELECT value, rule_type FROM policy_rules WHERE (company_id = ? OR (company_id IS NULL AND ? IS NULL)) AND vertical = ? AND rule_key = ? AND enabled = 1')
+  let v = db.prepare('SELECT value, rule_type FROM policy_rules WHERE (company_id = ? OR (company_id IS NULL AND (? || \'\') IS NULL)) AND vertical = ? AND rule_key = ? AND enabled = 1')
     .get(companyId || null, companyId || null, vertical || 'company', key);
   if (!v) v = db.prepare('SELECT value, rule_type FROM policy_rules WHERE company_id IS NULL AND vertical = ? AND rule_key = ? AND enabled = 1')
     .get(vertical || 'company', key);

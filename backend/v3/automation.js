@@ -9,7 +9,7 @@ function setDb(db) { _db = db; }
 
 function listRules(companyId) {
   if (!_db) return [];
-  return _db.prepare("SELECT * FROM automation_rules WHERE (? IS NULL OR company_id = ?) ORDER BY event_type, name")
+  return _db.prepare("SELECT * FROM automation_rules WHERE ((? || '') IS NULL OR company_id = ?) ORDER BY event_type, name")
     .all(companyId || null, companyId || null);
 }
 

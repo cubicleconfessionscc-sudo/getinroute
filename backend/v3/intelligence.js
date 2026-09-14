@@ -235,7 +235,7 @@ function monthRange(label) {
 
 function tenantScope(scope, alias = 'u') {
   return scope != null ? {
-    sql: ` AND (? IS NULL OR ${alias}.company_id = ?)`,
+    sql: ` AND ((? || '') IS NULL OR ${alias}.company_id = ?)`,
     params: [scope, scope]
   } : { sql: '', params: [] };
 }

@@ -81,7 +81,7 @@ function getIncident(id) {
 
 function listIncidents({ companyId, status, since, limit = 100 } = {}) {
   if (!_db) return [];
-  let q = "SELECT * FROM operational_incidents WHERE (? IS NULL OR company_id = ?) AND (? IS NULL OR status = ?)";
+  let q = "SELECT * FROM operational_incidents WHERE ((? || '') IS NULL OR company_id = ?) AND ((? || '') IS NULL OR status = ?)";
   const args = [companyId || null, companyId || null, status || null, status || null];
   if (since) { q += " AND created_at > ?"; args.push(since); }
   q += " ORDER BY priority_score DESC, id DESC LIMIT ?";
@@ -92,7 +92,7 @@ function listIncidents({ companyId, status, since, limit = 100 } = {}) {
 function incidentStats(companyId) {
   if (!_db) return {};
   const cid = companyId || null;
-  const rows = _db.prepare("SELECT status, COUNT(*) AS n, AVG(priority_score) AS avgScore FROM operational_incidents WHERE (? IS NULL OR company_id = ?) AND created_at > datetime('now','localtime','-24 hours') GROUP BY status").all(cid, cid);
+  const rows = _db.prepare("SELECT status, COUNT(*) AS n, AVG(priority_score) AS avgScore FROM operational_incidents WHERE ((? || '') IS NULL OR company_id = ?) AND created_at > datetime('now','localtime','-24 hours') GROUP BY status").all(cid, cid);
   const out = {};
   for (const r of rows) out[r.status] = { count: r.n, avgScore: Math.round(r.avgScore || 0) };
   return out;
