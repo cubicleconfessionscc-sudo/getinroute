@@ -388,6 +388,38 @@ CREATE TABLE IF NOT EXISTS employee_suspensions (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_susp_emp ON employee_suspensions(employee_id, status);
+
+/* ---- Announcements (Admin-only publishing; targeted Employee/Driver/School/Both) ---- */
+CREATE TABLE IF NOT EXISTS announcements (
+  ${COLS.idSQL},
+  company_id INTEGER,
+  audience TEXT NOT NULL DEFAULT 'both',
+  title TEXT NOT NULL,
+  body TEXT,
+  image_url TEXT,
+  starts_at TEXT,
+  expires_at TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ann_scope ON announcements(company_id, enabled, starts_at, expires_at);
+
+/* ---- Roster Auto-Run (per-company daily regeneration of schedules from routes) ---- */
+CREATE TABLE IF NOT EXISTS roster_auto_runs (
+  ${COLS.idSQL},
+  company_id INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0,
+  default_pickup TEXT,
+  default_drop TEXT,
+  directions TEXT DEFAULT '["toOffice","toHome"]',
+  last_run_date TEXT,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT,
+  UNIQUE (company_id)
+);
 `;
 
 const DDL_PG = `
@@ -770,11 +802,55 @@ CREATE TABLE IF NOT EXISTS employee_suspensions (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_susp_emp ON employee_suspensions(employee_id, status);
+
+/* ---- Announcements (Admin-only publishing; targeted Employee/Driver/School/Both) ---- */
+CREATE TABLE IF NOT EXISTS announcements (
+  ${COLS.idPG},
+  company_id BIGINT,
+  audience TEXT NOT NULL DEFAULT 'both',
+  title TEXT NOT NULL,
+  body TEXT,
+  image_url TEXT,
+  starts_at TEXT,
+  expires_at TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by BIGINT,
+  created_at TEXT DEFAULT log_now(),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ann_scope ON announcements(company_id, enabled, starts_at, expires_at);
+
+/* ---- Roster Auto-Run (per-company daily regeneration of schedules from routes) ---- */
+CREATE TABLE IF NOT EXISTS roster_auto_runs (
+  ${COLS.idPG},
+  company_id BIGINT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0,
+  default_pickup TEXT,
+  default_drop TEXT,
+  directions TEXT DEFAULT '["toOffice","toHome"]',
+  last_run_date TEXT,
+  created_by BIGINT,
+  created_at TEXT DEFAULT log_now(),
+  updated_at TEXT,
+  UNIQUE (company_id)
+);
 `;
 
 function ensureSchema(db) {
   const pg = !!process.env.DATABASE_URL;
   db.exec(pg ? DDL_PG : DDL_SQLITE);
+  // Idempotent column migrations shared by both engines.
+  const addCol = (table, colDef) => {
+    try { db.exec(pg ? `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${colDef}` : `ALTER TABLE ${table} ADD COLUMN ${colDef}`); } catch (e) {}
+  };
+  addCol('users', 'parking_line TEXT');
+  addCol('users', 'stand_selected TEXT');
+  addCol('route_employees', 'pickup_seq INTEGER');
+  addCol('route_employees', 'drop_seq INTEGER');
+  addCol('schedules', 'auto_generated INTEGER DEFAULT 0');
+  addCol('operational_events', 'acknowledged_at TEXT');
+  addCol('operational_events', 'dismissed_by BIGINT');
+  addCol('routes', 'auto_managed INTEGER DEFAULT 0');
 }
 
 /* Idempotent boot defaults: platform config singleton, feature flags, default plan */

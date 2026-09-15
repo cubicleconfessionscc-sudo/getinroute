@@ -87,7 +87,8 @@ function extractSqlStatements(src, name) {
 
 let all = [];
 for (const f of ['v3/ops.js', 'v3/intelligence.js', 'v3/index.js', 'v3/incidents.js', 'v3/events.js',
-  'v3/billing.js', 'v3/automation.js', 'v3/core.js', 'v3/archive.js', 'server.js', 'db.js', 'pgdb.js']) {
+  'v3/billing.js', 'v3/automation.js', 'v3/core.js', 'v3/archive.js', 'v3/announcements.js', 'v3/smartroutes.js',
+  'server.js', 'db.js', 'pgdb.js']) {
   all = all.concat(extractSqlStatements(fs.readFileSync(path.join(ROOT, f), 'utf8'), f));
 }
 

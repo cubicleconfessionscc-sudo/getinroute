@@ -104,7 +104,20 @@ function publishRecent(io) {
 
 function deserialize(r) {
   let payload; try { payload = JSON.parse(r.payload || "{}"); } catch (_) { payload = {}; }
-  return { id: r.id, type: r.type, tenantType: r.tenant_type, tenantId: r.tenant_id, payload, created: r.created_at };
+  return { id: r.id, type: r.type, tenantType: r.tenant_type, tenantId: r.tenant_id, payload, created: r.created_at, acknowledged_at: r.acknowledged_at, dismissed_by: r.dismissed_by };
+}
+
+/* Command Center dismiss (Item 8): marks an event dismissed for the operator
+   WITHOUT deleting it, so the audit trail, executions and incident links stay
+   intact. Called only for processed/dead events, never pending work. */
+function dismiss(id, actorId) {
+  if (!_db) return { ok: false, error: "no db" };
+  const row = _db.prepare("SELECT * FROM operational_events WHERE id = ?").get(id);
+  if (!row) throw Object.assign(new Error("Event not found"), { status: 404 });
+  if (row.status === "pending") return { ok: false, error: "event_pending" };
+  _db.prepare("UPDATE operational_events SET acknowledged_at = COALESCE(acknowledged_at, datetime('now','localtime')), dismissed_by = ? WHERE id = ?")
+    .run(actorId || null, id);
+  return { ok: true, id };
 }
 
 function recentEvents(tenantId, limit = 100, since = null) {
@@ -172,4 +185,4 @@ function emitDirect(type, payload, opts = {}) {
 function getDb() { return _db; }
 function getSubs() { return _subs; }
 
-module.exports = { setDb, on, emitDb, emitDirect, drain, markDone, markFail, startWorker, startDetection, recentEvents, eventStats, getDb, getSubs, deserialize };
+module.exports = { setDb, on, emitDb, emitDirect, drain, markDone, markFail, dismiss, startWorker, startDetection, recentEvents, eventStats, getDb, getSubs, deserialize };

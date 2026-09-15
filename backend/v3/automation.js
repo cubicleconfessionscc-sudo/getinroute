@@ -97,4 +97,18 @@ function evaluateRules(event) {
   return results;
 }
 
-module.exports = { setDb, listRules, upsertRule, toggleRule, evaluateRules, matchConditions, applyActions };
+/* Manual "Run Now" (Item 8): evaluates a rule against a synthetic event
+   regardless of its enabled flag, then returns executions. Never auto-enables. */
+function runRuleNow(id, { eventType = "manual_run", payload = {} } = {}) {
+  if (!_db) return { ok: false, error: "no db" };
+  const rule = _db.prepare("SELECT * FROM automation_rules WHERE id = ?").get(id);
+  if (!rule) throw Object.assign(new Error("Rule not found"), { status: 404 });
+  if (rule.level >= 4 && (payload || {}).safetyOverride) return { ok: false, skipped: "safety_override" };
+  const outcome = applyActions(rule, { type: eventType, payload: payload || {} }, { companyId: rule.company_id });
+  _db.prepare("INSERT INTO automation_executions (rule_id,event_id,company_id,triggered_by,outcome,detail,created_at) VALUES (?,?,?,?,?,?,datetime('now','localtime'))")
+    .run(rule.id, null, rule.company_id, "manual_run", "executed", JSON.stringify(outcome));
+  _db.prepare("UPDATE automation_rules SET run_count=run_count+1, last_run=datetime('now','localtime') WHERE id=?").run(rule.id);
+  return { ok: true, ruleId: rule.id, outcome };
+}
+
+module.exports = { setDb, listRules, upsertRule, toggleRule, evaluateRules, matchConditions, applyActions, runRuleNow };

@@ -373,6 +373,8 @@ function employeeProfile({ scope, userId, from, to, name }) {
 function transportManager(question, { companyId, userRole } = {}) {
   const q = String(question || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const has = (...ts) => ts.some((t) => q.includes(t));
+  const words = new Set(q.split(/[^a-z0-9]+/).filter(Boolean));
+  const hasWord = (...ws) => ws.some((w) => words.has(w));
   const nowDate = now();
   const today = nowDate.slice(0, 10);
   const ym = today.slice(0, 7);
@@ -383,6 +385,18 @@ function transportManager(question, { companyId, userRole } = {}) {
     answer: { what: answer.what, why: answer.why || null, data: answer.data || null, confidence: answer.confidence || { base: 0, sufficient: false }, action: answer.action || 'Manual review' },
     manual_review_required: !(answer.confidence && answer.confidence.sufficient), source: 'verified_system_data'
   });
+
+  // Conversational greetings / help / thanks (Item 7). Word-boundary matching
+  // so "hi" never fires inside words like "vehicle S".
+  if (has('good morning', 'good afternoon', 'good evening') || hasWord('hi', 'hello', 'hey', 'howdy')) {
+    return data('greeting', { what: `Hello! I'm the Transport Manager. I can answer from your verified records: today's trips, attendance, no-shows, delays, active drivers & vehicles, available fleet, driver/employee profiles, safety events, costs, and monthly summaries. What would you like to check first?`, why: 'Conversational greeting intent', data: { greeting: true }, confidence: { base: 98, sufficient: true }, action: 'Ask e.g. "How many trips today?"' });
+  }
+  if (has('help', 'what can you do', 'capabil', 'how do you work', 'what do you know', 'what are you')) {
+    return data('help', { what: 'I only answer from verified system data (no guesses): trips/status today, attendance & punctuality, no-show analysis, delays, active drivers & vehicles, available fleet, per-employee profiles, safety/SOS events, costs, and monthly summaries. I will never invent numbers or modify data — high-confidence suggestions still end with a manual action.', why: 'Capability help intent', data: { capabilities: ['trips', 'attendance', 'no-shows', 'delays', 'drivers', 'vehicles', 'capacity', 'safety', 'costs', 'employee profiles', 'monthly summaries'] }, confidence: { base: 98, sufficient: true }, action: 'Ask a question from the list' });
+  }
+  if (has('thank', 'thanks', 'awesome', 'great', 'nice')) {
+    return data('thanks', { what: "You're welcome! Anything else you'd like from the verified transport records?", why: 'Conversational thanks intent', data: { thanks: true }, confidence: { base: 98, sufficient: true }, action: 'none' });
+  }
 
   // Month keyword → YYYY-MM for summary intents.
   let targetYm = ym;

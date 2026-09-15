@@ -14,6 +14,8 @@ const events = require('./events');
 const incidents = require('./incidents');
 const automation = require('./automation');
 const archive = require('./archive');
+const announcements = require('./announcements');
+const smartroutes = require('./smartroutes');
 
 function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   /* --- schema bootstrap (idempotent) --- */
@@ -21,6 +23,7 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   ensureDefaults(db);
   core.setDb(db); sub.setDb(db); location.setDb(db); intelligence.setDb(db); billing.setDb(db); ops.setDb(db);
   incidents.setDb(db); automation.setDb(db); events.setDb(db); archive.setDb(db);
+  announcements.setDb(db); smartroutes.setDb(db);
 
   events.on('*', (payload, ctx) => {
     const outcome = automation.evaluateRules({ id: ctx.id, type: ctx.type, companyId: ctx.tenantId, payload });
@@ -226,12 +229,70 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.get('/predict/demand', auth, (req, res) => res.json(ops.predictDemand(req.user && req.user.company_id, Number(req.query.days) || 7)));
   R.get('/predict/utilization', auth, (req, res) => res.json(ops.predictUtilization(req.user && req.user.company_id)));
 
+  /* ---- ANNOUNCEMENTS (Item 9: Admin-only CRUD; app-facing verified feed) ---- */
+  const annCompanyKey = (u) => (u && u.emp_id === 'ADMIN') ? null : (u ? Number(u.id) : null);
+  R.get('/admin/announcements', auth, role('admin','owner'), (req, res) => {
+    res.json({ ok: true, announcements: announcements.list({ companyId: annCompanyKey(req.user), role: req.user.role }) });
+  });
+  R.post('/admin/announcements', auth, role('admin','owner'), (req, res) => {
+    const body = { ...(req.body || {}), company_id: req.body && req.body.company_id != null ? req.body.company_id : annCompanyKey(req.user) };
+    const out = announcements.upsert(body, req.user.id);
+    core.audit({ company_id: body.company_id || null, actor_id: req.user.id, actor_role: req.user.role, action: 'announcement:created', category: 'announcement', new_value: { id: out.id, title: body.title }, result: 'created' });
+    res.json({ ok: true, ...out });
+  });
+  R.put('/admin/announcements/:id', auth, role('admin','owner'), (req, res) => {
+    const out = announcements.upsert({ ...(req.body || {}), id: Number(req.params.id), company_id: req.body && req.body.company_id != null ? req.body.company_id : annCompanyKey(req.user) }, req.user.id);
+    core.audit({ company_id: req.body && req.body.company_id != null ? req.body.company_id : annCompanyKey(req.user), actor_id: req.user.id, actor_role: req.user.role, action: 'announcement:updated', category: 'announcement', new_value: { id: out.id }, result: 'updated' });
+    res.json({ ok: true, ...out });
+  });
+  R.delete('/admin/announcements/:id', auth, role('admin','owner'), (req, res) => {
+    const out = announcements.remove(Number(req.params.id), req.user.id);
+    core.audit({ company_id: annCompanyKey(req.user), actor_id: req.user.id, actor_role: req.user.role, action: 'announcement:deleted', category: 'announcement', new_value: { id: Number(req.params.id) }, result: 'deleted' });
+    res.json({ ok: true, ...out });
+  });
+  R.get('/apps/announcements', auth, (req, res) => {
+    const aud = { employee: 'employee', driver: 'driver' }[req.user.role] || ('school' === req.user.vertical ? 'school' : 'employee');
+    res.json({ ok: true, announcements: announcements.listForApp({ companyId: req.user.company_id || null, audience: aud }) });
+  });
+
+  /* ---- SMART ROUTES (Item 2: auto-assign/optimize; roster on/off + generate) ---- */
+  R.post('/routes/auto-assign', auth, role('admin','owner'), (req, res) => {
+    res.json(smartroutes.autoAssign({ actor: req.user, maxPerRoute: Number(req.body && req.body.max_per_route) || null, officePointId: req.body && req.body.office_point_id || null }));
+  });
+  R.post('/routes/:id/optimize', auth, role('admin','owner'), (req, res) => {
+    res.json(smartroutes.optimizeRoute(Number(req.params.id)));
+  });
+  R.get('/routes/auto-run', auth, role('admin','owner'), (req, res) => {
+    res.json({ ok: true, auto_run: smartroutes.getAutoRun(annCompanyKey(req.user)) });
+  });
+  R.post('/routes/auto-run', auth, role('admin','owner'), (req, res) => {
+    const b = req.body || {};
+    res.json(smartroutes.setAutoRun({ companyId: annCompanyKey(req.user), active: b.active, default_pickup: b.default_pickup, default_drop: b.default_drop, directions: b.directions, actorId: req.user.id }));
+  });
+  R.post('/routes/generate-schedules', auth, role('admin','owner'), (req, res) => {
+    const b = req.body || {};
+    res.json(smartroutes.generateRoster({ companyId: annCompanyKey(req.user), date: String(b.date || '').slice(0, 10) || now().slice(0, 10), actorId: req.user.id, timeOverride: { pickup: b.pickup_time, drop: b.drop_time } }));
+  });
+
+  /* ---- COMMAND CENTER DISMISS (Item 8: X without deleting the audit) ---- */
+  R.post('/events/:id/dismiss', auth, role('admin','owner','vendor'), (req, res) => {
+    res.json(events.dismiss(Number(req.params.id), req.user.id));
+  });
+
+  /* ---- AUTOMATION RUN NOW (Item 8) ---- */
+  R.post('/automation/rules/:id/run', auth, role('admin','owner'), (req, res) => {
+    res.json(automation.runRuleNow(Number(req.params.id), { eventType: String((req.body || {}).event_type || 'manual_run').slice(0, 60), payload: req.body && req.body.payload || {} }));
+  });
+
   app.use('/api/v3', R);
 
   /* ---- BACKGROUND JOBS (idempotent, V3 §76.35-36) ---- */
   const job = (fn, label) => setInterval(() => { try { fn(); } catch (e) { console.error('[v3:' + label + ']', e.message); } }, 5 * 60 * 1000);
   job(sub.reconcile, 'reconcile');
   job(ops.retryStuck, 'notif-retry');
+  /* Daily roster auto-run (Item 8): every 5 min, generate today's rosters for
+     companies whose auto-run is active and not yet run today. */
+  job(() => smartroutes.runAutoRosters(now().slice(0, 10)), 'roster-auto');
   events.startWorker(db, io);
   events.startDetection(db);
 }
