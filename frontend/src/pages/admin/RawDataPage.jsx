@@ -283,6 +283,7 @@ export default function RawDataPage() {
               {pv.issues?.length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Rows with problems ({pv.issues.length} shown of {pv.stats?.invalid + pv.stats?.duplicate})</div>
+                  <div style={{ overflowX: 'auto' }}>
                   <table className="tbl">
                     <thead><tr><th>Line</th><th>Data</th><th>Why</th></tr></thead>
                     <tbody>
@@ -295,6 +296,7 @@ export default function RawDataPage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               )}
             </Card>

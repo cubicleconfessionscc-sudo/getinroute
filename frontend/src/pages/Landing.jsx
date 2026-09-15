@@ -483,6 +483,7 @@ export default function Landing() {
       </section>
 
       {/* ================= INDUSTRIES ================= */}
+      <div id="about" style={{ position: 'relative', top: -78 }} aria-hidden="true" />
       <section className="pub-section" id="industries">
         <h2 className="pub-h2">BUILT FOR EVERY OPERATION</h2>
         <p className="pub-sub">GetInRoute adapts to the way your organization moves.</p>

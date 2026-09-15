@@ -222,7 +222,8 @@ export default function CommandCenter() {
         <div className="card">
           <div className="card-title"><Zap size={18} style={{ marginRight: 6, verticalAlign: 'middle' }} />Automation Rules</div>
           {rules.length === 0 ? <div className="empty">No rules — create some in the Automation Builder</div> : (
-            <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '2px solid var(--line)', textAlign: 'left' }}>
                 <th style={{ padding: '8px' }}>Rule</th><th style={{ padding: '8px' }}>Event</th><th style={{ padding: '8px' }}>Level</th><th style={{ padding: '8px' }}>Runs</th><th style={{ padding: '8px' }}>State</th>
               </tr></thead>
@@ -237,7 +238,8 @@ export default function CommandCenter() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </div>
       </div>

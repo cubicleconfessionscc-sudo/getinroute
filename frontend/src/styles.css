@@ -110,6 +110,8 @@ select option { color: var(--text); background: var(--surface-3); }
   .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
   .menu-btn { display: inline-flex; }
   .main { margin-left: 0; }
+  .topbar { padding: 12px 16px; gap: 10px; }
+  .modal { width: calc(100vw - 32px); max-width: 480px; }
 }
 .topbar { display: flex; align-items: center; gap: 14px; padding: 14px 28px; background: rgba(15,23,42,.85);
   backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: var(--z-sticky); }
