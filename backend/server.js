@@ -5967,6 +5967,7 @@ const SPA_ROUTES = ['/', '/admin', '/login', '/admin/login', '/company/login', '
    the persistent /data volume (Railway) and served from there; the packaged
    public/download copy is the fallback (local dev). */
 const DOWNLOAD_DIR = path.join(PUBLIC_DIR, 'download');
+const BINARIES_DIR = path.join(__dirname, 'binaries');
 const apkVolumeDir = (() => {
   if (process.env.APK_VOLUME_DIR) return process.env.APK_VOLUME_DIR;
   if (process.platform !== 'win32' && fs.existsSync('/data') && fs.statSync('/data').isDirectory()) return path.join('/data', 'apk');
@@ -5993,7 +5994,7 @@ function seedApkFromUrl(url, dst, name) {
 if (apkVolumeDir) {
   try {
     fs.mkdirSync(apkVolumeDir, { recursive: true });
-    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteDriver.apk')];
+    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
     for (const src of staged) {
       const dst = path.join(apkVolumeDir, path.basename(src));
       if (fs.existsSync(dst)) continue;
@@ -6008,17 +6009,20 @@ const DRIVER_APK_MIRROR = process.env.DRIVER_APK_SOURCE_URL || 'https://expo.dev
 const binDownload = (res, file, fallback) => {
   const candidates = [];
   if (apkVolumeDir) candidates.push(path.join(apkVolumeDir, file));
+  candidates.push(path.join(BINARIES_DIR, file));
   candidates.push(path.join(fallback, file));
   for (const p of candidates) {
     if (fs.existsSync(p) && fs.statSync(p).isFile()) {
       if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
       else if (p.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
       else if (p.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Disposition', 'attachment');
+      console.log(`[download] ${file} served from ${p} (${fs.statSync(p).size} bytes)`);
       return res.sendFile(p);
     }
   }
+  console.log(`[download] ${file} not in volume/image; falling back to remote sources`);
   // Multi-source fallback for binaries not present in the volume or image.
   // The GitHub Release asset URL 404s for anonymous/private-repo clients, so the
   // driver APK (not yet on the persistent volume) falls back to its public EAS
@@ -6038,7 +6042,7 @@ const binDownload = (res, file, fallback) => {
       if (file.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
       else if (file.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
       else if (file.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Content-Disposition', 'attachment');
       res.setHeader('Content-Length', up.headers['content-length'] || undefined);
       up.pipe(res);
@@ -6057,7 +6061,7 @@ app.use('/download', express.static(DOWNLOAD_DIR, {
     if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     else if (p.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
     else if (p.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Disposition', 'attachment');
   }
 }));
