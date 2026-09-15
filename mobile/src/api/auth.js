@@ -1,12 +1,15 @@
 import client from "./client";
+import { appId } from "../services/startup";
 
 export function register(payload) {
   // payload: { name, email, phone, password, role: "employee"|"driver", employeeId, ... }
-  return client.post("/auth/register", payload).then((r) => r.data);
+  return client.post("/auth/register", { ...payload, app: appId() }).then((r) => r.data);
 }
 
 export function login(email, password) {
-  return client.post("/auth/login", { email, password }).then((r) => r.data);
+  // `app` tells the backend which build this is (employee/driver/school) so it
+  // can enforce role isolation server-side — the client UI is not the gate.
+  return client.post("/auth/login", { email, password, app: appId() }).then((r) => r.data);
 }
 
 export function me() {

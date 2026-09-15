@@ -114,7 +114,7 @@ function demandAnalysis(companyId, days = 14) {
   for (const r of rows) { totals.requests += r.n; totals.cancelled += r.cancelled || 0; totals.absent += r.absent || 0; }
   const c = conf({
     score: rows.length ? 0.9 : 0.4,
-    reason: rows.length ? `Demand profile from ${rows.length} verified days` : 'Not enough verified data',
+    reason: rows.length ? `Demand profile from ${rows.length} verified days` : 'No demand data in this window yet',
     supportingData: totals, rulesChecked: [], warnings: [], impact: { level: 'low', note: 'Capacity planning' }
   });
   return { id: storeRecommendation({ kind: 'demand', subjectType: 'company', subjectId: companyId, createdBy: null, rec: { rows, totals }, c }).id, ...c, rows, totals };
@@ -154,7 +154,7 @@ function predictEta(scheduleId) {
 function rootCause(routeId, date) {
   const today = db.prepare(`SELECT AVG((julianday(drop_time)-julianday(pickup_time))*1440) AS avg FROM schedules WHERE route_id = ? AND date = ? AND status = 'completed'`).get(routeId, date);
   const hist = db.prepare(`SELECT AVG((julianday(drop_time)-julianday(pickup_time))*1440) AS avg FROM schedules WHERE route_id = ? AND status = 'completed' AND date != ?`).get(routeId, date || '');
-  if (today == null || today.avg == null) return { result: null, reason: 'Not enough verified data', manual_review_required: true };
+  if (today == null || today.avg == null) return { result: null, reason: 'No completed runs on this route in the selected window yet', manual_review_required: true };
   const delta = Number(today.avg) - (hist && hist.avg != null ? Number(hist.avg) : Number(today.avg));
   const stops = db.prepare('SELECT stops FROM routes WHERE id = ?').get(routeId);
   const stopCount = stops ? String(stops.stops || '').split('|').filter(Boolean).length : 0;
@@ -201,7 +201,7 @@ function costIntelligence(companyId, days = 30) {
   const est = { trips: trips.trips || 0, vehicles, avg_trips_per_vehicle: vehicles ? +((trips.trips || 0) / vehicles).toFixed(2) : 0, empty_leg_token: emptyKm, fuel_est_l: +((emptyKm * 0.08)).toFixed(1), carbon_kg_est: +(emptyKm * 0.8).toFixed(1) };
   const c = conf({
     score: (trips.trips || 0) > 0 ? 0.85 : 0.4,
-    reason: (trips.trips || 0) > 0 ? 'Cost estimates derived from verified trip + fleet averages' : 'Not enough verified data — estimates disabled',
+    reason: (trips.trips || 0) > 0 ? 'Cost estimates derived from verified trip + fleet averages' : 'No completed trips in the analyzed period, so cost estimates are paused',
     supportingData: est, rulesChecked: ['estimates_labeled'], warnings: [['estimate', 'Fuel/carbon figures are labeled estimates']], impact: { level: 'low', note: 'Reporting' }
   });
   return { ...c, estimates: est };

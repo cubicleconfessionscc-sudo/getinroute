@@ -80,6 +80,25 @@ select option { color: var(--text); background: var(--surface-3); }
 .page-sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
 .grid { display: grid; gap: 16px; }
 
+/* ---- AI Transport Manager (conversational, theme-aware) ---- */
+.ai-messages { flex: 1; overflow-y: auto; padding: 16px; background: var(--card); border-radius: var(--radius);
+  border: 1px solid var(--line); margin-bottom: 12px; -webkit-overflow-scrolling: touch; }
+.ai-row { display: flex; margin-bottom: 12px; }
+.ai-row.user { justify-content: flex-end; }
+.ai-row.assistant { justify-content: flex-start; }
+.ai-row.system { justify-content: center; }
+.ai-bubble { max-width: 78%; padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; border: 1px solid var(--line); }
+.ai-row.user .ai-bubble { background: var(--grad); color: #fff; border-color: transparent; }
+.ai-row.assistant .ai-bubble { background: var(--card-2); color: var(--text); }
+.ai-row.system .ai-bubble { background: var(--surface-2); color: var(--text-2); border-style: dashed; font-size: 12.5px; }
+.ai-thinking { color: var(--muted); font-style: italic; }
+.ai-input-wrap { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 6px 8px; }
+.ai-input-ico { color: var(--muted); margin-left: 8px; flex-shrink: 0; }
+.ai-input { flex: 1; border: none; background: transparent; color: var(--text); font-size: 14px; padding: 10px 8px; outline: none; }
+.ai-send { flex-shrink: 0; }
+
 /* ---- Admin shell ---- */
 .shell { display: flex; min-height: 100vh; }
 .sidebar { width: 258px; background: var(--surface); color: var(--text-2); padding: 20px 14px; display: flex;
@@ -101,8 +120,9 @@ select option { color: var(--text); background: var(--surface-3); }
 .sidebar-foot { margin-top: auto; padding: 12px 10px; border-top: 1px solid var(--line); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 @media (max-width: 900px) {
-  .sidebar { position: fixed; left: 0; top: 0; height: 100vh; z-index: var(--z-sidebar);
-    transform: translateX(-100%); transition: transform .25s ease; box-shadow: 8px 0 30px -12px rgba(0,0,0,.6); }
+  .sidebar { position: fixed; left: 0; top: 0; height: 100vh; z-index: calc(var(--z-overlay) + 1);
+    transform: translateX(-100%); transition: transform .25s ease; box-shadow: 8px 0 30px -12px rgba(0,0,0,.6);
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
   .sidebar.open { transform: translateX(0); }
   .sidebar .sidebar-close-btn { display: inline-flex; }
   .sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(3,6,14,.62);
@@ -182,6 +202,17 @@ table.tbl .actions { display: flex; gap: 6px; }
   box-shadow: 0 14px 30px -10px rgba(0,0,0,.5); display: flex; align-items: center; gap: 10px; animation: pop .25s ease; border: 1px solid var(--line); }
 .toast.ok { background: #064e3b; } .toast.err { background: #7f1d1d; }
 @keyframes pop { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* ---- Org Settings page ---- */
+.settings-page input, .settings-page select { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); font-size: 14px; outline: none;
+  transition: border .15s; }
+.settings-page input:focus, .settings-page select:focus { border-color: var(--primary); }
+.settings-page input[readonly] { background: var(--surface-3); color: var(--text-2); cursor: default; }
+.settings-page input[type="checkbox"] { width: auto; padding: 0; accent-color: var(--primary); }
+.settings-page .hint { margin-top: 4px; }
+.settings-page .field-row-time { display: flex; gap: 8px; align-items: center; }
+.settings-page .field-row-time .sep { color: var(--muted); font-size: 13px; }
 
 /* ---- Auth / Landing ---- */
 .auth-bg { min-height: 100vh; background: radial-gradient(1200px 600px at 80% -10%, rgba(14,165,233,.18), transparent),
@@ -653,7 +684,8 @@ a.pub-card:hover, .pub-card.pub-access:hover { transform: translateY(-3px); box-
 :root[data-theme="light"] .dot-pulse, :root[data-theme="light"] .live-dot { background: var(--green); }
 :root[data-theme="light"] ::selection { background: rgba(14,165,233,.25); color: #0f172a; }
 :root[data-theme="light"] .btn-primary, :root[data-theme="light"] .btn-primary:hover:not(:disabled) { color: #fff; }
-:root[data-theme="light"] .brand-name, :root[data-theme="light"] .brand-logo { color: #fff; }
+:root[data-theme="light"] .brand-logo { color: #fff; }
+:root[data-theme="light"] .brand-name { color: var(--ink); }
 :root[data-theme="light"] .sidebar { box-shadow: 1px 0 20px -12px rgba(2,6,23,.25); }
 :root[data-theme="light"] input[readonly] { background: var(--surface-3); }
 :root[data-theme="light"] .swipe-hint { color: var(--muted); }

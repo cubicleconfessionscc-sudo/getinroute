@@ -40,7 +40,7 @@ const DEFAULT_CONFIG = {
   },
 };
 
-function appId() {
+export function appId() {
   const variant = Constants.expoConfig?.extra?.appVariant || "company";
   // Each build variant is a real, separate app with its own store identity.
   if (variant === "school") return "school";

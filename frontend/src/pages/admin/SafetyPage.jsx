@@ -4,8 +4,15 @@ import { useToast, useInterval } from '../../components/ui';
 import { useSocketEvent } from '../../socket';
 import { Moon, CheckCircle2, ShieldCheck, AlertTriangle, Phone, User, Truck } from 'lucide-react';
 
-const PHASE = { pending: 'Waiting for confirmation', alert: 'PASSENGER ALERT', confirmed: 'Confirmed by passenger', resolved: 'Resolved', allowed: 'Allowed' };
+const PHASE = {
+  pending: 'Pending confirmation',
+  alert: 'Passenger alert',
+  confirmed: 'Reached home',
+  resolved: 'Resolved',
+  allowed: 'Allowed next drop'
+};
 const PHASE_COLOR = { pending: 'amber', alert: 'red', confirmed: 'green', resolved: 'slate', allowed: 'slate' };
+const ACTIVE_STATUSES = ['pending', 'alert'];
 
 export default function SafetyPage() {
   const toast = useToast();
@@ -31,20 +38,24 @@ export default function SafetyPage() {
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  const pending = rows.filter((r) => r.status === 'pending' || r.status === 'alert');
+  const pending = rows.filter((r) => ACTIVE_STATUSES.includes(r.status));
   const closed = rows.filter((r) => !pending.includes(r));
 
   return (
-    <div>
-      <div className="m-label">Night Safety Drop</div>
-      <h2>Safety queue</h2>
-      <p style={{ fontSize: 13, color: 'var(--muted)', maxWidth: 600, marginTop: 4 }}>
-        Employees dropped home after the configured night window must confirm they reached home.
-        Pending and alert items need review.
-      </p>
+    <div className="page" style={{ maxWidth: 900 }}>
+      <div className="page-head">
+        <div>
+          <div className="page-title">Safety Queue</div>
+          <div className="page-sub">
+            Employees dropped home inside the configured night window must confirm they reached home.
+            Active items need review; everything else is clear.
+          </div>
+        </div>
+      </div>
 
+      <div className="m-label" style={{ marginBottom: 8 }}>Active ({pending.length})</div>
       {pending.length === 0 && (
-        <div className="m-card"><div className="empty">No active safety confirmations — all clear.</div></div>
+        <div className="m-card"><div className="empty" style={{ padding: '26px 20px' }}>All clear — no active safety confirmations.</div></div>
       )}
 
       {pending.map((a) => (
@@ -91,7 +102,7 @@ export default function SafetyPage() {
           {closed.slice(0, 15).map((a) => (
             <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
               <div>
-                <b style={{ fontSize: 13 }}>{a.employee_name || '—'}</b>
+                <b style={{ fontSize: 13, color: 'var(--text)' }}>{a.employee_name || '—'}</b>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{a.trip_id || ''} · {a.resolved_at || a.updated_at || ''}</div>
               </div>
               <Badge color={PHASE_COLOR[a.status]}>{PHASE[a.status]}</Badge>

@@ -168,13 +168,14 @@ export default function AdminLayout() {
         <div className="brand">
           <div className="brand-logo">G</div>
           <div><div className="brand-name">GetinRoute</div><div style={{ fontSize: 11, color: '#64748b' }}>{user?.isOwner ? 'Owner Console' : 'Admin Console'}</div></div>
-          <button className="btn btn-ghost btn-icon sidebar-close-btn" style={{ marginLeft: 'auto', color: '#fff' }} onClick={() => setOpen(false)}><X size={18} /></button>
+          <button className="btn btn-ghost btn-icon sidebar-close-btn" style={{ marginLeft: 'auto', color: 'var(--text)' }} onClick={() => setOpen(false)}><X size={18} /></button>
         </div>
         {navItems.map((group) => (
           <React.Fragment key={group.label}>
             <div className="nav-label">{group.label}</div>
             {group.items.map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => { if (window.innerWidth <= 900) setOpen(false); }}>
                 {item.icon} {item.text}
               </NavLink>
             ))}

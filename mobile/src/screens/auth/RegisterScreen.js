@@ -1,12 +1,21 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from "react-native";
+import Constants from "expo-constants";
 import { useAuth } from "../../context/AuthContext";
 import { lookupCompany } from "../../api/company";
 import { colors, spacing, radius } from "../../theme";
 
+// This build is a genuine separate app. The Employee build only ever registers
+// employees; the Driver build only ever registers drivers. The role is fixed by
+// the variant (backed up by server-side enforcement) instead of a user toggle,
+// so the two apps can never switch roles on device.
+const VARIANT = Constants.expoConfig?.extra?.appVariant || "company";
+const LOCKED_ROLE = VARIANT === "driver" ? "driver" : null;
+const APP_NAME = VARIANT === "driver" ? "GetInRoute Driver" : "GetInRoute";
+
 export default function RegisterScreen({ navigation }) {
   const { register } = useAuth();
-  const [role, setRole] = useState("employee");
+  const [role, setRole] = useState(LOCKED_ROLE || "employee");
   const [gender, setGender] = useState(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -70,20 +79,26 @@ export default function RegisterScreen({ navigation }) {
       <Text style={styles.brand}>Create your account</Text>
       <Text style={styles.tagline}>An admin will review and approve your access.</Text>
 
-      <View style={styles.roleToggle}>
-        <TouchableOpacity
-          style={[styles.roleButton, role === "employee" && styles.roleButtonActive]}
-          onPress={() => setRole("employee")}
-        >
-          <Text style={[styles.roleText, role === "employee" && styles.roleTextActive]}>Employee</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.roleButton, role === "driver" && styles.roleButtonActive]}
-          onPress={() => setRole("driver")}
-        >
-          <Text style={[styles.roleText, role === "driver" && styles.roleTextActive]}>Driver</Text>
-        </TouchableOpacity>
-      </View>
+      {LOCKED_ROLE ? (
+        <View style={styles.lockedRoleWrap}>
+          <Text style={styles.lockedRoleText}>Registering as a <Text style={{ color: colors.teal, fontWeight: "700" }}>{LOCKED_ROLE}</Text> for the {APP_NAME} app.</Text>
+        </View>
+      ) : (
+        <View style={styles.roleToggle}>
+          <TouchableOpacity
+            style={[styles.roleButton, role === "employee" && styles.roleButtonActive]}
+            onPress={() => setRole("employee")}
+          >
+            <Text style={[styles.roleText, role === "employee" && styles.roleTextActive]}>Employee</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.roleButton, role === "driver" && styles.roleButtonActive]}
+            onPress={() => setRole("driver")}
+          >
+            <Text style={[styles.roleText, role === "driver" && styles.roleTextActive]}>Driver</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {role === "employee" && (
         <View style={styles.field}>
@@ -163,6 +178,15 @@ const styles = StyleSheet.create({
   backBtnText: { color: colors.teal, fontSize: 15, fontWeight: "600" },
   brand: { color: colors.text, fontSize: 24, fontWeight: "700" },
   tagline: { color: colors.textDim, fontSize: 13, marginTop: 6, marginBottom: spacing.lg },
+  lockedRoleWrap: {
+    backgroundColor: colors.panel,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 12,
+    marginBottom: spacing.lg
+  },
+  lockedRoleText: { color: colors.textDim, fontSize: 13, lineHeight: 18 },
   roleToggle: {
     flexDirection: "row",
     backgroundColor: colors.panel,

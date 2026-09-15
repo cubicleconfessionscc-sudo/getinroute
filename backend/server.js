@@ -581,6 +581,33 @@ function genSchoolCode(prefix) {
 
 /* ---------------- AUTH ---------------- */
 
+// Every mobile build is a genuine separate app (GetInRoute, GetInRoute Driver,
+// GetInRoute School). The BACKEND — never just the client UI — is the authority
+// that enforces which account roles each app variant may sign in and register
+// as, so a cross-variant login is rejected server-side even if a modified
+// client omits or overrides the role selector.
+const APP_ROLES = {
+  employee: new Set(['employee']),
+  driver: new Set(['driver']),
+  school: new Set(['admin', 'student', 'parent', 'driver']),
+};
+function appVariantOf(req) {
+  return String((req.body && req.body.app) || req.get('x-app-variant') || '').trim().toLowerCase();
+}
+function appRoleMismatch(app) {
+  if (app === 'employee') return 'This app is for employees. Drivers should use the GetInRoute Driver app.';
+  if (app === 'driver') return 'This app is for drivers. Employees should use the GetInRoute app.';
+  if (app === 'school') return 'This app is for GetInRoute School accounts only.';
+  return null;
+}
+function enforceAppLogin(app, user) {
+  if (!app) return null;
+  const allowed = APP_ROLES[app];
+  if (!allowed || !allowed.has(user.role)) return appRoleMismatch(app);
+  if (app === 'school' && user.vertical !== 'school') return appRoleMismatch(app);
+  return null;
+}
+
 app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
   const { identifier: rawId, email: rawEmail, password, lat, lng } = req.body || {};
   const identifier = (rawId || rawEmail || '').trim();
@@ -649,6 +676,15 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
     authLog('login deactivated', { id: user.id, status: user.status });
     return res.status(403).json({ error: 'Account deactivated by admin.', message: 'Account deactivated by admin.' });
   }
+  // App-variant enforcement: each mobile build only accepts the roles it ships
+  // for. This is checked after the password hash so the wrong app can never
+  // reveal whether an account exists.
+  const appName = appVariantOf(req);
+  const appBlock = enforceAppLogin(appName, user);
+  if (appBlock) {
+    authLog('login app-role-mismatch', { id: user.id, role: user.role, app: appName || null, vertical: user.vertical || null });
+    return res.status(403).json({ error: appBlock, message: appBlock });
+  }
   if (user.role === 'student') {
     // Students never login by default. School-level students are blocked hard;
     // college students may login only when the school enables it per student.
@@ -677,6 +713,19 @@ app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => 
   const emp_id = String(rawEmpId || employeeId || licenseNumber || '').trim();
   const email = String(rawEmail || '').trim().toLowerCase();
   if (!['employee', 'driver'].includes(role)) return res.status(400).json({ error: 'Role must be employee or driver', message: 'Role must be employee or driver' });
+  // App-variant enforcement at registration: the Employee app may only create
+  // employee accounts and the Driver app only driver accounts. School accounts
+  // are created on the school portal (/api/auth/parent/register and admins).
+  const appName = appVariantOf(req);
+  if (appName === 'school') {
+    return res.status(400).json({ error: 'School accounts are managed on the GetInRoute School portal.', message: 'School accounts are managed on the GetInRoute School portal.' });
+  }
+  if (appName === 'driver' && role !== 'driver') {
+    return res.status(400).json({ error: appRoleMismatch('driver'), message: appRoleMismatch('driver') });
+  }
+  if (appName === 'employee' && role !== 'employee') {
+    return res.status(400).json({ error: appRoleMismatch('employee'), message: appRoleMismatch('employee') });
+  }
   if (!emp_id || !email || !password || !name) return res.status(400).json({ error: 'All fields are required', message: 'All fields are required' });
   const counts = db.prepare(`SELECT (SELECT COUNT(*) FROM users WHERE role='employee') AS emp, (SELECT COUNT(*) FROM users WHERE role='driver') AS drv`).get();
   if (role === 'employee' && counts.emp >= MAX_EMPLOYEES) return res.status(400).json({ error: `Employee limit of ${MAX_EMPLOYEES} reached. Contact admin.`, message: `Employee limit of ${MAX_EMPLOYEES} reached. Contact admin.` });

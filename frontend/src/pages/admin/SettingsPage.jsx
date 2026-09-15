@@ -107,19 +107,22 @@ export default function SettingsPage() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 860 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h2 style={{ margin: 0 }}>Organization Settings</h2>
-        <span style={{ fontSize: 13, color: saving ? '#f59e0b' : '#10b981' }}>{saving ? 'Saving...' : 'Changes save automatically'}</span>
+    <div className="page settings-page" style={{ maxWidth: 860 }}>
+      <div className="page-head">
+        <div>
+          <div className="page-title">Organization Settings</div>
+          <div className="page-sub">Company profile, shifts, cabs, safety policies and mobile app preferences.</div>
+        </div>
+        <span style={{ fontSize: 13, color: saving ? 'var(--amber)' : 'var(--green)' }}>{saving ? 'Saving...' : 'Changes save automatically'}</span>
       </div>
 
       <Section icon={<Building2 size={16} />} title="Company Profile">
         <Field label="Company name">
-          <input value={company.name || user?.department || ''} readOnly style={{ background: '#f8fafc', color: 'var(--slate)' }} />
-          <span className="hint">This is the company name of your logged-in account.</span>
+          <input value={company.name || user?.department || ''} readOnly />
+          <span className="hint">Company name of your logged-in account.</span>
         </Field>
         <Field label="Company email">
-          <input value={user?.email || ''} readOnly style={{ background: '#f8fafc', color: 'var(--slate)' }} />
+          <input value={user?.email || ''} readOnly />
           <span className="hint">Login email of this company's administrator account.</span>
         </Field>
         <Field label="Contact phone">
@@ -134,7 +137,7 @@ export default function SettingsPage() {
         </Field>
         <Field label="Invite code">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input value={s.account?.inviteCode || user?.invite_code || ''} readOnly style={{ background: '#f8fafc', color: 'var(--slate)', fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.06em' }} />
+            <input value={s.account?.inviteCode || user?.invite_code || ''} readOnly style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.06em' }} />
             <button className="btn btn-sm btn-outline" onClick={copyInviteCode}><Copy size={14} /> Copy</button>
           </div>
           <span className="hint">Auto-generated once per company and permanently tied to this account. Share it with your fleet team.</span>
@@ -246,7 +249,7 @@ export default function SettingsPage() {
           ))}
           {!vt.length && <div style={{ fontSize: 13, color: 'var(--muted)' }}>No vehicle types. Click "Add type".</div>}
         </div>
-        <span className="hint">Each row: type name, optional vendor name (e.g. LUPL), and seat count. Changes save automatically.</span>
+        <span className="hint">Each row: type name, optional vendor name (e.g. LUPL), and seat count.</span>
       </Section>
 
       <Section icon={<Shield size={16} />} title="Speed & Vehicle Limits">
@@ -285,14 +288,6 @@ export default function SettingsPage() {
             </Field>
           </>
         )}
-        <Field label="Night hours">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="time" defaultValue={s.nightHours?.start || '20:00'} onBlur={(e) => update({ nightHours: { start: e.target.value, end: s.nightHours?.end || '06:00' } })} />
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>to</span>
-            <input type="time" defaultValue={s.nightHours?.end || '06:00'} onBlur={(e) => update({ nightHours: { start: s.nightHours?.start || '20:00', end: e.target.value } })} />
-          </div>
-          <span className="hint">Separate from night safety. Used for shift and scheduling rules.</span>
-        </Field>
       </Section>
 
       <Section icon={<AlertTriangle size={16} />} title="Night Safety Drop (door-to-door confirmation)">
@@ -339,10 +334,10 @@ export default function SettingsPage() {
         ) : (
           <div style={{ display: 'grid', gap: 10 }}>
             {nodalPoints.map((np) => (
-              <div key={np._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#f8fafc', borderRadius: 10, border: '1px solid var(--line)' }}>
-                <MapPin size={16} color="#4f46e5" />
+              <div key={np._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--line)' }}>
+                <MapPin size={16} color="var(--primary)" />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>{np.label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{np.label}</div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {np.address || `${np.lat}, ${np.lng}`}
                     {np.radiusMeters ? ` · ${np.radiusMeters}m radius` : ''}
@@ -453,7 +448,7 @@ export default function SettingsPage() {
             </Field>
           </div>
           {npForm.address && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 10px', background: '#f8fafc', borderRadius: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 8 }}>
               📍 {npForm.address}
             </div>
           )}
@@ -473,11 +468,11 @@ function Section({ icon, title, children, action }) {
   return (
     <div style={{ marginBottom: 28 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <div style={{ color: '#4f46e5' }}>{icon}</div>
-        <h3 style={{ fontSize: 17, fontWeight: 700, color: '#1e293b', margin: 0 }}>{title}</h3>
+        <div style={{ color: 'var(--primary)' }}>{icon}</div>
+        <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', margin: 0 }}>{title}</h3>
         {action && <div style={{ marginLeft: 'auto' }}>{action}</div>}
       </div>
-      <div style={{ background: '#fff', border: '1px solid var(--border, #e2e8f0)', borderRadius: 10, padding: '12px 16px' }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 16px' }}>
         {children}
       </div>
     </div>
@@ -487,7 +482,7 @@ function Section({ icon, title, children, action }) {
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#334155' }}>{label}</label>
+      <label style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--slate)' }}>{label}</label>
       {children}
       {React.Children.toArray(children).find((c) => c?.props?.className === 'hint')}
     </div>
@@ -497,7 +492,7 @@ function Field({ label, children }) {
 function Toggle({ checked, onChange }) {
   return (
     <button onClick={() => onChange(!checked)}
-      style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', background: checked ? '#4f46e5' : '#cbd5e1', position: 'relative', transition: 'background 0.2s' }}>
+      style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', background: checked ? 'var(--primary)' : 'var(--surface-3)', position: 'relative', transition: 'background 0.2s' }}>
       <span style={{ position: 'absolute', top: 2, left: checked ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
     </button>
   );
