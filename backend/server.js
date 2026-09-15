@@ -1,6 +1,7 @@
 require('./env');
 const express = require('express');
 const http = require('node:http');
+const https = require('node:https');
 const path = require('node:path');
 const fs = require('node:fs');
 const cors = require('cors');
@@ -5971,18 +5972,39 @@ const apkVolumeDir = (() => {
   if (process.platform !== 'win32' && fs.existsSync('/data') && fs.statSync('/data').isDirectory()) return path.join('/data', 'apk');
   return null;
 })();
+const APK_SEED_URLS = {
+  'GetInRouteDriver.apk': process.env.DRIVER_APK_SOURCE_URL || 'https://expo.dev/artifacts/eas/DFNehC-wQsEnu2irM7AW5w4NtwwjLZTAYO-1fPcHPvI.apk'
+};
+function seedApkFromUrl(url, dst, name) {
+  const lib = url.startsWith('https:') ? https : http;
+  const tmp = `${dst}.tmp`;
+  console.log(`[apk-bootstrap] downloading ${name} -> ${dst}`);
+  lib.get(url, (up) => {
+    if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); console.error(`[apk-bootstrap] seed failed ${name} status=${up.statusCode}`); try { fs.unlinkSync(tmp); } catch (e) {} return; }
+    const out = fs.createWriteStream(tmp);
+    up.pipe(out);
+    out.on('finish', () => out.close(() => {
+      try { fs.renameSync(tmp, dst); console.log(`[apk-bootstrap] seeded ${name}`); }
+      catch (e) { console.error(`[apk-bootstrap] seed rename ${name}: ${e.message}`); }
+    }));
+    out.on('error', (e) => { console.error(`[apk-bootstrap] seed write ${name}: ${e.message}`); try { fs.unlinkSync(tmp); } catch (e2) {} });
+  }).on('error', (e) => console.error(`[apk-bootstrap] seed get ${name}: ${e.message}`));
+}
 if (apkVolumeDir) {
   try {
     fs.mkdirSync(apkVolumeDir, { recursive: true });
     const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteDriver.apk')];
     for (const src of staged) {
       const dst = path.join(apkVolumeDir, path.basename(src));
-      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
+      if (fs.existsSync(dst)) continue;
+      if (fs.existsSync(src)) fs.copyFileSync(src, dst);
+      else if (APK_SEED_URLS[path.basename(src)]) seedApkFromUrl(APK_SEED_URLS[path.basename(src)], dst, path.basename(src));
     }
     console.log('[apk-bootstrap] volume=' + apkVolumeDir + ' total=' + fs.readdirSync(apkVolumeDir).join(','));
   } catch (e) { console.error('[apk-bootstrap]', e.message); }
 }
 const APK_BASE_URL = (process.env.APK_BASE_URL || 'https://github.com/cubicleconfessionscc-sudo/getinroute/releases/download/apps-v1').replace(/\/$/, '');
+const DRIVER_APK_MIRROR = process.env.DRIVER_APK_SOURCE_URL || 'https://expo.dev/artifacts/eas/DFNehC-wQsEnu2irM7AW5w4NtwwjLZTAYO-1fPcHPvI.apk';
 const binDownload = (res, file, fallback) => {
   const candidates = [];
   if (apkVolumeDir) candidates.push(path.join(apkVolumeDir, file));
@@ -5997,18 +6019,35 @@ const binDownload = (res, file, fallback) => {
       return res.sendFile(p);
     }
   }
-  // Binaries larger than the deploy upload cap are not bundled in the app image;
-  // serve them from the canonical GitHub Release asset so the download URL still works.
-  http.get(`${APK_BASE_URL}/${encodeURIComponent(file)}`, (up) => {
-    if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); return res.status(404).json({ error: 'Not found' }); }
-    if (file.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    else if (file.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
-    else if (file.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.setHeader('Content-Disposition', 'attachment');
-    res.setHeader('Content-Length', up.headers['content-length'] || undefined);
-    up.pipe(res);
-  }).on('error', () => res.status(404).json({ error: 'Not found' }));
+  // Multi-source fallback for binaries not present in the volume or image.
+  // The GitHub Release asset URL 404s for anonymous/private-repo clients, so the
+  // driver APK (not yet on the persistent volume) falls back to its public EAS
+  // artifact mirror; 3xx redirects are followed through the correct protocol.
+  const trySource = (sources, idx, res, redirects) => {
+    if (idx >= sources.length) return res.status(404).json({ error: 'Not found' });
+    const u = sources[idx];
+    const lib = u.startsWith('https:') ? https : http;
+    lib.get(u, (up) => {
+      if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location && redirects < 5) {
+        up.resume();
+        let next = null;
+        try { next = new URL(up.headers.location, u).toString(); } catch (e) { return trySource(sources, idx + 1, res, 0); }
+        return trySource([next].concat(sources.slice(idx + 1)), idx, res, redirects + 1);
+      }
+      if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); return trySource(sources, idx + 1, res, 0); }
+      if (file.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      else if (file.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
+      else if (file.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Content-Disposition', 'attachment');
+      res.setHeader('Content-Length', up.headers['content-length'] || undefined);
+      up.pipe(res);
+    }).on('error', () => trySource(sources, idx + 1, res, 0));
+  };
+  const sources = [];
+  if (file === 'GetInRouteDriver.apk' && DRIVER_APK_MIRROR) sources.push(DRIVER_APK_MIRROR);
+  sources.push(`${APK_BASE_URL}/${encodeURIComponent(file)}`);
+  trySource(sources, 0, res, 0);
 };
 app.get('/download/GetInRoute.apk', (req, res) => binDownload(res, 'GetInRoute.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteSchool.apk', (req, res) => binDownload(res, 'GetInRouteSchool.apk', DOWNLOAD_DIR));
