@@ -38,7 +38,7 @@ export const APP_LINKS = {
       'vehicle information'
     ],
     web: { state: 'available', url: '/driver/login', label: 'Sign in on Web' },
-    android: { state: 'coming-soon', url: '', label: 'Android APK' },
+    android: { state: 'available', url: '/download/GetInRouteDriver.apk', label: 'Android APK' },
     ios: { state: 'coming-soon', url: '', label: 'iPhone' }
   },
   parent: {

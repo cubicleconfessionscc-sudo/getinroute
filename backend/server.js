@@ -5974,7 +5974,7 @@ const apkVolumeDir = (() => {
 if (apkVolumeDir) {
   try {
     fs.mkdirSync(apkVolumeDir, { recursive: true });
-    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk')];
+    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteDriver.apk')];
     for (const src of staged) {
       const dst = path.join(apkVolumeDir, path.basename(src));
       if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
@@ -6012,6 +6012,7 @@ const binDownload = (res, file, fallback) => {
 };
 app.get('/download/GetInRoute.apk', (req, res) => binDownload(res, 'GetInRoute.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteSchool.apk', (req, res) => binDownload(res, 'GetInRouteSchool.apk', DOWNLOAD_DIR));
+app.get('/download/GetInRouteDriver.apk', (req, res) => binDownload(res, 'GetInRouteDriver.apk', DOWNLOAD_DIR));
 app.use('/download', express.static(DOWNLOAD_DIR, {
   setHeaders: (res, p) => {
     if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
