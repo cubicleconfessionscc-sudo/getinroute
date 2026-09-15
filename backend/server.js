@@ -6023,7 +6023,9 @@ const apkVolumeDir = (() => {
   return null;
 })();
 const APK_SEED_URLS = {
-  'GetInRouteDriver.apk': process.env.DRIVER_APK_SOURCE_URL || 'https://expo.dev/artifacts/eas/DFNehC-wQsEnu2irM7AW5w4NtwwjLZTAYO-1fPcHPvI.apk'
+  'GetInRouteDriver.apk': process.env.DRIVER_APK_SOURCE_URL || 'https://expo.dev/artifacts/eas/DFNehC-wQsEnu2irM7AW5w4NtwwjLZTAYO-1fPcHPvI.apk',
+  'GetInRoute.apk': process.env.EMPLOYEE_APK_SOURCE_URL || '',
+  'GetInRouteSchool.apk': process.env.SCHOOL_APK_SOURCE_URL || ''
 };
 function seedApkFromUrl(url, dst, name) {
   const lib = url.startsWith('https:') ? https : http;
@@ -6059,7 +6061,24 @@ function seedApkFromUrl(url, dst, name) {
 if (apkVolumeDir) {
   try {
     fs.mkdirSync(apkVolumeDir, { recursive: true });
-    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
+    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(BINARIES_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
+    // Explicit version bump (APK_SEED_VERSION) forces the volume APKs to be
+    // re-seeded from newly built artifacts on the next deploy. Without it the
+    // persistent volume keeps serving the last-good builds and nothing changes.
+    const seedVersion = process.env.APK_SEED_VERSION || '';
+    const versionMarker = path.join(apkVolumeDir, '.seed-version');
+    let stagedVersion = '';
+    try { stagedVersion = fs.readFileSync(versionMarker, 'utf8'); } catch (e) {}
+    if (seedVersion && stagedVersion !== seedVersion) {
+      console.log(`[apk-bootstrap] APK_SEED_VERSION=${seedVersion} != stored ${stagedVersion || '(none)'} -> re-seeding volume APKs`);
+      for (const src of staged) {
+        const dst = path.join(apkVolumeDir, path.basename(src));
+        try { if (fs.existsSync(dst)) fs.unlinkSync(dst); } catch (e) {}
+      }
+      try { fs.unlinkSync(versionMarker); } catch (e) {}
+    } else if (!seedVersion && !stagedVersion) {
+      try { fs.writeFileSync(versionMarker, ''); } catch (e) {}
+    }
     for (const src of staged) {
       const dst = path.join(apkVolumeDir, path.basename(src));
       // Auto-heal: a real APK is always >= 1 MB; if the volume file is
@@ -6078,6 +6097,7 @@ if (apkVolumeDir) {
       if (fs.existsSync(src)) fs.copyFileSync(src, dst);
       else if (APK_SEED_URLS[path.basename(src)]) seedApkFromUrl(APK_SEED_URLS[path.basename(src)], dst, path.basename(src));
     }
+    if (seedVersion) { try { fs.writeFileSync(versionMarker, seedVersion); } catch (e) {} }
     console.log('[apk-bootstrap] volume=' + apkVolumeDir + ' total=' + fs.readdirSync(apkVolumeDir).join(','));
   } catch (e) { console.error('[apk-bootstrap]', e.message); }
 }
