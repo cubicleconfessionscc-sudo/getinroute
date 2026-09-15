@@ -5982,11 +5982,27 @@ function seedApkFromUrl(url, dst, name) {
   console.log(`[apk-bootstrap] downloading ${name} -> ${dst}`);
   lib.get(url, (up) => {
     if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); console.error(`[apk-bootstrap] seed failed ${name} status=${up.statusCode}`); try { fs.unlinkSync(tmp); } catch (e) {} return; }
+    const ct = (up.headers['content-type'] || '').toLowerCase();
+    const expectedMin = name.endsWith('.apk') ? 10 * 1024 * 1024 : 1024 * 1024;
+    if (ct.includes('text/html')) {
+      up.resume();
+      console.error(`[apk-bootstrap] seed failed ${name}: got text/html (redirect page, not a real binary)`);
+      try { fs.unlinkSync(tmp); } catch (e) {}
+      return;
+    }
     const out = fs.createWriteStream(tmp);
     up.pipe(out);
     out.on('finish', () => out.close(() => {
-      try { fs.renameSync(tmp, dst); console.log(`[apk-bootstrap] seeded ${name}`); }
-      catch (e) { console.error(`[apk-bootstrap] seed rename ${name}: ${e.message}`); }
+      try {
+        const sz = fs.statSync(tmp).size;
+        if (sz < expectedMin) {
+          console.error(`[apk-bootstrap] seed failed ${name}: file too small (${sz} bytes < ${expectedMin})`);
+          fs.unlinkSync(tmp);
+          return;
+        }
+        fs.renameSync(tmp, dst);
+        console.log(`[apk-bootstrap] seeded ${name} (${sz} bytes)`);
+      } catch (e) { console.error(`[apk-bootstrap] seed rename ${name}: ${e.message}`); }
     }));
     out.on('error', (e) => { console.error(`[apk-bootstrap] seed write ${name}: ${e.message}`); try { fs.unlinkSync(tmp); } catch (e2) {} });
   }).on('error', (e) => console.error(`[apk-bootstrap] seed get ${name}: ${e.message}`));
@@ -5997,6 +6013,18 @@ if (apkVolumeDir) {
     const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
     for (const src of staged) {
       const dst = path.join(apkVolumeDir, path.basename(src));
+      // Auto-heal: a real APK is always >= 1 MB; if the volume file is
+      // smaller it is a corrupted seed (expired mirror wrote an HTML page)
+      // and must be removed so the image copy can replace it.
+      if (fs.existsSync(dst)) {
+        try {
+          const dstStat = fs.statSync(dst);
+          if (dstStat.size < 1024 * 1024) {
+            console.log(`[apk-bootstrap] healing corrupt ${path.basename(dst)} (${dstStat.size} bytes) -> removing`);
+            fs.unlinkSync(dst);
+          }
+        } catch (e) {}
+      }
       if (fs.existsSync(dst)) continue;
       if (fs.existsSync(src)) fs.copyFileSync(src, dst);
       else if (APK_SEED_URLS[path.basename(src)]) seedApkFromUrl(APK_SEED_URLS[path.basename(src)], dst, path.basename(src));
@@ -6012,15 +6040,21 @@ const binDownload = (res, file, fallback) => {
   candidates.push(path.join(BINARIES_DIR, file));
   candidates.push(path.join(fallback, file));
   for (const p of candidates) {
-    if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-      if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      else if (p.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
-      else if (p.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Content-Disposition', 'attachment');
-      console.log(`[download] ${file} served from ${p} (${fs.statSync(p).size} bytes)`);
-      return res.sendFile(p);
+    if (!fs.existsSync(p) || !fs.statSync(p).isFile()) continue;
+    // A real APK is always >= 1 MB; a tiny file in the volume is a
+    // corrupted seed from an expired remote mirror — skip and try next.
+    const st = fs.statSync(p);
+    if (file.endsWith('.apk') && st.size < 1024 * 1024) {
+      console.log(`[download] ${file} skipping corrupt candidate ${p} (${st.size} bytes)`);
+      continue;
     }
+    if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    else if (p.endsWith('.aab')) res.setHeader('Content-Type', 'application/octet-stream');
+    else if (p.endsWith('.ipa')) res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Disposition', 'attachment');
+    console.log(`[download] ${file} served from ${p} (${st.size} bytes)`);
+    return res.sendFile(p);
   }
   console.log(`[download] ${file} not in volume/image; falling back to remote sources`);
   // Multi-source fallback for binaries not present in the volume or image.
@@ -6056,6 +6090,7 @@ const binDownload = (res, file, fallback) => {
 app.get('/download/GetInRoute.apk', (req, res) => binDownload(res, 'GetInRoute.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteSchool.apk', (req, res) => binDownload(res, 'GetInRouteSchool.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteDriver.apk', (req, res) => binDownload(res, 'GetInRouteDriver.apk', DOWNLOAD_DIR));
+app.get('/download/GetInRouteDriver-v2.apk', (req, res) => binDownload(res, 'GetInRouteDriver.apk', DOWNLOAD_DIR));
 app.use('/download', express.static(DOWNLOAD_DIR, {
   setHeaders: (res, p) => {
     if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
