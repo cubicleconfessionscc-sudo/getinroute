@@ -60,6 +60,7 @@ import BillingOps from './pages/admin/BillingOps';
 import NotificationTemplates from './pages/admin/NotificationTemplates';
 import CommandCenter from './pages/admin/CommandCenter';
 import AutomationBuilder from './pages/admin/AutomationBuilder';
+import AnnouncementsPage from './pages/admin/AnnouncementsPage';
 import DriversManagement from './pages/admin/DriversManagement';
 import ParentsManagement from './pages/admin/ParentsManagement';
 import WhatIfSimulator from './pages/admin/WhatIfSimulator';
@@ -69,6 +70,7 @@ import EHome from './pages/employee/EHome';
 import ETrack from './pages/employee/ETrack';
 import EHistory from './pages/employee/EHistory';
 import EFeedback from './pages/employee/EFeedback';
+import AddressSettings from './pages/employee/AddressSettings';
 
 import DriverApp from './pages/driver/DriverApp';
 import DHome from './pages/driver/DHome';
@@ -192,6 +194,7 @@ export default function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="billing" element={<BillingOps />} />
             <Route path="notification-templates" element={<NotificationTemplates />} />
+            <Route path="announcements" element={<AnnouncementsPage />} />
             <Route path="command-center" element={<CommandCenter />} />
             <Route path="automation" element={<AutomationBuilder />} />
             <Route path="drivers" element={<DriversManagement />} />
@@ -225,6 +228,7 @@ export default function App() {
           <Route path="/app" element={<Require role="employee"><EmployeeApp /></Require>}>
             <Route index element={<EHome />} />
             <Route path="track" element={<ETrack />} />
+            <Route path="address" element={<AddressSettings />} />
             <Route path="history" element={<EHistory />} />
             <Route path="chat" element={<MobileChat />} />
             <Route path="feedback" element={<EFeedback />} />

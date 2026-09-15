@@ -6,7 +6,7 @@ import AddressPicker from '../../components/AddressPicker';
 import MapPicker from '../../components/MapPicker';
 import MapLibreMap from '../../components/MapLibreMap';
 import { calculateRoute } from '../../lib/geo';
-import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2, Wand2, Play, CalendarClock } from 'lucide-react';
 
 const emptyRoute = { name: '', start_point: '', end_point: '', speed_limit: 40, stops: [{ sequence: 1, name: '', lat: 12.97, lng: 77.59 }], start_lat: null, start_lng: null, end_lat: null, end_lng: null };
 
@@ -27,12 +27,57 @@ export default function RoutesPage() {
   const [assigning, setAssigning] = useState(false);
   const [dir, setDir] = useState(null); // { status: 'OK'|'ERROR'|'not-configured', ... }
   const [dirLoading, setDirLoading] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [optId, setOptId] = useState(null);
+  const [autoRun, setAutoRun] = useState(null);
+  const [genDate, setGenDate] = useState('');
+  const [genBusy, setGenBusy] = useState(false);
 
   const load = () => {
     api.get('/api/admin/routes').then((r) => setRoutes(Array.isArray(r) ? r : [])).catch(() => {});
     api.get('/api/admin/users?role=employee').then((rows) => setEmployees(Array.isArray(rows) ? rows : [])).catch(() => {});
+    api.get('/api/v3/routes/auto-run').then((s) => setAutoRun(s || null)).catch(() => setAutoRun(null));
   };
   useEffect(() => { load(); }, []);
+
+  const runAutoAssign = async () => {
+    if (autoBusy) return;
+    setAutoBusy(true);
+    try {
+      const res = await api.post('/api/v3/routes/auto-assign', {});
+      const n = (res && (res.assigned || []).length) || 0;
+      toast(res && res.message ? res.message : (n ? `Auto-assigned ${n} employee(s) to the nearest route` : 'No unassigned employees — everyone is already on a route'));
+      setAutoRun(res && res.autoRun);
+      load();
+    } catch (e) { toast(e.message || 'Auto-assign failed', 'err'); } finally { setAutoBusy(false); }
+  };
+
+  const optimizeRoute = async (r) => {
+    setOptId(r.id);
+    try {
+      const res = await api.post(`/api/v3/routes/${r.id}/optimize`, {});
+      toast(res && res.optimized ? `Route "${r.name}" pickup/drop order optimized` : 'Route order already optimal');
+      load();
+    } catch (e) { toast(e.message || 'Optimize failed', 'err'); } finally { setOptId(null); }
+  };
+
+  const saveAutoRun = async (patch) => {
+    const next = { ...(autoRun || { auto_active: 0 }), ...patch };
+    try {
+      const res = await api.post('/api/v3/routes/auto-run', next);
+      setAutoRun(res || next);
+      toast(res && res.active ? 'Auto roster enabled — schedules will be generated daily' : 'Auto roster disabled');
+    } catch (e) { toast(e.message || 'Failed to save', 'err'); }
+  };
+
+  const generateRosters = async () => {
+    if (!genDate) return toast('Choose a date first', 'err');
+    setGenBusy(true);
+    try {
+      const res = await api.post(`/api/v3/routes/generate-schedules?date=${genDate}`, {});
+      toast(res ? res.message : 'Roster generated for ' + genDate);
+    } catch (e) { toast(e.message || 'Generation failed', 'err'); } finally { setGenBusy(false); }
+  };
 
   const save = async () => {
     if (!form.name || form.stops.length < 2) return toast('Route needs a name and at least 2 stops', 'err');
@@ -207,6 +252,44 @@ export default function RoutesPage() {
         {!isVendor && <button className="btn btn-primary" onClick={() => { setEditing(null); setForm(emptyRoute); setMapFor(null); setDir(null); setModal(true); }}><Plus size={16} /> New route</button>}
       </div>
 
+      {!isVendor && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card-title" style={{ fontSize: 13, marginBottom: 10 }}><Wand2 size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} color="#7c3aed" />SMART ROUTES</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn btn-outline" disabled={autoBusy} onClick={runAutoAssign}>
+              {autoBusy ? <Loader2 size={15} style={{ animation: 'spin .8s linear infinite' }} /> : <Wand2 size={15} />} {autoBusy ? 'Assigning…' : 'Auto-assign unassigned employees'}
+            </button>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10 }}>
+              <CalendarClock size={15} color="var(--slate)" />
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Daily roster</span>
+              <button className={`btn btn-sm ${autoRun?.active ? 'btn-green' : 'btn-outline'}`} onClick={() => saveAutoRun({ active: autoRun?.active ? 0 : 1 })}>
+                {autoRun?.active ? 'ON' : 'OFF'}
+              </button>
+              {autoRun?.active && (
+                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>pickup {autoRun.pickup_time} · drop {autoRun.drop_time} · next {autoRun.next_run}</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="date" value={genDate} onChange={(e) => setGenDate(e.target.value)} style={{ width: 150 }} />
+              <button className="btn btn-primary btn-sm" disabled={genBusy || !genDate} onClick={generateRosters}>
+                {genBusy ? <Loader2 size={14} style={{ animation: 'spin .8s linear infinite' }} /> : <Play size={14} />} Generate schedules
+              </button>
+            </div>
+          </div>
+          {autoRun && (
+            <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Pickup
+                <input type="time" value={autoRun.pickup_time || '08:00'} onChange={(e) => saveAutoRun({ pickup_time: e.target.value })} style={{ width: 110, marginLeft: 6 }} />
+              </label>
+              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Drop
+                <input type="time" value={autoRun.drop_time || '18:00'} onChange={(e) => saveAutoRun({ drop_time: e.target.value })} style={{ width: 110, marginLeft: 6 }} />
+              </label>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>tip: set times, then toggle ON. A scheduled job generates tomorrow's roster from assigned routes every 5 minutes.</span>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <div className="table-wrap">
           <table className="tbl">
@@ -226,6 +309,7 @@ export default function RoutesPage() {
                   <td><Badge color={r.status === 'active' ? 'green' : 'slate'}>{r.status}</Badge></td>
                   <td>
                     <div className="actions">
+                      {!isVendor && <button className="btn btn-sm btn-outline" title="Auto-optimize pickup/drop sequence" onClick={() => optimizeRoute(r)}>{optId === r.id ? <Loader2 size={14} style={{ animation: 'spin .8s linear infinite' }} /> : <Wand2 size={14} />} Optimize</button>}
                       {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => openAssign(r)}><User size={14} /> Assign</button>}
                       {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
                       {!isVendor && <button className="btn btn-sm btn-ghost" title="Delete route" onClick={() => delRoute(r)}><Trash2 size={14} color="#ef4444" /></button>}

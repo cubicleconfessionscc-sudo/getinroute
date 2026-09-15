@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, todayStr } from '../../api';
 import { useToast, useInterval } from '../../components/ui';
 import { MapPin, ChevronRight, ArrowRight, ArrowLeft, Phone, Car, Clock } from 'lucide-react';
+import AnnouncementBanner from '../../components/AnnouncementBanner';
 
 function SwipeBtn({ direction, label, disabled, onComplete }) {
   const trackRef = useRef(null);
@@ -152,6 +153,7 @@ export default function EHome() {
 
   return (
     <div>
+      <AnnouncementBanner audiences={['employee', 'both']} />
       {allotment ? (
         <>
           <div className="m-card">

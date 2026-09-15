@@ -6,6 +6,7 @@ import { useSocketEvent } from '../../socket';
 import { api } from '../../api';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import { useNoindex } from '../../components/Noindex';
+import ThemeButton from '../../components/ThemeButton';
 import {
   LayoutDashboard, MapPinned, Route as RouteIcon, Truck, Users, ClipboardCheck,
   CalendarClock, FileSpreadsheet, Bell, LogOut, Menu, X, MessageCircle, MessageSquare, History,
@@ -22,6 +23,7 @@ const NAV_OWNER = [
     { to: '/admin/company-approvals', icon: <Building2 size={18} />, text: 'Company Approvals' },
     { to: '/admin/subscription', icon: <CreditCard size={18} />, text: 'Subscription Center' },
     { to: '/admin/feature-flags', icon: <Flag size={18} />, text: 'Feature Flags' },
+    { to: '/admin/announcements', icon: <Bell size={18} />, text: 'Announcements' },
     { to: '/admin/schools', icon: <School size={18} />, text: 'Schools' },
     { to: '/admin/admin-accounts', icon: <Shield size={18} />, text: 'Admin Accounts' },
     { to: '/admin/approvals', icon: <Users size={18} />, text: 'Drivers & Employees' },
@@ -67,6 +69,7 @@ const NAV_ADMIN = [
   ]},
   { label: 'Communicate', items: [
     { to: '/admin/chat', icon: <MessageCircle size={18} />, text: 'Messages' },
+    { to: '/admin/announcements', icon: <Bell size={18} />, text: 'Announcements' },
     { to: '/admin/sms-log', icon: <MessageSquare size={18} />, text: 'SMS Log' },
     { to: '/admin/tickets', icon: <Ticket size={18} />, text: 'Support Tickets' }
   ]},
@@ -114,6 +117,7 @@ const NAV_VENDOR = [
   ]},
   { label: 'Communicate', items: [
     { to: '/admin/chat', icon: <MessageCircle size={18} />, text: 'Messages' },
+    { to: '/admin/announcements', icon: <Bell size={18} />, text: 'Announcements' },
     { to: '/admin/sms-log', icon: <MessageSquare size={18} />, text: 'SMS Log' },
     { to: '/admin/tickets', icon: <Ticket size={18} />, text: 'Support Tickets' }
   ]},
@@ -187,6 +191,7 @@ export default function AdminLayout() {
         <div className="topbar">
           <button className="menu-btn" onClick={() => setOpen(true)}><Menu size={18} /></button>
           <div className="spacer" />
+          <ThemeButton compact />
           {!isVendor && (
             <div className="bell-wrap">
               <button className="btn btn-ghost btn-icon" onClick={() => nav('/admin/notifications')}><Bell size={19} /></button>

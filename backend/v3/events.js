@@ -97,7 +97,7 @@ function startWorker(db, io) {
 function publishRecent(io) {
   if (!_db || !io) return;
   try {
-    const rows = _db.prepare("SELECT * FROM operational_events WHERE status='processed' AND processed_at > datetime('now','localtime','-1 minute') ORDER BY id DESC LIMIT 30").all();
+    const rows = _db.prepare("SELECT * FROM operational_events WHERE status='processed' AND acknowledged_at IS NULL AND processed_at > datetime('now','localtime','-1 minute') ORDER BY id DESC LIMIT 30").all();
     if (rows.length) io.to("role:admin").emit("realtime:events", rows.map(deserialize));
   } catch (_) {}
 }
@@ -122,7 +122,7 @@ function dismiss(id, actorId) {
 
 function recentEvents(tenantId, limit = 100, since = null) {
   if (!_db) return [];
-  let q = "SELECT * FROM operational_events WHERE ((? || '') IS NULL OR tenant_id = ?)";
+  let q = "SELECT * FROM operational_events WHERE ((? || '') IS NULL OR tenant_id = ?) AND acknowledged_at IS NULL";
   const args = [tenantId || null, tenantId || null];
   if (since) { q += " AND created_at > ?"; args.push(since); }
   q += " ORDER BY id DESC LIMIT ?";

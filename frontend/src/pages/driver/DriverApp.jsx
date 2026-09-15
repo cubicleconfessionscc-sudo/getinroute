@@ -4,6 +4,7 @@ import { useAuth } from '../../auth';
 import { Home, Route as RouteIcon, Star, LogOut, Bell, MessageCircle } from 'lucide-react';
 import { api } from '../../api';
 import { useInterval } from '../../components/ui';
+import ThemeButton from '../../components/ThemeButton';
 
 export default function DriverApp() {
   const { user, logout } = useAuth();
@@ -34,6 +35,7 @@ export default function DriverApp() {
             <div className="sub">{user?.emp_id} · {user?.vertical === 'school' ? 'School Driver' : 'Driver'}</div>
           </div>
           <div className="spacer" />
+          <ThemeButton compact />
           <button className="btn btn-icon" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }}><Bell size={18} /></button>
           <button className="btn btn-icon" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} onClick={logout}><LogOut size={18} /></button>
         </div>

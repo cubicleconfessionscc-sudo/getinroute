@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { useToast, useInterval, Badge } from '../../components/ui';
 import { useSocketEvent } from '../../socket';
 import { Play, Square, ChevronRight, Users, MapPin, MessageCircle, BellRing, Navigation } from 'lucide-react';
+import AnnouncementBanner from '../../components/AnnouncementBanner';
 
 const LIVE = [
   { key: 'en_route', label: 'En route' },
@@ -112,6 +113,7 @@ export default function DHome() {
 
   return (
     <div>
+      <AnnouncementBanner audiences={['driver', 'both']} />
       <div className="m-card">
         <div className="m-label">Today's route</div>
         <h2>{data.route.name}</h2>

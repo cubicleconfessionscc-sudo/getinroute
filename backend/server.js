@@ -4498,15 +4498,30 @@ app.post('/api/admin/address-updates/:id/reject', auth, role('admin'), (req, res
   const au = db.prepare('SELECT * FROM address_updates WHERE id = ?').get(req.params.id);
   if (!au) return res.status(404).json({ error: 'Not found' });
   const corrected = req.body && req.body.correctedAddress;
-  db.prepare('UPDATE address_updates SET status=?, reviewed_by=?, reviewed_at=datetime(\'now\',\'localtime\') WHERE id=?').run('rejected', req.user.id, au.id);
+  // When the admin fixes the geocode, mark the request as 'corrected' (NOT rejected):
+  // the user's location was replaced with the verified point, keep a positive trail.
+  const finalStatus = corrected ? 'corrected' : 'rejected';
+  db.prepare('UPDATE address_updates SET status=?, reviewed_by=?, reviewed_at=datetime(\'now\',\'localtime\') WHERE id=?').run(finalStatus, req.user.id, au.id);
   if (corrected) {
     db.prepare('UPDATE users SET home_address=?, home_lat=?, home_lng=?, pending_address=NULL WHERE id=?')
       .run(corrected.address || au.old_address, corrected.lat || au.new_lat, corrected.lng || au.new_lng, au.user_id);
     setLocationStatus(au.user_id, 'approved', { note: 'Admin updated your address manually.' });
+    notify(au.user_id, 'Address Corrected ✅', 'Admin corrected your address. You can book cabs again.');
   } else {
     setLocationStatus(au.user_id, 'rejected', { note: 'Your address change was rejected. Contact admin.' });
+    notify(au.user_id, 'Address Change Rejected', 'Your address change was rejected. Contact admin.');
   }
-  notify(au.user_id, 'Address Change Rejected', corrected ? 'Admin updated your address manually.' : 'Your address change was rejected. Contact admin.');
+  res.json({ ok: true });
+});
+
+/* Dismiss an address change request without deleting the audit trail (Item 3): the
+   request row stays, marked 'dismissed', user's location is untouched. */
+app.post('/api/admin/address-updates/:id/dismiss', auth, role('admin'), (req, res) => {
+  const au = db.prepare('SELECT * FROM address_updates WHERE id = ?').get(req.params.id);
+  if (!au) return res.status(404).json({ error: 'Not found' });
+  if (au.status !== 'pending') return res.status(400).json({ error: 'Only pending requests can be dismissed' });
+  db.prepare('UPDATE address_updates SET status=?, reviewed_by=?, reviewed_at=datetime(\'now\',\'localtime\') WHERE id=?').run('dismissed', req.user.id, au.id);
+  setLocationStatus(au.user_id, 'pending', { note: 'Your address change request was dismissed by the admin.' });
   res.json({ ok: true });
 });
 

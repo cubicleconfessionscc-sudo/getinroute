@@ -213,23 +213,34 @@ export default function ApprovalsPage() {
       <div className="page-head">
         <div>
           <div className="page-title">Approvals</div>
-          <div className="page-sub">Every registration and address change is reviewed here before access is granted.</div>
+          <div className="page-sub">Employees, drivers, address changes and companies are reviewed here. A corrected address keeps the user active — it is not a rejection.</div>
         </div>
         <Badge color="amber"><ClipboardCheck size={14} /> {list.length + pendingCompanies.length + addressUpdates.filter((a) => a.status === 'pending').length} waiting</Badge>
       </div>
 
-      {addressUpdates.length > 0 && (
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[
+          ['employee', `Employees`, list.filter((u) => u.role === 'employee').length],
+          ['driver', `Drivers`, list.filter((u) => u.role === 'driver').length],
+          ['address', `Addresses`, addressUpdates.filter((a) => a.status === 'pending').length],
+          ['company', `Companies`, pendingCompanies.length],
+        ].map(([k, label, count]) => (
+          <button key={k} className={`btn btn-sm ${tab === k ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTab(k)}>{label} ({count})</button>
+        ))}
+      </div>
+
+      {tab === 'address' && addressUpdates.length > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#0ea5e9', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Home size={16} /> Address Change Requests ({addressUpdates.filter((a) => a.status === 'pending').length} pending)
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
             {addressUpdates.map((au) => (
-              <div className="card" key={au.id} style={{ borderLeft: `3px solid ${au.status === 'pending' ? '#f59e0b' : au.status === 'approved' ? '#22c55e' : '#94a3b8'}` }}>
+              <div className="card" key={au.id} style={{ borderLeft: `3px solid ${au.status === 'pending' ? '#f59e0b' : au.status === 'approved' ? '#22c55e' : au.status === 'corrected' ? '#3b82f6' : '#94a3b8'}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                   <b style={{ fontSize: 15 }}>{au.user_name}</b>
                   <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace' }}>{au.user_emp_id}</span>
-                  <Badge color={au.status === 'pending' ? 'amber' : au.status === 'approved' ? 'green' : 'slate'}>{au.status}</Badge>
+                  <Badge color={au.status === 'pending' ? 'amber' : au.status === 'approved' || au.status === 'corrected' ? 'green' : 'slate'}>{au.status}</Badge>
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--slate)' }}>
                   {au.current_address && <div style={{ marginBottom: 4 }}><b>Current:</b> {au.current_address}</div>}
@@ -250,6 +261,14 @@ export default function ApprovalsPage() {
                       <button className="btn btn-green" style={{ flex: 1, justifyContent: 'center' }} onClick={() => decideAddress(au, 'approve')}><Check size={15} /> Approve</button>
                       <button className="btn btn-outline" title="Fix address on map" onClick={() => setFixModal(au)}><MapPin size={15} /> Fix</button>
                       <button className="btn btn-danger" style={{ flex: 1, justifyContent: 'center' }} onClick={() => decideAddress(au, 'reject')}><X size={15} /> Reject</button>
+                      <button className="btn btn-ghost" title="Dismiss without changing location" onClick={async () => {
+                        if (!confirm(`Dismiss ${au.user_name}'s address request without changing anything?`)) return;
+                        try {
+                          await api.post(`/api/admin/address-updates/${au.id}/dismiss`);
+                          toast('Address request dismissed');
+                          load();
+                        } catch (e) { toast(e.message || 'Request failed', 'err'); }
+                      }}><X size={15} style={{ color: 'var(--muted)' }} /></button>
                     </div>
                   </div>
                 )}
@@ -259,7 +278,7 @@ export default function ApprovalsPage() {
         </div>
       )}
 
-      {pendingCompanies.length > 0 && (
+      {tab === 'company' && pendingCompanies.length > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#a78bfa', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Building2 size={16} /> Pending Company Registrations ({pendingCompanies.length})
@@ -289,13 +308,11 @@ export default function ApprovalsPage() {
         </div>
       )}
 
-      {list.length === 0 && pendingCompanies.length === 0 ? (
-        <div className="card"><div className="empty">No pending requests. When employees, drivers, or companies register, they'll appear here for you to accept or reject.</div></div>
-      ) : list.length > 0 ? (
+      {(tab === 'employee' || tab === 'driver') && list.length > 0 && (
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>Employee & Driver Registrations ({list.length})</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>{tab === 'employee' ? 'Employee' : 'Driver'} Registrations ({list.filter((u) => u.role === tab).length})</div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
-            {list.map((u) => (
+            {list.filter((u) => u.role === tab).map((u) => (
               <div className="card" key={u._id || u.id} style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   <div className="avatar" style={{ background: 'var(--grad-soft)', color: 'var(--primary)' }}>{(u.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}</div>
@@ -318,10 +335,16 @@ export default function ApprovalsPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {((tab === 'employee' || tab === 'driver') && list.filter((u) => u.role === tab).length === 0) ||
+       (tab === 'company' && pendingCompanies.length === 0) ||
+       (tab === 'address' && addressUpdates.length === 0) ? (
+        <div className="card"><div className="empty">Nothing waiting in this tab. When new {tab === 'address' ? 'address change requests' : tab === 'company' ? 'company registrations' : `${tab} registrations`} come in, they'll appear here.</div></div>
       ) : null}
 
       <Modal open={!!fixModal} onClose={() => { setFixModal(null); setFixAddr(null); }} title={`Set correct address for ${fixModal?.user_name || ''}`} wide>
-        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Search and select the correct address from the map dropdown, then save. This replaces the employee's requested address.</p>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Search and select the correct address from the map dropdown, then save. This replaces the employee's requested address and keeps their access active (status: corrected, not rejected).</p>
         <AddressPicker value={null} onChange={(item) => setFixAddr(item)} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={() => { setFixModal(null); setFixAddr(null); }}>Cancel</button>

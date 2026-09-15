@@ -4,7 +4,7 @@ import { useToast } from '../../components/ui';
 import { useSocketEvent } from '../../socket';
 import {
   Command, Search, AlertTriangle, CheckCircle2, Activity, Zap, Users, TrendingUp,
-  CalendarClock, Inbox, ShieldAlert, Cpu, Settings
+  CalendarClock, Inbox, ShieldAlert, Cpu, Settings, X
 } from 'lucide-react';
 
 const SEVERITY_COLOR = { critical: '#dc2626', high: '#f97316', medium: '#eab308', low: '#10b981' };
@@ -45,6 +45,14 @@ export default function CommandCenter() {
   });
 
   const refresh = () => { load(); toast('Refreshed'); };
+
+  const dismissEvent = async (e) => {
+    try {
+      await api.post(`/api/v3/events/${e.id}/dismiss`);
+      setEvents((prev) => prev.filter((x) => x.id !== e.id));
+      toast(`Event #${e.id} dismissed (audit kept)`);
+    } catch (err) { toast(err.message || 'Failed to dismiss', 'err'); }
+  };
 
   const transition = async (inc, toStatus) => {
     try {
@@ -179,11 +187,16 @@ export default function CommandCenter() {
           {events.length === 0 ? <div className="empty">No events yet</div> : (
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {events.map((e) => (
-                <div key={e.id} style={{ padding: '6px 2px', borderBottom: '1px solid var(--line)', fontSize: 12.5, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <div key={e.id} style={{ padding: '6px 2px', borderBottom: '1px solid var(--line)', fontSize: 12.5, display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                   <div><span style={{ fontFamily: 'monospace', fontSize: 11, background: 'rgba(0,0,0,0.04)', padding: '1px 6px', borderRadius: 4 }}>{e.type}</span>
                     {e.payload && e.payload.sourceId && <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>#{e.payload.sourceId}</span>}
                   </div>
-                  <span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.created}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.created}</span>
+                    <button className="btn btn-xs btn-ghost" title="Dismiss (audit kept)" onClick={() => dismissEvent(e)}>
+                      <X size={13} style={{ color: 'var(--muted)' }} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

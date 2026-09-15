@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../api';
 import { useToast } from '../../components/ui';
-import { Zap, Plus, Trash2, Power, History, ShieldCheck, ChevronDown } from 'lucide-react';
+import { Zap, Plus, Trash2, Power, History, ShieldCheck, ChevronDown, Play } from 'lucide-react';
 
 const EVENT_TYPES = ['*', 'trip.started', 'trip.completed', 'trip.delayed', 'sos.event', 'sos.realtime',
   'overspeed.event', 'geofence.event', 'safety.event', 'heartbeat.event', 'checkin.checkin', 'checkin.checkout',
@@ -62,6 +62,15 @@ export default function AutomationBuilder() {
     try { conditions = JSON.parse(r.conditions || '[]'); } catch (_) {}
     try { actions = JSON.parse(r.actions || '[]'); } catch (_) {}
     setForm({ id: r.id, name: r.name, event_type: r.event_type, level: r.level, max_confidence: r.max_confidence != null ? String(r.max_confidence) : '', conditions, actions });
+  };
+
+  const runNow = async (r) => {
+    try {
+      const res = await api.post(`/api/v3/automation/rules/${r.id}/run`, { event_type: 'manual.run' });
+      if (res && res.skipped) return toast(`Rule skipped (safety override)`, 'info');
+      toast(`Run Now: ${r.name} executed`);
+      load();
+    } catch (e) { toast(e.message || 'Run failed', 'err'); }
   };
 
   const openForm = () => setForm({ id: null, name: '', event_type: '*', level: 1, max_confidence: '', conditions: [], actions: [] });
@@ -162,7 +171,8 @@ export default function AutomationBuilder() {
                       <td style={{ padding: '8px' }}>{r.run_count || 0}</td>
                       <td style={{ padding: '8px' }}>{r.enabled ? <span style={{ color: '#4ade80', fontWeight: 700 }}>ON</span> : <span className="muted">OFF</span>}</td>
                       <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
-                        <button className="btn btn-sm" onClick={() => edit(r)}><ChevronDown size={13} style={{ marginRight: 2, verticalAlign: 'middle' }} />Edit</button>
+                        <button className="btn btn-sm" onClick={() => runNow(r)} title="Run this rule now (even if disabled)"><Play size={13} style={{ marginRight: 2, verticalAlign: 'middle' }} />Run Now</button>
+                        <button className="btn btn-sm" onClick={() => edit(r)} style={{ marginLeft: 6 }}><ChevronDown size={13} style={{ marginRight: 2, verticalAlign: 'middle' }} />Edit</button>
                         <button className={`btn btn-sm ${r.enabled ? 'btn-danger' : 'btn-green'}`} onClick={() => toggle(r)} style={{ marginLeft: 6 }}><Power size={13} style={{ verticalAlign: 'middle' }} /></button>
                       </td>
                     </tr>
