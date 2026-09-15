@@ -298,6 +298,15 @@ function splitStatements(sql) {
       i++;
       continue;
     }
+    // Skip SQL block comments entirely so semicolons inside /* */ never
+    // split a statement (PostgreSQL rejects truncated /* comments).
+    if (c === '/' && sql[i + 1] === '*' && !quote) {
+      const end = sql.indexOf('*/', i + 2);
+      const stop = end === -1 ? sql.length : end + 3;
+      cur += sql.slice(i, stop);
+      i = stop;
+      continue;
+    }
     if (quote) {
       if (c === quote) {
         if (sql[i + 1] === quote) {
@@ -338,3 +347,4 @@ function splitStatements(sql) {
 
 module.exports = db_pg;
 module.exports.preparePGLite = preparePGLite;
+module.exports.splitStatements = splitStatements;

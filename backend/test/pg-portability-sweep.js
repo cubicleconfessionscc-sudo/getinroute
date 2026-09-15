@@ -133,6 +133,40 @@ if (pgmemAvailable) {
     pub.none(DDL_PG);
   } catch (e) { console.log('pg-mem schema (v3) skipped:', e.message.split('\n')[0]); }
 
+  // Runtime DDL splitter regression: production executes DDL_PG via
+  // pgdb.splitStatements(), which must never truncate a /* comment (e.g. a
+  // `;` inside a comment previously split mid-comment -> PG "unterminated
+  // /* comment"). Verify every produced fragment is comment-balanced and
+  // parses in pg-mem.
+  {
+    const splitStatements = pgdb.splitStatements;
+    const ddl = require(path.join(ROOT, 'v3/schema.js')).DDL_PG;
+    const stmts = splitStatements(ddl);
+    let unbalanced = 0, fragFails = 0;
+    for (const s of stmts) {
+      const t = s.trim();
+      if (!t) continue;
+      const opens = (t.match(/\/\*/g) || []).length;
+      const closes = (t.match(/\*\//g) || []).length;
+      if (opens !== closes) {
+        unbalanced++;
+        console.log(FAIL, 'splitStatements unbalanced comment', '\n  ', t.slice(0, 140));
+        continue;
+      }
+      try {
+        pub.none(inlineGeneric(t));
+      } catch (e) {
+        // "already exists" etc are runtime (skip); genuine syntax is a parse failure
+        if (e && /syntax error|failed to parse|invalid syntax/.test(e.message || '')) {
+          fragFails++;
+          console.log(FAIL, 'splitStatements frag parse', '\n  ', t.slice(0, 220), '\n   =>', e.message.split('\n')[0]);
+        }
+      }
+    }
+    bad += unbalanced + fragFails;
+    console.log(`runtime split ok  ${stmts.filter((s) => s.trim()).length} DDL fragments, comment-balanced=${unbalanced === 0}`);
+  }
+
   function inlineGeneric(sql) {
     let out = '', i = 0, quote = null;
     while (i < sql.length) {

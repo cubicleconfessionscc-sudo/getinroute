@@ -389,7 +389,7 @@ CREATE TABLE IF NOT EXISTS employee_suspensions (
 );
 CREATE INDEX IF NOT EXISTS idx_susp_emp ON employee_suspensions(employee_id, status);
 
-/* ---- Announcements (Admin-only publishing; targeted Employee/Driver/School/Both) ---- */
+/* ---- Announcements (Admin-only publishing, targeted Employee/Driver/School/Both) ---- */
 CREATE TABLE IF NOT EXISTS announcements (
   ${COLS.idSQL},
   company_id INTEGER,
@@ -803,7 +803,7 @@ CREATE TABLE IF NOT EXISTS employee_suspensions (
 );
 CREATE INDEX IF NOT EXISTS idx_susp_emp ON employee_suspensions(employee_id, status);
 
-/* ---- Announcements (Admin-only publishing; targeted Employee/Driver/School/Both) ---- */
+/* ---- Announcements (Admin-only publishing, targeted Employee/Driver/School/Both) ---- */
 CREATE TABLE IF NOT EXISTS announcements (
   ${COLS.idPG},
   company_id BIGINT,
