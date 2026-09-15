@@ -1,16 +1,23 @@
-// Dynamic app config: the same Expo project ships as two genuinely separate
-// builds. APP_VARIANT is baked at build time by eas.json (preview/production =>
-// 'company', school profile => 'school'). Each variant gets its own identity:
-// distinct display name, Android package / iOS bundle id, icon, splash color
-// and runtime data. The runtime entry (App.js) reads extra.appVariant to mount
-// the matching root navigator, so the School build is a real, separate app and
-// never shows "Employee" branding.
+// Dynamic app config: the same Expo project ships as genuinely separate
+// builds. APP_VARIANT is baked at build time by eas.json ('company' => the
+// GetInRoute employee + driver app, 'driver' => GetInRoute Driver, 'school' =>
+// GetInRoute School). Each variant gets its own identity: distinct display
+// name, Android package / iOS bundle id and runtime data. The runtime entry
+// (App.js) reads extra.appVariant to mount the matching root, so each build is
+// a real, separate app and never shows another variant's branding.
 const VARIANT = (process.env.APP_VARIANT || 'company').toLowerCase();
 const IS_SCHOOL = VARIANT === 'school';
+const IS_DRIVER = VARIANT === 'driver';
+
+const identity = IS_SCHOOL
+  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 1, bg: '#0F766E' }
+  : IS_DRIVER
+    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 1, bg: '#10141A' }
+    : { name: 'GetInRoute', pkg: 'com.getinroute.app', vc: 23, bg: '#10141A' };
 
 module.exports = {
   expo: {
-    name: IS_SCHOOL ? 'GetInRoute School' : 'GetInRoute',
+    name: identity.name,
     slug: 'clement',
     version: '1.0.4',
     orientation: 'portrait',
@@ -24,12 +31,12 @@ module.exports = {
     },
     icon: IS_SCHOOL ? './assets/school-icon.png' : './assets/icon.png',
     splash: {
-      backgroundColor: IS_SCHOOL ? '#0F766E' : '#10141A'
+      backgroundColor: identity.bg
     },
     assetBundlePatterns: ['**/*'],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: IS_SCHOOL ? 'com.getinroute.school' : 'com.getinroute.app',
+      bundleIdentifier: identity.pkg,
       config: { usesNonExemptEncryption: false },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'GetInRoute needs your location to track your commute and, for drivers, to share live position with employees and admins.',
@@ -38,22 +45,22 @@ module.exports = {
       runtimeVersion: { policy: 'appVersion' }
     },
     android: {
-      package: IS_SCHOOL ? 'com.getinroute.school' : 'com.getinroute.app',
+      package: identity.pkg,
       compileSdkVersion: 35,
       targetSdkVersion: 35,
       runtimeVersion: { policy: 'appVersion' },
       adaptiveIcon: {
         foregroundImage: IS_SCHOOL ? './assets/school-adaptive-icon.png' : './assets/adaptive-icon.png',
-        backgroundColor: IS_SCHOOL ? '#0F766E' : '#10141A'
+        backgroundColor: identity.bg
       },
       permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION'],
       config: {
         googleMaps: { apiKey: 'AIzaSyDZ6JqrpMh1o8_zbtR_N1RNjaPDJQKSEgE' }
       },
-      versionCode: IS_SCHOOL ? 1 : 23
+      versionCode: identity.vc
     },
     extra: {
-      appVariant: IS_SCHOOL ? 'school' : 'company',
+      appVariant: VARIANT,
       eas: { projectId: '25f0833c-90f8-426f-bacb-0e2e12527a3e' }
     },
     owner: 'clementedwins-team'

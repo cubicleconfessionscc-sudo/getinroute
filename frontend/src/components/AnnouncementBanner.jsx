@@ -13,7 +13,7 @@ export default function AnnouncementBanner({ audiences = ['employee', 'both'] })
     if (!user) return;
     api.get('/api/v3/apps/announcements', { audience: audiences.join(',') })
       .then((r) => {
-        const arr = Array.isArray(r) ? r : [];
+        const arr = (r && r.announcements) || [];
         const ours = arr.filter((a) => audiences.includes(a.audience) || a.audience === 'both');
         setItems(ours);
       }).catch(() => {});

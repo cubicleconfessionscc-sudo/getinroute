@@ -7,16 +7,21 @@ import StartupGate from "./src/components/StartupGate";
 import RootNavigator from "./src/navigation/RootNavigator";
 import SchoolApp from "./src/school/SchoolApp";
 import { registerGlobalErrorHandlers } from "./src/services/globalErrors";
+import { startSyncLoop } from "./src/services/offlineQueue";
 
 // The build variant is baked into the app config at build time by eas.json
-// (preview/production => "company", school => "school"). Selecting the root
-// from the on-device config keeps this a single codebase but two real apps.
+// (company => GetInRoute, driver => GetInRoute Driver, school => GetInRoute
+// School). Selecting the root from the on-device config keeps this a single
+// codebase but genuinely separate apps. Company and driver builds share the
+// role-based RootNavigator (employees land on employee screens, drivers on
+// driver screens); school mounts its own dedicated root.
 const VARIANT = Constants.expoConfig?.extra?.appVariant || "company";
 
 function CompanyApp() {
   useEffect(() => {
     const unregister = registerGlobalErrorHandlers();
-    return unregister;
+    const timer = startSyncLoop();
+    return () => { if (unregister) unregister(); if (timer) clearInterval(timer); };
   }, []);
 
   return (

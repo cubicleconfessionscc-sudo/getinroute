@@ -11,6 +11,7 @@ import { notifyTripAssigned, notifyChatMessage } from "../../services/notificati
 import { useAuth } from "../../context/AuthContext";
 import SwipeButton from "../../components/SwipeButton";
 import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
+import OfflineBanner from "../../components/OfflineBanner";
 import { colors, spacing, radius } from "../../theme";
 
 export default function EmployeeHomeScreen({ navigation }) {
@@ -467,6 +468,10 @@ export default function EmployeeHomeScreen({ navigation }) {
         </View>
       ) : null}
 
+      <View style={styles.bannerWrap}>
+        <OfflineBanner onOpenSync={() => navigation.navigate("PendingSync")} />
+      </View>
+
       {locationStatus !== "none" && locationStatus !== "approved" && (
         <View style={[styles.card, styles.pendingCard]}>
           <Text style={styles.pendingTitle}>
@@ -708,6 +713,7 @@ function dirLabel(dir) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg, overflow: "hidden" },
   fill: { flex: 1 },
+  bannerWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xs },
   watermark: {
     position: "absolute",
     left: 0,

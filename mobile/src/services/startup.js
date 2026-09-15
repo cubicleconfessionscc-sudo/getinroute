@@ -42,9 +42,9 @@ const DEFAULT_CONFIG = {
 
 function appId() {
   const variant = Constants.expoConfig?.extra?.appVariant || "company";
-  // Company build serves both employee and driver roles; the natural
-  // store identity is the single "GetInRoute" app.
+  // Each build variant is a real, separate app with its own store identity.
   if (variant === "school") return "school";
+  if (variant === "driver") return "driver";
   return "employee";
 }
 

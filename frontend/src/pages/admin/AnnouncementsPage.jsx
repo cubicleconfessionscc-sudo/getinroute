@@ -17,7 +17,7 @@ export default function AnnouncementsPage() {
   const [modal, setModal] = useState(false);
 
   const load = () => {
-    api.get('/api/v3/admin/announcements').then((r) => setList(Array.isArray(r) ? r : [])).catch(() => {});
+    api.get('/api/v3/admin/announcements').then((r) => setList((r && r.announcements) || [])).catch(() => {});
     setLoading(false);
   };
   useEffect(() => { load(); }, []);

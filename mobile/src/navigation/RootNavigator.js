@@ -27,6 +27,7 @@ const ChatScreen = lazy(() => import("../screens/shared/ChatScreen"));
 const FeedbackScreen = lazy(() => import("../screens/shared/FeedbackScreen"));
 const HelpScreen = lazy(() => import("../screens/shared/HelpScreen"));
 const SettingsScreen = lazy(() => import("../screens/shared/SettingsScreen"));
+const PendingSyncScreen = lazy(() => import("../screens/shared/PendingSyncScreen"));
 
 const Stack = createNativeStackNavigator();
 
@@ -96,6 +97,7 @@ function EmployeeStack() {
       <Stack.Screen name="Feedback" component={FeedbackScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Feedback" })} />
       <Stack.Screen name="Help" component={HelpScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Help" })} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Settings" })} />
+      <Stack.Screen name="PendingSync" component={PendingSyncScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Pending Sync" })} />
     </Stack.Navigator>
   );
 }
@@ -108,6 +110,7 @@ function DriverStack() {
       <Stack.Screen name="Feedback" component={FeedbackScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Feedback" })} />
       <Stack.Screen name="Help" component={HelpScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Help" })} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Settings" })} />
+      <Stack.Screen name="PendingSync" component={PendingSyncScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Pending Sync" })} />
     </Stack.Navigator>
   );
 }

@@ -9,6 +9,18 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "company"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "driver": {
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "driver"
+      },
       "android": {
         "buildType": "apk"
       }

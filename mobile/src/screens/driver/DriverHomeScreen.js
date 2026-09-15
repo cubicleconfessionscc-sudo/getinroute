@@ -10,6 +10,7 @@ import { startDriverTracking, stopDriverTracking } from "../../services/location
 import { getSupportConfig } from "../../api/support";
 import { useAuth } from "../../context/AuthContext";
 import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
+import OfflineBanner from "../../components/OfflineBanner";
 import { speakTripAssigned } from "../../services/voice";
 import { notifyTripAssigned, notifyChatMessage } from "../../services/notifications";
 import { colors, spacing, radius } from "../../theme";
@@ -528,6 +529,10 @@ export default function DriverHomeScreen({ navigation }) {
         </View>
       ) : null}
 
+      <View style={styles.bannerWrap}>
+        <OfflineBanner onOpenSync={() => navigation.navigate("PendingSync")} />
+      </View>
+
       {run && (
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Allotted cab</Text>
@@ -834,6 +839,7 @@ export default function DriverHomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg, overflow: "hidden" },
   fill: { flex: 1 },
+  bannerWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xs },
   watermark: {
     position: "absolute",
     left: 0,

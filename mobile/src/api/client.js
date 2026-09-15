@@ -1,4 +1,5 @@
 import axios from "axios";
+import { handleOffline, setSender, flush, markOnline, cachePut } from "../services/offlineQueue";
 
 // Point this at your deployed GetInRoute backend. Everything in the app
 // (axios + the socket URL, which is derived by stripping "/api") follows this.
@@ -31,6 +32,50 @@ client.interceptors.request.use(async (config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+
+// ---- Offline sync wiring (see services/offlineQueue.js) ----
+// Retry sender replays queued writes with the user's token but WITHOUT the
+// interceptors, so a network failure there keeps the item queued instead of
+// recursively re-queuing it.
+setSender(async (method, url, data) => {
+  const token = await getToken();
+  const res = await axios.request({
+    method,
+    url,
+    data: data === undefined ? undefined : data,
+    headers: {
+      Authorization: token ? `Bearer ${token}` : undefined,
+      "Content-Type": "application/json"
+    },
+    timeout: 15000
+  });
+  return res.data;
+});
+
+client.interceptors.response.use(
+  async (res) => {
+    markOnline();
+    // Cache successful GETs so screens keep showing last-known data offline.
+    if (String(res.config.method || "get").toLowerCase() === "get") {
+      try { cachePut({ baseURL: res.config.baseURL, url: res.config.url, params: res.config.params }, res.data); } catch (e) {}
+    }
+    flush().catch(() => {});
+    return res;
+  },
+  async (err) => {
+    if (err.response) return Promise.reject(err); // server answered: surface the real error
+    const fallback = await handleOffline(err, err.config);
+    if (fallback) {
+      // Mirror the shape of a successful axios response so existing
+      // callers (`res.data`, `.then(r => r)`) keep working while offline.
+      return { data: fallback, status: 200, statusText: "OK", headers: {}, config: err.config };
+    }
+    const offlineError = new Error("You are offline. Check your connection and retry.");
+    offlineError.offline = true;
+    offlineError.cause = err;
+    return Promise.reject(offlineError);
+  }
+);
 
 // Decode the JWT `exp` claim (seconds since epoch) so the app can show the
 // user how long their session stays valid and can pre-emptively clear
