@@ -58,32 +58,65 @@ function log(level, tag, message) {
   }
 }
 
-async function checkHealth(timeoutMs = 10000) {
-  // A dedicated axios instance with a short timeout so the health probe
-  // never blocks startup for long on a flaky network.
-  const { default: axios } = await import("axios");
-  const probe = axios.create({
-    baseURL: API_BASE_URL,
-    timeout: timeoutMs,
-    validateStatus: (s) => s < 500,
-  });
-  const res = await probe.get("/health");
-  if (res.status !== 200) {
-    throw new Error("health:unavailable");
-  }
-  return res.data || {};
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchAppConfig(timeoutMs = 10000) {
+function apiOrigin() {
+  // Strip any path from the base URL (e.g. ".../api" -> origin) without
+  // depending on URL/URL.origin support in the JS engine.
+  const u = String(API_BASE_URL);
+  const scheme = u.indexOf("://") + 3;
+  const pathStart = u.indexOf("/", scheme);
+  return pathStart === -1 ? u : u.slice(0, pathStart);
+}
+
+// The server exposes its liveness endpoint at the origin root (GET /health).
+// Small dedicated axios instances + bounded attempts so the health probe never
+// blocks startup for long on a flaky network, but still recovers from a
+// transient blip automatically.
+async function checkHealth(timeoutMs = 4500, attempts = 3) {
+  const { default: axios } = await import("axios");
+  const origin = apiOrigin();
+  let lastErr = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await delay(700 * attempt);
+    const probe = axios.create({
+      baseURL: origin,
+      timeout: timeoutMs,
+      validateStatus: (s) => s < 500,
+    });
+    try {
+      const res = await probe.get("/health");
+      if (res.status === 200) {
+        return res.data || {};
+      }
+      log("warn", "health", `attempt ${attempt + 1}/${attempts} -> HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+      log("warn", "health", `attempt ${attempt + 1}/${attempts} -> ${err && err.message}`);
+    }
+  }
+  throw lastErr || new Error("health:unavailable");
+}
+
+async function fetchAppConfig(timeoutMs = 8000) {
   const { default: axios } = await import("axios");
   const probe = axios.create({ baseURL: API_BASE_URL, timeout: timeoutMs });
-  try {
-    const res = await probe.get(`/api/mobile/app-config?app=${appId()}`);
-    return (res && res.data) || {};
-  } catch {
-    // Old backend without the endpoint: treat as no-gating update policy.
-    return {};
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await delay(400);
+    try {
+      const res = await probe.get(`/mobile/app-config?app=${appId()}`);
+      return (res && res.data) || {};
+    } catch (err) {
+      lastErr = err;
+    }
   }
+  // Old backend without the endpoint, or no connectivity: treat as no-gating
+  // update policy. Health already ran; this must never block the app.
+  log("warn", "config", lastErr && lastErr.message);
+  return {};
 }
 
 // Runs the full startup pipeline. Returns the final startup state plus any

@@ -120,7 +120,7 @@ app.get('/apk/school', (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   let dbOk = true;
   try {
     db.prepare('SELECT 1 AS ok').get();
