@@ -6028,35 +6028,47 @@ const APK_SEED_URLS = {
   'GetInRouteSchool.apk': process.env.SCHOOL_APK_SOURCE_URL || ''
 };
 function seedApkFromUrl(url, dst, name) {
-  const lib = url.startsWith('https:') ? https : http;
   const tmp = `${dst}.tmp`;
-  console.log(`[apk-bootstrap] downloading ${name} -> ${dst}`);
-  lib.get(url, (up) => {
-    if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); console.error(`[apk-bootstrap] seed failed ${name} status=${up.statusCode}`); try { fs.unlinkSync(tmp); } catch (e) {} return; }
-    const ct = (up.headers['content-type'] || '').toLowerCase();
-    const expectedMin = name.endsWith('.apk') ? 10 * 1024 * 1024 : 1024 * 1024;
-    if (ct.includes('text/html')) {
-      up.resume();
-      console.error(`[apk-bootstrap] seed failed ${name}: got text/html (redirect page, not a real binary)`);
-      try { fs.unlinkSync(tmp); } catch (e) {}
-      return;
-    }
-    const out = fs.createWriteStream(tmp);
-    up.pipe(out);
-    out.on('finish', () => out.close(() => {
-      try {
-        const sz = fs.statSync(tmp).size;
-        if (sz < expectedMin) {
-          console.error(`[apk-bootstrap] seed failed ${name}: file too small (${sz} bytes < ${expectedMin})`);
-          fs.unlinkSync(tmp);
-          return;
-        }
-        fs.renameSync(tmp, dst);
-        console.log(`[apk-bootstrap] seeded ${name} (${sz} bytes)`);
-      } catch (e) { console.error(`[apk-bootstrap] seed rename ${name}: ${e.message}`); }
-    }));
-    out.on('error', (e) => { console.error(`[apk-bootstrap] seed write ${name}: ${e.message}`); try { fs.unlinkSync(tmp); } catch (e2) {} });
-  }).on('error', (e) => console.error(`[apk-bootstrap] seed get ${name}: ${e.message}`));
+  const download = (u, redirects) => {
+    const lib = u.startsWith('https:') ? https : http;
+    console.log(`[apk-bootstrap] downloading ${name} -> ${dst}`);
+    lib.get(u, (up) => {
+      // EAS artifact URLs 302 to GCS; follow up to 5 redirects like the
+      // runtime download fallback, otherwise the seed silently fails.
+      if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location) {
+        up.resume();
+        if (redirects >= 5) { console.error(`[apk-bootstrap] seed failed ${name}: too many redirects`); return; }
+        let next = null;
+        try { next = new URL(up.headers.location, u).toString(); } catch (e) { console.error(`[apk-bootstrap] seed failed ${name}: bad redirect`); return; }
+        return download(next, redirects + 1);
+      }
+      if (up.statusCode < 200 || up.statusCode >= 400) { up.resume(); console.error(`[apk-bootstrap] seed failed ${name} status=${up.statusCode}`); try { fs.unlinkSync(tmp); } catch (e) {} return; }
+      const ct = (up.headers['content-type'] || '').toLowerCase();
+      const expectedMin = name.endsWith('.apk') ? 10 * 1024 * 1024 : 1024 * 1024;
+      if (ct.includes('text/html')) {
+        up.resume();
+        console.error(`[apk-bootstrap] seed failed ${name}: got text/html (redirect page, not a real binary)`);
+        try { fs.unlinkSync(tmp); } catch (e) {}
+        return;
+      }
+      const out = fs.createWriteStream(tmp);
+      up.pipe(out);
+      out.on('finish', () => out.close(() => {
+        try {
+          const sz = fs.statSync(tmp).size;
+          if (sz < expectedMin) {
+            console.error(`[apk-bootstrap] seed failed ${name}: file too small (${sz} bytes < ${expectedMin})`);
+            fs.unlinkSync(tmp);
+            return;
+          }
+          fs.renameSync(tmp, dst);
+          console.log(`[apk-bootstrap] seeded ${name} (${sz} bytes)`);
+        } catch (e) { console.error(`[apk-bootstrap] seed rename ${name}: ${e.message}`); }
+      }));
+      out.on('error', (e) => { console.error(`[apk-bootstrap] seed write ${name}: ${e.message}`); try { fs.unlinkSync(tmp); } catch (e2) {} });
+    }).on('error', (e) => console.error(`[apk-bootstrap] seed get ${name}: ${e.message}`));
+  };
+  download(url, 0);
 }
 if (apkVolumeDir) {
   try {
