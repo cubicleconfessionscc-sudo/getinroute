@@ -6061,6 +6061,11 @@ function seedApkFromUrl(url, dst, name) {
             fs.unlinkSync(tmp);
             return;
           }
+          if (fs.existsSync(dst)) {
+            console.log(`[apk-bootstrap] skip ${name}: ${dst} already present (keeping existing build)`);
+            try { fs.unlinkSync(tmp); } catch (e) {}
+            return;
+          }
           fs.renameSync(tmp, dst);
           console.log(`[apk-bootstrap] seeded ${name} (${sz} bytes)`);
         } catch (e) { console.error(`[apk-bootstrap] seed rename ${name}: ${e.message}`); }
@@ -6073,7 +6078,10 @@ function seedApkFromUrl(url, dst, name) {
 if (apkVolumeDir) {
   try {
     fs.mkdirSync(apkVolumeDir, { recursive: true });
-    const staged = [path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(BINARIES_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
+    // Prefer the packaged binaries/ copies first (public/download is excluded
+    // from the deploy image via .railwayignore, so a download/ first entry would
+    // start an async URL seed that later renames over a good copy).
+    const staged = [path.join(BINARIES_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(BINARIES_DIR, 'GetInRouteSchool.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
     // Explicit version bump (APK_SEED_VERSION) forces the volume APKs to be
     // re-seeded from newly built artifacts on the next deploy. Without it the
     // persistent volume keeps serving the last-good builds and nothing changes.
