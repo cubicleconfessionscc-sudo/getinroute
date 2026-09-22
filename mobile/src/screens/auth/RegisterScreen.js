@@ -6,11 +6,12 @@ import { lookupCompany } from "../../api/company";
 import { colors, spacing, radius } from "../../theme";
 
 // This build is a genuine separate app. The Employee build only ever registers
-// employees; the Driver build only ever registers drivers. The role is fixed by
-// the variant (backed up by server-side enforcement) instead of a user toggle,
-// so the two apps can never switch roles on device.
+// employees (the driver option is hidden on account creation); the Driver build
+// only ever registers drivers. The role is fixed by the variant (backed up by
+// server-side enforcement) instead of a user toggle, so the two apps can never
+// switch roles on device. The School build keeps its own role choices.
 const VARIANT = Constants.expoConfig?.extra?.appVariant || "company";
-const LOCKED_ROLE = VARIANT === "driver" ? "driver" : null;
+const LOCKED_ROLE = VARIANT === "driver" ? "driver" : VARIANT === "company" ? "employee" : null;
 const APP_NAME = VARIANT === "driver" ? "GetInRoute Driver" : "GetInRoute";
 
 export default function RegisterScreen({ navigation }) {
