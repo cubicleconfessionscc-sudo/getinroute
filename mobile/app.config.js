@@ -13,7 +13,7 @@ const identity = IS_SCHOOL
   ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 1, bg: '#0F766E' }
   : IS_DRIVER
     ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 1, bg: '#10141A' }
-    : { name: 'GetInRoute', pkg: 'com.getinroute.app', vc: 23, bg: '#10141A' };
+    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 23, bg: '#10141A' };
 
 module.exports = {
   expo: {

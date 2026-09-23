@@ -23,7 +23,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.getinroute.app",
+      "bundleIdentifier": "com.getinroute.employee",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -36,7 +36,7 @@
       }
     },
     "android": {
-      "package": "com.getinroute.app",
+      "package": "com.getinroute.employee",
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "runtimeVersion": {
