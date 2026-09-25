@@ -1,0 +1,15 @@
+# GetInRoute - Google Play Console testers
+# Create each account at accounts.google.com, then add the addresses
+# under Play Console -> app -> Testing -> Internal/Closed testing -> Testers.
+getinroute.tester01@gmail.com
+getinroute.tester02@gmail.com
+getinroute.tester03@gmail.com
+getinroute.tester04@gmail.com
+getinroute.tester05@gmail.com
+getinroute.tester06@gmail.com
+getinroute.tester07@gmail.com
+getinroute.tester08@gmail.com
+getinroute.tester09@gmail.com
+getinroute.tester10@gmail.com
+getinroute.tester11@gmail.com
+getinroute.tester12@gmail.com

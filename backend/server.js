@@ -1689,6 +1689,7 @@ app.get('/api/admin/users', auth, role('admin', 'vendor'), (req, res) => {
     approved: u.approved, status: u.approved === 1 ? 'approved' : u.approved === 0 ? 'pending' : 'suspended',
     isLocked: u.locked_until && new Date(u.locked_until) > new Date(),
     vehicle_id: u.vehicle_id, lat: u.lat, lng: u.lng, last_update: u.last_update, created_at: u.created_at,
+    home_address: u.home_address, home_lat: u.home_lat, home_lng: u.home_lng,
     isOwner: u.emp_id === 'ADMIN'
   })));
 });

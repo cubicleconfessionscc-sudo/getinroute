@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { MapPin, Search, Loader2 } from 'lucide-react';
 import { searchAddress } from '../lib/geo';
 
@@ -11,6 +12,7 @@ export default function AddressPicker({ value, onChange }) {
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef(null);
   const boxRef = useRef(null);
+  const ddRef = useRef(null);
 
   useEffect(() => { if (value) setSelected(value); }, [value && value.address, value && value.lat]);
 
@@ -35,23 +37,40 @@ export default function AddressPicker({ value, onChange }) {
   };
 
   useEffect(() => {
-    const h = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    const h = (e) => {
+      const inBox = boxRef.current && boxRef.current.contains(e.target);
+      const inDd = ddRef.current && ddRef.current.contains(e.target);
+      if (!inBox && !inDd) setOpen(false);
+    };
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', h);
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', esc); };
   }, []);
 
-  useEffect(() => { if (results.length) openDropdown(); else setOpen(false); }, [results]); // eslint-disable-line react-hooks/exhaustive-deps
+  const measure = useCallback(() => {
+    const input = boxRef.current && boxRef.current.querySelector('input');
+    if (!input) return;
+    const r = input.getBoundingClientRect();
+    setDropPos({ top: r.bottom + 4, left: r.left, width: r.width });
+  }, []);
 
-  const openDropdown = () => {
-    const input = boxRef.current?.querySelector('input');
-    if (input) {
-      const r = input.getBoundingClientRect();
-      setDropPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    }
-    setOpen(results.length > 0);
-  };
+  useEffect(() => {
+    if (!results.length) { setOpen(false); return; }
+    measure();
+    setOpen(true);
+  }, [results, measure]);
+
+  useEffect(() => {
+    if (!open) return;
+    measure();
+    document.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      document.removeEventListener('scroll', measure, true);
+      window.removeEventListener('resize', measure);
+    };
+  }, [open, measure]);
 
   const pick = (r) => {
     setOpen(false);
@@ -71,6 +90,21 @@ export default function AddressPicker({ value, onChange }) {
     onChange && onChange(item);
   };
 
+  const dropdown = open && results.length > 0 && dropPos
+    ? createPortal(
+        <div ref={ddRef} className="addr-dd" style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}>
+          {results.map((r, i) => (
+            <button key={`${r.provider_id || i}-${i}`} type="button" className="addr-dd-item" onClick={() => pick(r)}>
+              <MapPin size={14} color="var(--primary)" style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>{r.label || r.address}</span>
+            </button>
+          ))}
+          <div className="addr-dd-foot">OpenStreetMap data</div>
+        </div>,
+        document.body
+      )
+    : null;
+
   return (
     <div ref={boxRef} style={{ position: 'relative' }}>
       <div style={{ position: 'relative' }}>
@@ -84,24 +118,9 @@ export default function AddressPicker({ value, onChange }) {
         {loading && <Loader2 size={15} style={{ position: 'absolute', right: 10, top: 11, color: 'var(--muted)', animation: 'spin 1s linear infinite' }} />}
       </div>
       {!loading && query.length >= 3 && results.length === 0 && (
-        <div style={{ fontSize: 12, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '6px 10px', marginTop: 4 }}>
-          No address matches found for \u201c{query}\u201d. Try a nearby landmark or check spelling.
-        </div>
+        <div className="addr-dd-empty">No address matches found for “{query}”. Try a nearby landmark or check spelling.</div>
       )}
-      {open && results.length > 0 && dropPos && (
-        <div style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 'var(--z-dropdown, 900)', background: '#fff', border: '1px solid var(--line)', borderRadius: 10, maxHeight: 240, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,.18)' }}>
-          {results.map((r, i) => (
-            <button key={`${r.provider_id || i}-${i}`} type="button" onClick={() => pick(r)}
-              style={{ display: 'flex', gap: 8, alignItems: 'flex-start', width: '100%', textAlign: 'left', padding: '9px 12px', borderBottom: '1px solid #f1f5f9', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}>
-              <MapPin size={14} color="var(--primary)" style={{ flexShrink: 0, marginTop: 2 }} />
-              <span>{r.label || r.address}</span>
-            </button>
-          ))}
-          <div style={{ padding: '5px 12px', fontSize: 11, color: '#94a3b8', textAlign: 'right' }}>OpenStreetMap data</div>
-        </div>
-      )}
+      {dropdown}
       {selected && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
           <MapPin size={13} color="#22c55e" />

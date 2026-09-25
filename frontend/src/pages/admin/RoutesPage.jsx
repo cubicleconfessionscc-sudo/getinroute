@@ -127,6 +127,7 @@ export default function RoutesPage() {
   };
 
   const empAddress = (e) => (e && (e.home_address || e.address || e.pickup_address)) || null;
+  const employeesWithAddr = employees.filter((e) => e && empAddress(e));
 
   const move = (i, dir) => {
     const stops = [...form.stops];
@@ -326,8 +327,8 @@ export default function RoutesPage() {
       <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit route' : 'New route'} wide>
         <div className="field" style={{ marginBottom: 12 }}><label>Route name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Electronic City → Manyata Tech Park" /></div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 12 }}>
-          <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+        <div className="startend-duo">
+          <div className="field">
             <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#22c55e" />Start point (search & pick exact location)</label>
             <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -342,7 +343,7 @@ export default function RoutesPage() {
             </div>
             {form.start_lat != null && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>📍 {Number(form.start_lat).toFixed(5)}, {Number(form.start_lng).toFixed(5)}</div>}
           </div>
-          <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+          <div className="field">
             <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#ef4444" />End point (search & pick exact location)</label>
             <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -364,7 +365,7 @@ export default function RoutesPage() {
           <button className="btn btn-sm btn-outline" onClick={() => setForm({ ...form, stops: [...form.stops, { sequence: form.stops.length + 1, name: '', lat: 12.97, lng: 77.59 }] })}><Plus size={14} /> Add stop</button>
         </div>
         {form.stops.map((s, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '32px 1fr 34px 90px 90px 120px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+          <div key={i} className="stop-row">
             <GripVertical size={18} style={{ color: 'var(--muted)' }} />
             <AddressPicker
               value={(s.lat && s.lng) ? { address: s.name, lat: s.lat, lng: s.lng } : (s.name ? { address: s.name } : null)}
@@ -377,9 +378,9 @@ export default function RoutesPage() {
             <button type="button" title={`Pick stop ${i + 1} on map`} className="btn btn-outline" onClick={() => setMapFor(i)} style={{ padding: '7px 9px' }}>
               <MapPinned size={15} color="#f59e0b" />
             </button>
-            <input type="number" placeholder="Lat" value={s.lat} onChange={(e) => { const stops = [...form.stops]; stops[i].lat = Number(e.target.value); setForm({ ...form, stops }); }} />
-            <input type="number" placeholder="Lng" value={s.lng} onChange={(e) => { const stops = [...form.stops]; stops[i].lng = Number(e.target.value); setForm({ ...form, stops }); }} />
-            <div style={{ display: 'flex', gap: 4 }}>
+            <div className="stop-coords">
+              <input type="number" placeholder="Lat" value={s.lat} onChange={(e) => { const stops = [...form.stops]; stops[i].lat = Number(e.target.value); setForm({ ...form, stops }); }} />
+              <input type="number" placeholder="Lng" value={s.lng} onChange={(e) => { const stops = [...form.stops]; stops[i].lng = Number(e.target.value); setForm({ ...form, stops }); }} />
               <button className="btn btn-sm btn-ghost" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
               <button className="btn btn-sm btn-ghost" disabled={i === form.stops.length - 1} onClick={() => move(i, 1)}>↓</button>
               {form.stops.length > 2 && <button className="btn btn-sm btn-danger" onClick={() => setForm({ ...form, stops: form.stops.filter((_, j) => j !== i) })}><Trash2 size={13} /></button>}
@@ -390,9 +391,9 @@ export default function RoutesPage() {
         <div className="field" style={{ marginBottom: 12 }}>
           <label><User size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add employee by address (auto-fills their saved address)</label>
           <select value={empPick} onChange={(e) => pickEmployee(e.target.value)}>
-            <option value="">Select an employee to add their address…</option>
-            {employees.map((e) => (
-              <option key={e.id || e._id} value={String(e.id || e._id)}>{e.name} · {e.emp_id}{e.home_address ? '' : ' (no address)'}</option>
+            <option value="">{employeesWithAddr.length ? 'Select an employee to add their address…' : 'No approved addresses yet — approve address requests under Approvals…'}</option>
+            {employeesWithAddr.map((e) => (
+              <option key={e.id || e._id} value={String(e.id || e._id)}>{e.name} · {e.emp_id} — {String(e.home_address || e.address || e.pickup_address).split(',').slice(0, 2).join(',')}</option>
             ))}
           </select>
         </div>

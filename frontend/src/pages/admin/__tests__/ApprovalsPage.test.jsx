@@ -56,6 +56,7 @@ describe('ApprovalsPage — reject flow (admin cards)', () => {
     const user = userEvent.setup();
     const calls = mockApi({});
     renderPage();
+    await user.click(screen.getByRole('button', { name: /drivers/i }));
     await screen.findByText('Temp Check User');
     await user.click(screen.getByRole('button', { name: /reject/i }));
     expect(window.confirm).toHaveBeenCalled();
