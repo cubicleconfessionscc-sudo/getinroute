@@ -3675,6 +3675,94 @@ function pruneLocationHistory() {
 const pruneHistoryTimer = setInterval(pruneLocationHistory, 24 * 60 * 60 * 1000);
 if (pruneHistoryTimer.unref) pruneHistoryTimer.unref();
 
+/* ---------------- LIVE MAP: TENANT-SCOPED BROADCASTS ---------------- */
+
+// Resolve the live rooms a connected user belongs to. Location events are only
+// ever emitted to these rooms (company:<key> / vendor:<vendor_id> / owner-live)
+// — never to a global role:admin poke, so many concurrent drivers updating at
+// once scale cleanly and companies never see each other's GPS.
+function userTenantRooms(user) {
+  const rooms = new Set();
+  if (user.role === 'vendor') {
+    if (user.vendor_id != null) rooms.add('vendor-live:' + Number(user.vendor_id));
+    return rooms;
+  }
+  // Owner admins receive every company's live feed in one room.
+  if (user.role === 'admin' && user.emp_id === 'ADMIN') {
+    rooms.add('owner-live');
+    return rooms;
+  }
+  if (user.company_id != null) {
+    rooms.add('company-live:' + Number(user.company_id));
+  } else if (user.role === 'admin') {
+    // Company admins without a company_id yet: their own id IS the company key
+    // (matches companyAdminScope), plus the legacy unbound room.
+    rooms.add('company-live:' + Number(user.id));
+    rooms.add('company-live:0');
+  } else {
+    // Legacy employees/drivers with no company assignment were visible to every
+    // admin before; mirror that in the shared legacy room.
+    rooms.add('company-live:0');
+  }
+  return rooms;
+}
+
+function emitScoped(scopes, event, payload) {
+  if (!io || !scopes || !scopes.size) return;
+  for (const r of scopes) {
+    try { io.to(r).emit(event, payload); } catch (e) {}
+  }
+}
+
+// Keyed current-location store (driver_locations): ONE row per driver/employee,
+// upserted on every ping — never appended, so a busy fleet stays one small row
+// per driver and the web map has a canonical per-driver position on disk.
+function upsertDriverLocation(driver, opts) {
+  try {
+    db.prepare(`
+      INSERT INTO driver_locations (driver_id, role, driver_name, vehicle_id, company_id, vendor_id, lat, lng, speed_kmph, heading, source, last_updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, datetime('now','localtime'))
+      ON CONFLICT(driver_id) DO UPDATE SET
+        role = excluded.role, driver_name = excluded.driver_name,
+        vehicle_id = excluded.vehicle_id, company_id = excluded.company_id,
+        vendor_id = excluded.vendor_id, lat = excluded.lat, lng = excluded.lng,
+        speed_kmph = excluded.speed_kmph, heading = excluded.heading,
+        source = excluded.source, last_updated_at = datetime('now','localtime')
+    `).run(
+      driver.id, driver.role, driver.name || null,
+      opts.vehicleId ?? null, driver.company_id ?? null, opts.vendorId ?? null,
+      opts.lat, opts.lng, opts.speed ?? 0, opts.heading ?? null, 'gps'
+    );
+  } catch (e) { console.error('[driver-locations] upsert failed:', e.message); }
+}
+
+// Dashboards also listen for full 'tracking' arrays. We push them per-scope but
+// throttled (5s per scope) and rebuild them for THAT scope only, so the global
+// per-ping emitToAdmins('tracking', {}) disappears.
+const TRACKING_NUDGE_MS = 5000;
+const lastTrackingNudge = new Map();
+function trackingForRoom(room) {
+  if (room === 'owner-live') return buildTracking(null, { isOwner: true });
+  const m = /^company-live:(\d+)$/.exec(room);
+  if (m) return buildTracking(null, companyAdminScope({ user: { id: Number(m[1]), emp_id: '' } }));
+  const v = /^vendor-live:(\d+)$/.exec(room);
+  if (v) return buildTracking({ vid: Number(v[1]) }, { isOwner: false });
+  return {};
+}
+function nudgeTrackingRooms(scopes) {
+  if (!io || !scopes || !scopes.size) return;
+  const now = Date.now();
+  for (const r of scopes) {
+    // Legacy room holds unbound users whose positions are NOT representable as a
+    // single company tracking payload; keyed events already covered the room.
+    if (r === 'company-live:0') continue;
+    const last = lastTrackingNudge.get(r) || 0;
+    if (now - last < TRACKING_NUDGE_MS) continue;
+    lastTrackingNudge.set(r, now);
+    try { io.to(r).emit('tracking', trackingForRoom(r)); } catch (e) {}
+  }
+}
+
 /* ---------------- SOCKET.IO ---------------- */
 
 const server = http.createServer(app);
@@ -3697,6 +3785,7 @@ io.on('connection', (socket) => {
   const user = socket.data.user;
   socket.join(`user:${user.id}`);
   socket.join(`role:${user.role}`);
+  for (const r of userTenantRooms(user)) socket.join(r);
   socket.on('chat:send', ({ receiver_id, message }) => {
     if (!message || !String(message).trim()) return;
     const recv = db.prepare('SELECT id FROM users WHERE id=?').get(receiver_id);
@@ -3730,21 +3819,22 @@ io.on('connection', (socket) => {
     // Only drivers stream vehicle GPS, and only for the vehicle assigned to them.
     // A non-driver (or driver passing someone else's trip id) must never be able
     // to move a vehicle on the map.
-    let vid = user.role === 'driver' ? user.vehicle_id : null;
-    if (!vid && user.role === 'driver' && tripId) {
+    if (user.role !== 'driver') return;
+    let vid = user.vehicle_id;
+    if (!vid && tripId) {
       const s = db.prepare('SELECT vehicle_id FROM schedules WHERE id=?').get(String(tripId).replace(/[^0-9]/g, '') || 0);
       vid = s?.vehicle_id;
     }
-    if (!vid || (user.role === 'driver' && Number(vid) !== Number(user.vehicle_id))) return;
-    if (vid) {
+    if (vid && Number(vid) !== Number(user.vehicle_id)) vid = null; // not their cab
+    const vehicle = vid != null ? db.prepare('SELECT * FROM vehicles WHERE id=?').get(vid) : null;
+    if (vehicle) {
       db.prepare("UPDATE vehicles SET lat=?, lng=?, speed=?, status='active', last_update=datetime('now','localtime'), connected=1, gps_status='live' WHERE id=?")
         .run(lat, lng, Number(speedKmph) || 0, vid);
       recordGpsHistory('vehicle', vid, lat, lng, speedKmph);
-      const v = db.prepare('SELECT * FROM vehicles WHERE id=?').get(vid);
       // Vehicle-level speed limit wins; fall back to the route, then the default.
       const limit = Number(
-        v.speed_limit ??
-        (v.route_id ? (db.prepare('SELECT speed_limit FROM routes WHERE id=?').get(v.route_id)?.speed_limit ?? speedLimitFor()) : speedLimitFor())
+        vehicle.speed_limit ??
+        (vehicle.route_id ? (db.prepare('SELECT speed_limit FROM routes WHERE id=?').get(vehicle.route_id)?.speed_limit ?? speedLimitFor()) : speedLimitFor())
       );
       if (Number(speedKmph) > limit + 5) {
         // Item 8: throttle over-speed events/alerts so a sustained over-limit run
@@ -3753,20 +3843,53 @@ io.on('connection', (socket) => {
         const fresh = last && (Date.now() - Date.parse(String(last).replace(' ', 'T'))) < 60000;
         if (!fresh) {
           db.prepare('INSERT INTO speed_events (vehicle_id,vehicle_name,driver_name,speed,speed_limit,lat,lng) VALUES (?,?,?,?,?,?,?)')
-            .run(vid, v.vehicle_name, v.driver_name, Number(speedKmph), limit, lat, lng);
-          emitToAdmins('alert', { vehicle_name: v.vehicle_name, driver_name: v.driver_name, speed: Number(speedKmph), speed_limit: limit });
+            .run(vid, vehicle.vehicle_name, vehicle.driver_name, Number(speedKmph), limit, lat, lng);
+          emitToAdmins('alert', { vehicle_name: vehicle.vehicle_name, driver_name: vehicle.driver_name, speed: Number(speedKmph), speed_limit: limit });
         }
       }
-      io.to(`trip:${tripId}`).emit('location:broadcast', { tripId, lat, lng, speedKmph });
-      emitToAdmins('tracking', {});
-      countRealtimeMessages(1);
-      touchHeartbeat(user.id, true);
+    } else {
+      // Cabless driver (or a trip with no cab assigned yet): record their own
+      // position so they're trackable without letting them steer any vehicle.
+      db.prepare('UPDATE users SET lat=?, lng=?, last_update=datetime(\'now\',\'localtime\') WHERE id=?').run(lat, lng, user.id);
+      recordGpsHistory('user', user.id, lat, lng, speedKmph);
     }
+    // Keyed current-location store — one row per driver, upserted per ping.
+    upsertDriverLocation(user, {
+      vehicleId: vehicle ? vid : null,
+      vendorId: vehicle ? vehicle.vendor_id : null,
+      lat, lng, speed: Number(speedKmph) || 0, heading: null
+    });
+    // Scoped, keyed broadcast: the driver's own company / vendor / owner rooms
+    // only — never a global poke to every admin. Each event targets a single
+    // marker (driverId), so a fleet of concurrent drivers stays O(1) per ping.
+    const scopes = userTenantRooms(user);
+    if (vehicle && vehicle.vendor_id != null) scopes.add('vendor-live:' + Number(vehicle.vendor_id));
+    scopes.add('owner-live');
+    emitScoped(scopes, 'driverLocation', {
+      driverId: user.id, driverName: user.name, role: user.role,
+      vehicleId: vehicle ? vid : null, vehicleName: vehicle ? vehicle.vehicle_name : null,
+      lat, lng, speedKmph: Number(speedKmph) || 0, heading: null, ts: Date.now()
+    });
+    nudgeTrackingRooms(scopes);
+    if (tripId) io.to(`trip:${tripId}`).emit('location:broadcast', { tripId, lat, lng, speedKmph });
+    countRealtimeMessages(1);
+    touchHeartbeat(user.id, true);
   });
   socket.on('location:push', ({ lat, lng }) => {
     if (typeof lat === 'number' && typeof lng === 'number') {
       db.prepare('UPDATE users SET lat=?, lng=?, last_update=datetime(\'now\',\'localtime\') WHERE id=?').run(lat, lng, user.id);
       recordGpsHistory('user', user.id, lat, lng, null);
+      upsertDriverLocation(user, {
+        vehicleId: null, vendorId: user.vendor_id ?? null,
+        lat, lng, speed: 0, heading: null
+      });
+      const scopes = userTenantRooms(user);
+      scopes.add('owner-live');
+      emitScoped(scopes, 'employeeLocation', {
+        employeeId: user.id, employeeName: user.name, role: user.role,
+        lat, lng, heading: null, ts: Date.now()
+      });
+      nudgeTrackingRooms(scopes);
       countRealtimeMessages(1);
       touchHeartbeat(user.id, true);
     }

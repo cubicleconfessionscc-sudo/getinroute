@@ -197,18 +197,31 @@ table.tbl .actions { display: flex; gap: 6px; }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 
 /* ---- AddressPicker dropdown (portaled to body) ---- */
-.addr-dd { position: fixed; z-index: var(--z-dropdown); background: var(--card); color: var(--text);
-  border: 1px solid var(--line); border-radius: 12px; max-height: 240px; overflow-y: auto;
-  box-shadow: 0 12px 32px rgba(0,0,0,.45); backdrop-filter: blur(8px); }
+/* Pinned to a light, high-contrast palette on purpose: the dropdown floats
+   above the modal (z --z-dropdown 150 > modal 110) and must stay readable in
+   both light and dark themes. */
+.addr-dd { position: fixed; z-index: var(--z-dropdown); background: #ffffff; color: #1a1a1a;
+  border: 1px solid rgba(0,0,0,.16); border-radius: 12px; max-height: 240px; overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45); }
 .addr-dd-item { display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left;
-  padding: 9px 12px; border-bottom: 1px solid var(--line); background: none; border: none;
-  cursor: pointer; font-size: 13px; color: var(--text); }
-.addr-dd-item:hover { background: var(--surface-2); }
+  padding: 9px 12px; border-bottom: 1px solid #f0f0f0; background: none; border: none;
+  cursor: pointer; font-size: 13px; color: #1a1a1a; }
+.addr-dd-item:hover, .addr-dd-item:focus-visible { background: #f0f0f0; outline: none; }
 .addr-dd-item:last-of-type { border-bottom: none; }
-.addr-dd-foot { padding: 5px 12px; font-size: 11px; color: var(--muted); text-align: right;
-  background: var(--surface); border-top: 1px solid var(--line); }
-.addr-dd-empty { font-size: 12px; color: var(--amber); background: rgba(245,158,11,.1);
+.addr-dd-foot { padding: 5px 12px; font-size: 11px; color: #68707c; text-align: right;
+  background: #fafafa; border-top: 1px solid #f0f0f0; }
+.addr-dd-empty { font-size: 12px; color: #b45309; background: rgba(245,158,11,.12);
   border: 1px solid rgba(245,158,11,.35); border-radius: 8px; padding: 6px 10px; margin-top: 4px; }
+
+/* ---- Google Places-style autocomplete guard ----
+   The app's own dropdown uses .addr-dd above. These overrides protect against
+   any browser/autocomplete script injecting a .pac-container: it must render on
+   top of every modal (z-index well above --z-modal:110) and read dark-on-white. */
+.pac-container { z-index: 9999 !important; background: #ffffff !important; }
+.pac-item, .pac-item-query, .pac-matched { color: #1a1a1a !important; }
+.pac-item:hover, .pac-item-selected { background-color: #f0f0f0 !important; }
+.pac-item { border-top: 1px solid #f0f0f0; font-size: 13px; padding: 6px 10px; cursor: pointer; }
+.pac-container.hdpi .pac-item, .pac-container.hdpi2 .pac-item { background-color: #ffffff; }
 
 /* ---- New route modal layout ---- */
 .startend-duo { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 12px; }

@@ -132,6 +132,35 @@ export default function Dashboard() {
       };
     });
   });
+  useSocketEvent('driverLocation', (p) => {
+    if (!p || typeof p !== 'object' || p.lat == null || p.lng == null || p.vehicleId == null) return;
+    const patch = {
+      lat: Number(p.lat), lng: Number(p.lng), speed: Number(p.speedKmph) || 0,
+      gps_status: 'live', last_update: new Date().toISOString(),
+      last_ping_ago_sec: 0, _live_ts: Date.now()
+    };
+    setTracking((prev) => {
+      if (!prev || !Array.isArray(prev.vehicles)) return prev;
+      if (!prev.vehicles.some((v) => Number(v.id) === Number(p.vehicleId))) return prev;
+      return { ...prev, vehicles: prev.vehicles.map((v) => Number(v.id) === Number(p.vehicleId) ? { ...v, ...patch } : v) };
+    });
+  });
+  useSocketEvent('employeeLocation', (p) => {
+    if (!p || typeof p !== 'object' || p.lat == null || p.lng == null) return;
+    const patch = {
+      lat: Number(p.lat), lng: Number(p.lng),
+      gps_status: 'live', last_update: new Date().toISOString(),
+      last_ping_ago_sec: 0, _live_ts: Date.now()
+    };
+    setTracking((prev) => {
+      if (!prev || !Array.isArray(prev.employees)) return prev;
+      const i = prev.employees.findIndex((e) => Number(e.id) === Number(p.employeeId));
+      if (i === -1) return prev;
+      const employees = prev.employees.slice();
+      employees[i] = { ...employees[i], ...patch };
+      return { ...prev, employees };
+    });
+  });
   useSocketEvent('alert', (a) => {
     if (!a || typeof a !== 'object') return;
     if (a.vehicle_name == null || a.speed == null) return;

@@ -710,6 +710,31 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_location_history_subject ON location_history(subject, subject_id, id);
 `);
 
+// Keyed current-location store: ONE row per driver/employee, upserted on every
+// incoming GPS ping (never appended). This is what lets the web map update a
+// single driver's marker without re-fetching the whole fleet, and what scales
+// to many concurrent drivers. Canonical UI reads stay in vehicles/users (done
+// for speed); this table holds the tenant-scoped current position + heading.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS driver_locations (
+    driver_id INTEGER PRIMARY KEY,
+    role TEXT DEFAULT 'driver',
+    driver_name TEXT,
+    vehicle_id INTEGER,
+    company_id INTEGER,
+    vendor_id INTEGER,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    speed_kmph REAL DEFAULT 0,
+    heading REAL,
+    source TEXT DEFAULT 'gps',
+    last_updated_at TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_driver_locations_company ON driver_locations(company_id, last_updated_at);
+  CREATE INDEX IF NOT EXISTS idx_driver_locations_vendor ON driver_locations(vendor_id, last_updated_at);
+`);
+
 // Owner/Admin raw-data import audit trail: who imported what, when, how many
 // rows landed, how many were skipped/rejected and the rejected rows + reasons
 // (used later to export a "rejected.csv" back to the operator).

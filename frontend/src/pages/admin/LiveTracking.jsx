@@ -64,6 +64,54 @@ export default function LiveTracking() {
     });
   });
 
+  // Live per-driver location events (keyed server broadcast, scoped to this
+  // user's company/vendor). Each event patches ONLY that driver's marker so a
+  // fleet of concurrent drivers each move their own pin without a full refresh.
+  const CLIENT_STALE_THRESHOLD = 60; // seconds without a live ping => stale pin
+  useSocketEvent('driverLocation', (p) => {
+    if (!p || typeof p !== 'object' || p.lat == null || p.lng == null) return;
+    const patch = {
+      lat: Number(p.lat), lng: Number(p.lng),
+      speed: Number(p.speedKmph) || 0,
+      gps_status: 'live', last_update: new Date().toISOString(),
+      last_ping_ago_sec: 0, _live_ts: Date.now()
+    };
+    setData((prev) => {
+      if (!prev || !Array.isArray(prev.vehicles) || p.vehicleId == null) return prev;
+      if (!prev.vehicles.some((v) => Number(v.id) === Number(p.vehicleId))) return prev;
+      return { ...prev, vehicles: prev.vehicles.map((v) => Number(v.id) === Number(p.vehicleId) ? { ...v, ...patch } : v) };
+    });
+  });
+  useSocketEvent('employeeLocation', (p) => {
+    if (!p || typeof p !== 'object' || p.lat == null || p.lng == null) return;
+    const patch = {
+      lat: Number(p.lat), lng: Number(p.lng),
+      gps_status: 'live', last_update: new Date().toISOString(),
+      last_ping_ago_sec: 0, _live_ts: Date.now()
+    };
+    setData((prev) => {
+      if (!prev || !Array.isArray(prev.employees)) return prev;
+      const i = prev.employees.findIndex((e) => Number(e.id) === Number(p.employeeId));
+      if (i === -1) return prev;
+      const employees = prev.employees.slice();
+      employees[i] = { ...employees[i], ...patch };
+      return { ...prev, employees };
+    });
+  });
+  // Between server pushes, flag pins with no live ping for CLIENT_STALE_THRESHOLD.
+  useInterval(() => {
+    setData((prev) => {
+      if (!prev) return prev;
+      const now = Date.now();
+      const mark = (rows) => (Array.isArray(rows) ? rows.map((r) => {
+        if (r?._live_ts == null) return r;
+        const ageSec = Math.round((now - r._live_ts) / 1000);
+        return { ...r, gps_status: ageSec > CLIENT_STALE_THRESHOLD ? 'stale' : 'live', last_ping_ago_sec: ageSec };
+      }) : rows);
+      return { ...prev, vehicles: mark(prev.vehicles), employees: mark(prev.employees) };
+    });
+  }, 10000);
+
   useSocketEvent('driver:status', (payload) => {
     if (!payload || typeof payload !== 'object' || payload.vehicle_id == null) return;
     setData((prev) => {
