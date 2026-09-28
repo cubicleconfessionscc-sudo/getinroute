@@ -6209,7 +6209,21 @@ if (apkVolumeDir) {
     // Explicit version bump (APK_SEED_VERSION) forces the volume APKs to be
     // re-seeded from newly built artifacts on the next deploy. Without it the
     // persistent volume keeps serving the last-good builds and nothing changes.
-    const seedVersion = process.env.APK_SEED_VERSION || '';
+    //
+    // When the env var is absent, derive the seed version from the binaries
+    // packaged in the image (name + size). A rebuild produces a different
+    // size, so the volume automatically re-stages and the new APK is served
+    // without anyone having to edit Railway dashboard variables.
+    let seedVersion = process.env.APK_SEED_VERSION || '';
+    if (!seedVersion) {
+      try {
+        const fp = staged
+          .filter((s) => s.startsWith(BINARIES_DIR) && fs.existsSync(s) && fs.statSync(s).isFile())
+          .map((s) => `${path.basename(s)}:${fs.statSync(s).size}`)
+          .join('|');
+        if (fp) seedVersion = `img:${fp}`;
+      } catch (e) { /* fall through to the no-marker path */ }
+    }
     const versionMarker = path.join(apkVolumeDir, '.seed-version');
     let stagedVersion = '';
     try { stagedVersion = fs.readFileSync(versionMarker, 'utf8'); } catch (e) {}
