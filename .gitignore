@@ -13,6 +13,7 @@ mobile/android/
 mobile/.expo/
 .gradle/
 apk-backups/
+artifacts/
 
 # Databases and business data
 *.db

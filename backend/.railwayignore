@@ -10,7 +10,8 @@ test-*.js
 test-*.cjs
 apk-backup
 _apk_view.zip
-binaries
+binaries/*
+!binaries/GetInRoute.apk
 public/assets
 public/download
 data

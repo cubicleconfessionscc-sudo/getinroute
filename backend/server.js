@@ -6277,6 +6277,23 @@ if (apkVolumeDir) {
           }
         } catch (e) {}
       }
+      // If the deploy image carries a build of this APK that differs from the
+      // one cached on the volume, refresh the cached copy. This is what makes a
+      // newly uploaded APK actually go live: previously the volume copy always
+      // won, so rebuilt APKs never reached production. Only overwrites when a
+      // real (>= 1 MB) image copy is present, and never touches files that
+      // have no image counterpart.
+      if (fs.existsSync(src) && fs.existsSync(dst)) {
+        try {
+          const s = fs.statSync(src).size;
+          const d = fs.statSync(dst).size;
+          if (s >= 1024 * 1024 && s !== d) {
+            fs.copyFileSync(src, dst);
+            console.log(`[apk-bootstrap] refreshed ${path.basename(dst)} from image (${d} -> ${s} bytes)`);
+            continue;
+          }
+        } catch (e) { console.error('[apk-bootstrap] refresh failed ' + path.basename(dst) + ': ' + e.message); }
+      }
       if (fs.existsSync(dst)) continue;
       if (fs.existsSync(src)) fs.copyFileSync(src, dst);
       else if (APK_SEED_URLS[path.basename(src)]) seedApkFromUrl(APK_SEED_URLS[path.basename(src)], dst, path.basename(src));
