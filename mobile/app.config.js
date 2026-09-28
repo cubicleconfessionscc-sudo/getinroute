@@ -8,18 +8,19 @@
 const VARIANT = (process.env.APP_VARIANT || 'company').toLowerCase();
 const IS_SCHOOL = VARIANT === 'school';
 const IS_DRIVER = VARIANT === 'driver';
+const VERSION = '1.0.5';
 
 const identity = IS_SCHOOL
-  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 1, bg: '#0F766E' }
+  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 2, bg: '#0F766E' }
   : IS_DRIVER
-    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 1, bg: '#10141A' }
-    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 23, bg: '#10141A' };
+    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 2, bg: '#10141A' }
+    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 24, bg: '#10141A' };
 
 module.exports = {
   expo: {
     name: identity.name,
     slug: 'clement',
-    version: '1.0.4',
+    version: VERSION,
     orientation: 'portrait',
     userInterfaceStyle: 'light',
     updates: {
@@ -27,7 +28,7 @@ module.exports = {
       enabled: true,
       checkAutomatically: 'ON_LOAD',
       fallbackToCacheTimeout: 0,
-      runtimeVersion: { policy: 'appVersion' }
+      runtimeVersion: VERSION
     },
     icon: IS_SCHOOL ? './assets/school-icon.png' : './assets/icon.png',
     splash: {
@@ -42,13 +43,13 @@ module.exports = {
         NSLocationWhenInUseUsageDescription: 'GetInRoute needs your location to track your commute and, for drivers, to share live position with employees and admins.',
         NSLocationAlwaysAndWhenInUseUsageDescription: 'GetInRoute needs background location during an active trip so live tracking keeps working while the app is minimized.'
       },
-      runtimeVersion: { policy: 'appVersion' }
+      runtimeVersion: VERSION
     },
     android: {
       package: identity.pkg,
-      compileSdkVersion: 35,
-      targetSdkVersion: 35,
-      runtimeVersion: { policy: 'appVersion' },
+      compileSdkVersion: 36,
+      targetSdkVersion: 36,
+      runtimeVersion: VERSION,
       adaptiveIcon: {
         foregroundImage: IS_SCHOOL ? './assets/school-adaptive-icon.png' : './assets/adaptive-icon.png',
         backgroundColor: identity.bg

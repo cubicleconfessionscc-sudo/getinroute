@@ -13,8 +13,11 @@ import * as FileSystem from "expo-file-system";
 // Only network-level failures are queued. Real server errors (401/400/422/500)
 // are never queued - those must surface to the user immediately.
 
-const FILE = FileSystem.documentDirectory + "offline_sync.json";
-const CACHE_DIR = FileSystem.documentDirectory + "gir_cache/";
+// SDK 53: expo-file-system exposes the legacy storage API (async) at the
+// package root. documentDirectory can be null in exotic runtimes.
+const DOC_DIR = FileSystem.documentDirectory || "";
+const FILE = DOC_DIR + "offline_sync.json";
+const CACHE_DIR = DOC_DIR + "gir_cache/";
 const FLUSH_MS = 20000; // belt & braces; flushes also run opportunistically
 
 let state = { pending: 0, syncing: false, lastSyncedAt: null, online: true };
@@ -26,18 +29,18 @@ function notify() {
   }
 }
 
-function readQueue() {
+async function readQueue() {
   try {
-    const raw = FileSystem.readAsStringSync(FILE);
+    const raw = await FileSystem.readAsStringAsync(FILE);
     return raw ? JSON.parse(raw) : [];
   } catch (e) {
     return [];
   }
 }
 
-function writeQueue(q) {
+async function writeQueue(q) {
   try {
-    FileSystem.writeAsStringSync(FILE, JSON.stringify(q));
+    await FileSystem.writeAsStringAsync(FILE, JSON.stringify(q));
   } catch (e) {
     console.error("offline queue write failed:", e);
   }
@@ -66,23 +69,28 @@ export function stopSyncLoop() {
   if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
 }
 
-function cacheGet(normalizedConfig) {
+async function cacheGet(normalizedConfig) {
   try {
-    if (!FileSystem.getInfoSync(CACHE_DIR).exists) return null;
+    const dirInfo = await FileSystem.getInfoAsync(CACHE_DIR);
+    if (!dirInfo.exists) return null;
     const key = normalizedConfig.url.replace(/[^A-Za-z0-9_-]/g, "_");
     const f = CACHE_DIR + key + ".json";
-    if (!FileSystem.getInfoSync(f).exists) return null;
-    return JSON.parse(FileSystem.readAsStringSync(f));
+    const finfo = await FileSystem.getInfoAsync(f);
+    if (!finfo.exists) return null;
+    return JSON.parse(await FileSystem.readAsStringAsync(f));
   } catch (e) {
     return null;
   }
 }
 
-export function cachePut(normalizedConfig, data) {
+export async function cachePut(normalizedConfig, data) {
   try {
-    if (!FileSystem.getInfoSync(CACHE_DIR).exists) FileSystem.makeDirectorySync(CACHE_DIR, { intermediates: true });
+    const dirInfo = await FileSystem.getInfoAsync(CACHE_DIR);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
+    }
     const key = normalizedConfig.url.replace(/[^A-Za-z0-9_-]/g, "_");
-    FileSystem.writeAsStringSync(CACHE_DIR + key + ".json", JSON.stringify({ at: Date.now(), data }));
+    await FileSystem.writeAsStringAsync(CACHE_DIR + key + ".json", JSON.stringify({ at: Date.now(), data }));
   } catch (e) {
     // Cache is best-effort.
   }
@@ -94,10 +102,10 @@ export function readCached(normalizedConfig) {
   return cacheGet(normalizedConfig);
 }
 
-function enqueue(req) {
-  const q = readQueue();
+async function enqueue(req) {
+  const q = await readQueue();
   q.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), method: req.method, url: req.url, data: req.data, ts: Date.now(), attempts: 0 });
-  writeQueue(q);
+  await writeQueue(q);
 }
 
 // Replay a queued write via the injected sender (bypasses the axios interceptor
@@ -119,7 +127,7 @@ export function setSender(fn) { sender = fn; }
 
 export async function flush() {
   if (!sender || state.syncing) return 0;
-  const q = readQueue();
+  const q = await readQueue();
   if (!q.length) return 0;
   state.syncing = true;
   notify();
@@ -131,7 +139,7 @@ export async function flush() {
     if (ok) synced++;
     else { next.push({ ...item, attempts: item.attempts + 1 }); }
   }
-  writeQueue(next);
+  await writeQueue(next);
   state.syncing = false;
   state.lastSyncedAt = new Date().toISOString();
   state.online = q.length > synced ? false : true;
@@ -151,10 +159,10 @@ export async function handleOffline(err, config) {
   const method = String((config && config.method) || "get").toLowerCase();
   const norm = { baseURL: config.baseURL, url: config.url, params: config.params };
   if (method !== "get") {
-    enqueue({ method: method.toUpperCase(), url: config.baseURL + config.url, data: config.data ? JSON.parse(JSON.stringify(config.data)) : null });
+    await enqueue({ method: method.toUpperCase(), url: config.baseURL + config.url, data: config.data ? JSON.parse(JSON.stringify(config.data)) : null });
     return { ok: true, offline: true, queued: Date.now().toString(36), message: "Saved offline — will sync when you are back online" };
   }
-  const cached = cacheGet(norm);
+  const cached = await cacheGet(norm);
   if (cached) {
     return { ...cached.data, stale: true, offline: true };
   }
@@ -167,13 +175,13 @@ export function markOnline() {
 }
 
 export async function queueLength() {
-  return readQueue().length;
+  return (await readQueue()).length;
 }
 
 export async function pendingList() {
-  return readQueue().reverse();
+  return (await readQueue()).reverse();
 }
 
 export async function clearPending() {
-  writeQueue([]);
+  await writeQueue([]);
 }

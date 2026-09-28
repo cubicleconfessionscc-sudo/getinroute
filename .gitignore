@@ -5,6 +5,15 @@
 .env.*
 !*.env.example
 
+# Signing keys and build credentials - never commit
+secrets/
+*.jks
+*.keystore
+mobile/android/
+mobile/.expo/
+.gradle/
+apk-backups/
+
 # Databases and business data
 *.db
 *.db-wal

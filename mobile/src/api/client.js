@@ -57,7 +57,7 @@ client.interceptors.response.use(
     markOnline();
     // Cache successful GETs so screens keep showing last-known data offline.
     if (String(res.config.method || "get").toLowerCase() === "get") {
-      try { cachePut({ baseURL: res.config.baseURL, url: res.config.url, params: res.config.params }, res.data); } catch (e) {}
+      cachePut({ baseURL: res.config.baseURL, url: res.config.url, params: res.config.params }, res.data).catch(() => {});
     }
     flush().catch(() => {});
     return res;
