@@ -10,6 +10,7 @@ test-*.js
 test-*.cjs
 apk-backup
 _apk_view.zip
+binaries
 public/assets
 public/download
 data
