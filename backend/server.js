@@ -128,6 +128,26 @@ app.get(['/health', '/api/health'], (req, res) => {
     dbOk = false;
   }
   res.json({ ok: dbOk, db: dbOk ? 'up' : 'down', ts: ts() });
+  if (process.env.APK_DIAG !== '0') {
+    try {
+      const sizeOf = (f) => { try { const s = fs.statSync(f); return s.isFile() ? s.size : -1; } catch (e) { return 0; } };
+      const imgs = {};
+      for (const n of ['GetInRoute.apk', 'GetInRouteDriver.apk', 'GetInRouteSchool.apk']) {
+        imgs[n] = { bin: sizeOf(path.join(BINARIES_DIR, n)), dl: sizeOf(path.join(DOWNLOAD_DIR, n)) };
+      }
+      const vol = {};
+      let volList = [];
+      if (apkVolumeDir) {
+        try { volList = fs.readdirSync(apkVolumeDir); } catch (e) {}
+        for (const n of ['GetInRoute.apk', 'GetInRouteDriver.apk', 'GetInRouteSchool.apk']) {
+          vol[n] = sizeOf(path.join(apkVolumeDir, n));
+        }
+      }
+      let marker = '';
+      try { marker = fs.readFileSync(path.join(apkVolumeDir || '', '.seed-version'), 'utf8'); } catch (e) {}
+      res.json({ ok: dbOk, db: dbOk ? 'up' : 'down', ts: ts(), apk: { imgDir: BINARIES_DIR, imgs, volDir: apkVolumeDir, vol, volList, marker, envSeed: process.env.APK_SEED_VERSION || '' } });
+    } catch (e) { /* diag only */ }
+  }
 });
 
 // Public, unauthenticated runtime config for the web frontends (P2 maps).
