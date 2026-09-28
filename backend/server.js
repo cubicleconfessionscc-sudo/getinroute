@@ -120,6 +120,15 @@ app.get('/apk/school', (req, res) => {
   }
 });
 
+// Fingerprint of the running source, so a deploy can be proven live.
+// sha256 of this server.js, first 12 hex chars.
+const BUILD_ID = (() => {
+  try {
+    return require('crypto').createHash('sha256')
+      .update(require('fs').readFileSync(__filename)).digest('hex').slice(0, 12);
+  } catch (e) { return 'unknown'; }
+})();
+
 app.get(['/health', '/api/health'], (req, res) => {
   let dbOk = true;
   try {
@@ -127,7 +136,7 @@ app.get(['/health', '/api/health'], (req, res) => {
   } catch (e) {
     dbOk = false;
   }
-  res.json({ ok: dbOk, db: dbOk ? 'up' : 'down', ts: ts() });
+  res.json({ ok: dbOk, db: dbOk ? 'up' : 'down', build: BUILD_ID, ts: ts() });
   if (process.env.APK_DIAG === '1') {
     try {
       const sizeOf = (f) => { try { const s = fs.statSync(f); return s.isFile() ? s.size : -1; } catch (e) { return 0; } };

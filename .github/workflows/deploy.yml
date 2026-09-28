@@ -53,7 +53,29 @@ jobs:
       - name: Deploy to Railway (production)
         working-directory: backend
         run: |
-          railway up --detach \
+          # NOT --detach: `railway up --detach` returns 0 as soon as the source
+          # is uploaded, so a failed Railway build looked like a successful
+          # deploy while production kept serving the previous code.
+          railway up \
             --project df871066-14b2-4fbc-b218-1782d72063be \
             --environment production \
             --service getinroute-app
+
+      - name: Verify the new build is actually live
+        run: |
+          # /health returns a build id = sha256(server.js)[:12]. Compare it to
+          # the file that was just deployed so a rollback / failed build is caught.
+          EXPECTED=$(sha256sum backend/server.js | cut -c1-12)
+          echo "expected build id: $EXPECTED"
+          for i in $(seq 1 30); do
+            BODY=$(curl -fsS --max-time 20 https://getinroute.in/health || true)
+            echo "  attempt $i: $BODY"
+            ACTUAL=$(echo "$BODY" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build',''))" 2>/dev/null || true)
+            if [ "$ACTUAL" = "$EXPECTED" ]; then
+              echo "DEPLOY VERIFIED: live build id matches ($ACTUAL)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::deploy not live - expected build $EXPECTED, live build '${ACTUAL:-none}'"
+          exit 1
