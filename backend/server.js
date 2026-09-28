@@ -128,7 +128,7 @@ app.get(['/health', '/api/health'], (req, res) => {
     dbOk = false;
   }
   res.json({ ok: dbOk, db: dbOk ? 'up' : 'down', ts: ts() });
-  if (process.env.APK_DIAG !== '0') {
+  if (process.env.APK_DIAG === '1') {
     try {
       const sizeOf = (f) => { try { const s = fs.statSync(f); return s.isFile() ? s.size : -1; } catch (e) { return 0; } };
       const imgs = {};
