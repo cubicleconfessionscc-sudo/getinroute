@@ -82,7 +82,7 @@ const INDUSTRIES = [
 const FAQ = [
   { q: 'What is GetInRoute?', a: 'GetInRoute is an intelligent employee transportation operating system. It connects companies, employees, drivers, vehicles and routes into one platform with live tracking, safety, automation and predictive intelligence.' },
   { q: 'How does the 10-day trial work?', a: 'Register your company, submit a few details, owner approval is given, and a 10-day free trial begins with full platform access. Payment is required only after the trial ends.' },
-  { q: 'Which apps are available?', a: 'The Employee and School Android apps are available now. The Driver and Parent apps are in active development — no placeholder links, only real builds.' },
+  { q: 'Which apps are available?', a: 'The Employee, Driver and School Android apps are available now as direct APK downloads. The Parent app is in active development — no placeholder links, only real builds.' },
   { q: 'Is GetInRoute compliant with India\'s OSH Rules 2026?', a: 'Yes. GetInRoute includes GPS tracking for night-shift vehicles, driver background verification, trip documentation, SOS alerts, escort protocols, and audit-ready reporting.' },
   { q: 'Does it support multiple transport vendors?', a: 'Yes. Unlimited vendors, each with their own drivers, vehicles and zone assignments, all managed separately from the dispatch dashboard.' },
   { q: 'How is it different from generic cab-tracking tools?', a: 'GetInRoute is built for transportation operations — booking, boarding, safety, automation, intelligence and billing combined, with no per-employee module upsells.' }
@@ -407,13 +407,30 @@ export default function Landing() {
               <div className="pub-card-ico ico-indigo">{app.key === 'school' ? <School size={22} /> : app.key === 'driver' ? <Navigation size={22} /> : app.key === 'parent' ? <Users size={22} /> : <Smartphone size={22} />}</div>
               <div>
                 <b>{app.name.replace('GetInRoute ', '')} App</b>
-                <div className="pub-a">{app.web?.state === 'available' ? 'Sign in on web' : (app.android.state === 'available' ? 'Android APK' : 'Coming soon')}</div>
+                <div className="pub-a">
+                  {app.android.state === 'available' ? `Android APK · v1.0.5` : 'Coming soon'}
+                  {app.web?.state === 'available' ? ' · also on web' : ''}
+                </div>
               </div>
             </Link>
           ))}
         </div>
-        <div style={{ textAlign: 'center' }}>
-          <Link to="/apps" className="btn btn-primary"><Smartphone size={17} /> Explore All Apps</Link>
+        <div style={{ textAlign: 'center', display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {['employee', 'driver', 'school'].map((k) => {
+            const app = APP_LINKS[k];
+            if (!app?.android?.url) return null;
+            return (
+              <a
+                key={k}
+                className="btn btn-primary"
+                href={app.android.url}
+                download={`${app.name.replace(/\s+/g, '')}-v1.0.5.apk`}
+              >
+                <Download size={17} /> {app.name} APK
+              </a>
+            );
+          })}
+          <Link to="/apps" className="btn btn-ghost"><Smartphone size={17} /> All Apps</Link>
         </div>
       </section>
 

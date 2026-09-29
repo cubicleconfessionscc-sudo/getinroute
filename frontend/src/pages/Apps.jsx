@@ -72,6 +72,11 @@ export default function Apps() {
                     <span className="btn btn-sm btn-soon" style={{ flex: 1 }}><Apple size={15} /> {app.ios.label}</span>
                   )}
                 </div>
+                {app.android.state === 'available' && (
+                  <p className="apps-note" style={{ marginTop: 10 }}>
+                    Installs as <code>{app.android.pkg}</code> &middot; v1.0.5 &middot; Android 7.0+ &middot; 16&nbsp;KB page-size safe
+                  </p>
+                )}
                 {app.web && app.web.state === 'available' && (
                   <Link to={app.web.url} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center', width: '100%', marginTop: 10 }}>{app.web.label}</Link>
                 )}
@@ -82,6 +87,10 @@ export default function Apps() {
             );
           })}
         </div>
+        <p className="pub-muted-note" style={{ textAlign: 'center', marginTop: 18 }}>
+          <strong>Upgrading from v1.0.4?</strong> v1.0.5 is signed with a new release key, so Android will not let it install over the old build.
+          Uninstall the previous version once, then install v1.0.5 and sign in again.
+        </p>
         <p className="pub-muted-note" style={{ textAlign: 'center', marginTop: 26 }}>
           Android APKs download directly from GetInRoute. iPhone builds are distributed through the Apple App Store / TestFlight — links appear here once a build is approved. We only publish real links, never placeholders.
         </p>

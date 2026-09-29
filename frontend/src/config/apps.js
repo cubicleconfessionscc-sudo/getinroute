@@ -19,7 +19,7 @@ export const APP_LINKS = {
       'support'
     ],
     web: { state: 'available', url: '/employee-login', label: 'Sign in on Web' },
-    android: { state: 'available', url: '/download/GetInRoute.apk', label: 'Android APK' },
+    android: { state: 'available', url: '/download/GetInRoute.apk', label: 'Android APK', pkg: 'com.getinroute.employee' },
     ios: { state: 'coming-soon', url: '', label: 'iPhone' }
   },
   driver: {
@@ -38,7 +38,7 @@ export const APP_LINKS = {
       'vehicle information'
     ],
     web: { state: 'available', url: '/driver/login', label: 'Sign in on Web' },
-    android: { state: 'available', url: '/download/GetInRouteDriver-v2.apk', label: 'Android APK' },
+    android: { state: 'available', url: '/download/GetInRouteDriver.apk', label: 'Android APK', pkg: 'com.getinroute.driver' },
     ios: { state: 'coming-soon', url: '', label: 'iPhone' }
   },
   parent: {
@@ -74,7 +74,7 @@ export const APP_LINKS = {
       'notifications'
     ],
     web: { state: 'available', url: '/school/login', label: 'Sign in on Web' },
-    android: { state: 'available', url: '/download/GetInRouteSchool.apk', label: 'Android APK' },
+    android: { state: 'available', url: '/download/GetInRouteSchool.apk', label: 'Android APK', pkg: 'com.getinroute.school' },
     ios: { state: 'coming-soon', url: '', label: 'iPhone' }
   }
 };
