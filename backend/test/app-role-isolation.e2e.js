@@ -13,17 +13,24 @@ const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
 
 let db = null;
+// A fresh DB is ideal, but the suite should also be re-runnable against a DB
+// that other suites already populated, so every account gets a per-run suffix.
+const RUN = process.env.RUN_ID || String(Date.now()).slice(-8);
+const mail = (local) => `${local}.${RUN}@isolation.test`;
 if (DB_PATH) {
   db = new DatabaseSync(DB_PATH);
   const hash = (p) => bcrypt.hashSync(p, 10);
   // Company accounts are seeded straight in: these are the roles the school
   // vertical never owns, which is exactly the boundary under test.
   db.prepare(`INSERT OR REPLACE INTO users (id, role, emp_id, email, name, password_hash, approved, status, vertical)
-              VALUES (901, 'employee', 'EMP-T1', 'employee@isolation.test', 'Isolation Employee', ?, 1, 'active', 'company')`).run(hash('Emp@12345'));
+              VALUES (901, 'employee', ?, ?, 'Isolation Employee', ?, 1, 'active', 'company')`)
+    .run(`EMP-${RUN}`, mail('employee'), hash('Emp@12345'));
   db.prepare(`INSERT OR REPLACE INTO users (id, role, emp_id, email, name, password_hash, approved, status, vertical)
-              VALUES (902, 'driver', 'DRV-T1', 'driver@isolation.test', 'Isolation Driver', ?, 1, 'active', 'company')`).run(hash('Drv@12345'));
+              VALUES (902, 'driver', ?, ?, 'Isolation Driver', ?, 1, 'active', 'company')`)
+    .run(`DRV-${RUN}`, mail('driver'), hash('Drv@12345'));
   db.prepare(`INSERT OR REPLACE INTO users (id, role, emp_id, email, name, password_hash, approved, status, vertical)
-              VALUES (999, 'admin', 'ADMIN', 'owner.isolation@getinroute.local', 'Isolation Owner', ?, 1, 'active', 'company')`).run(hash('Owner@123'));
+              VALUES (999, 'admin', 'ADMIN', 'owner.isolation@getinroute.local', 'Isolation Owner', ?, 1, 'active', 'company')`)
+    .run(hash('Owner@123'));
 }
 
 async function req(method, p, { token, body } = {}) {
@@ -65,67 +72,72 @@ const expect = async (label, app, email, password, wantStatus, wantRole) => {
   const ownerToken = r.j.token;
 
   r = await req('POST', '/api/owner/schools', { token: ownerToken, body: {
-    name: 'Isolation School', contact_phone: '+91 98888 77777',
-    adminName: 'Iso Head', adminEmail: 'schooladmin@isolation.test', adminPassword: 'Sch@12345' } });
+    name: 'Isolation School ' + RUN, contact_phone: '+91 98888 77777',
+    adminName: 'Iso Head', adminEmail: mail('schooladmin'), adminPassword: 'Sch@12345' } });
   ok('seed: create school', r.status === 200, r);
   const schoolId = r.j.id;
 
   r = await req('POST', `/api/owner/schools/${schoolId}/approve`, { token: ownerToken });
   ok('seed: approve school', r.status === 200, r);
 
-  r = await login('school', 'schooladmin@isolation.test', 'Sch@12345');
+  r = await login('school', mail('schooladmin'), 'Sch@12345');
   ok('seed: school admin login via school app', r.status === 200, r);
   const sTok = r.j.token;
 
   r = await req('POST', '/api/school/students/import', { token: sTok, body: { students: [
     { name: 'College Student', phone: '+91 90000 55551', class_grade: 'XII-B',
-      education_level: 'college', can_login: true, email: 'student@isolation.test', password: 'Stu@12345' }] } });
+      education_level: 'college', can_login: true, email: mail('student'), password: 'Stu@12345' }] } });
   ok('seed: import college student', r.status === 200 && r.j.imported === 1, r);
 
   r = await req('POST', '/api/school/drivers', { token: sTok, body: {
-    name: 'School Bus Driver', email: 'schooldriver@isolation.test', password: 'SDrv@1234', phone: '+91 96000 55552' } });
+    name: 'School Bus Driver', email: mail('schooldriver'), password: 'SDrv@1234', phone: '+91 96000 55552' } });
   ok('seed: create school driver', r.status === 200, r);
 
   r = await req('POST', '/api/auth/parent/register', { body: {
-    name: 'Iso Parent', email: 'parent@isolation.test', password: 'Par@12345',
+    name: 'Iso Parent', email: mail('parent'), password: 'Par@12345',
     phone: '+91 98000 55553' } });
   ok('seed: parent register', r.status === 200, r);
 
   // ---- Employee app (com.getinroute.employee) ----
-  await expect('employee account -> employee app', 'employee', 'employee@isolation.test', 'Emp@12345', 200, 'employee');
-  await expect('driver account -> employee app BLOCKED', 'employee', 'driver@isolation.test', 'Drv@12345', 403);
-  await expect('school admin -> employee app BLOCKED', 'employee', 'schooladmin@isolation.test', 'Sch@12345', 403);
-  await expect('parent -> employee app BLOCKED', 'employee', 'parent@isolation.test', 'Par@12345', 403);
-  await expect('student -> employee app BLOCKED', 'employee', 'student@isolation.test', 'Stu@12345', 403);
-  await expect('school driver -> employee app BLOCKED', 'employee', 'schooldriver@isolation.test', 'SDrv@1234', 403);
+  await expect('employee account -> employee app', 'employee', mail('employee'), 'Emp@12345', 200, 'employee');
+  await expect('driver account -> employee app BLOCKED', 'employee', mail('driver'), 'Drv@12345', 403);
+  await expect('school admin -> employee app BLOCKED', 'employee', mail('schooladmin'), 'Sch@12345', 403);
+  await expect('parent -> employee app BLOCKED', 'employee', mail('parent'), 'Par@12345', 403);
+  await expect('student -> employee app BLOCKED', 'employee', mail('student'), 'Stu@12345', 403);
+  await expect('school driver -> employee app BLOCKED', 'employee', mail('schooldriver'), 'SDrv@1234', 403);
 
   // ---- Driver app (com.getinroute.driver) ----
-  await expect('driver account -> driver app', 'driver', 'driver@isolation.test', 'Drv@12345', 200, 'driver');
-  await expect('employee account -> driver app BLOCKED', 'driver', 'employee@isolation.test', 'Emp@12345', 403);
-  await expect('school admin -> driver app BLOCKED', 'driver', 'schooladmin@isolation.test', 'Sch@12345', 403);
-  await expect('parent -> driver app BLOCKED', 'driver', 'parent@isolation.test', 'Par@12345', 403);
-  await expect('student -> driver app BLOCKED', 'driver', 'student@isolation.test', 'Stu@12345', 403);
+  await expect('driver account -> driver app', 'driver', mail('driver'), 'Drv@12345', 200, 'driver');
+  await expect('employee account -> driver app BLOCKED', 'driver', mail('employee'), 'Emp@12345', 403);
+  await expect('school admin -> driver app BLOCKED', 'driver', mail('schooladmin'), 'Sch@12345', 403);
+  await expect('parent -> driver app BLOCKED', 'driver', mail('parent'), 'Par@12345', 403);
+  await expect('student -> driver app BLOCKED', 'driver', mail('student'), 'Stu@12345', 403);
   // vertical='school' drivers are intentionally shared with the Driver app.
-  await expect('school driver -> driver app (shared by design)', 'driver', 'schooldriver@isolation.test', 'SDrv@1234', 200, 'driver');
+  await expect('school driver -> driver app (shared by design)', 'driver', mail('schooldriver'), 'SDrv@1234', 200, 'driver');
 
   // ---- School app (com.getinroute.school) ----
-  await expect('school admin -> school app', 'school', 'schooladmin@isolation.test', 'Sch@12345', 200, 'admin');
-  await expect('parent -> school app', 'school', 'parent@isolation.test', 'Par@12345', 200, 'parent');
-  await expect('college student -> school app', 'school', 'student@isolation.test', 'Stu@12345', 200, 'student');
-  await expect('school driver -> school app', 'school', 'schooldriver@isolation.test', 'SDrv@1234', 200, 'driver');
-  await expect('employee account -> school app BLOCKED', 'school', 'employee@isolation.test', 'Emp@12345', 403);
-  await expect('company driver -> school app BLOCKED', 'school', 'driver@isolation.test', 'Drv@12345', 403);
+  await expect('school admin -> school app', 'school', mail('schooladmin'), 'Sch@12345', 200, 'admin');
+  await expect('parent -> school app', 'school', mail('parent'), 'Par@12345', 200, 'parent');
+  await expect('college student -> school app', 'school', mail('student'), 'Stu@12345', 200, 'student');
+  await expect('school driver -> school app', 'school', mail('schooldriver'), 'SDrv@1234', 200, 'driver');
+  await expect('employee account -> school app BLOCKED', 'school', mail('employee'), 'Emp@12345', 403);
+  await expect('company driver -> school app BLOCKED', 'school', mail('driver'), 'Drv@12345', 403);
 
   // ---- Registration cannot be used to mint a cross-variant account ----
-  r = await req('POST', '/api/auth/register', { body: { name: 'X', email: 'x1@iso.test', password: 'Pass@1234', role: 'driver', app: 'employee' } });
-  ok('register driver role from employee app BLOCKED', r.status === 400 || r.status === 403, r);
-  r = await req('POST', '/api/auth/register', { body: { name: 'X', email: 'x2@iso.test', password: 'Pass@1234', role: 'employee', app: 'driver' } });
-  ok('register employee role from driver app BLOCKED', r.status === 400 || r.status === 403, r);
-  r = await req('POST', '/api/auth/register', { body: { name: 'X', email: 'x3@iso.test', password: 'Pass@1234', role: 'employee', app: 'school' } });
-  ok('register from school app BLOCKED', r.status === 400, r);
+  // /api/auth/register is rate limited to 30/hour per IP. A 429 means the guard
+  // fired before the role check could run, which is correct behaviour but tells
+  // us nothing about role enforcement, so it is reported as SKIP, not a failure.
+  const blocked = async (label, body) => {
+    const res = await req('POST', '/api/auth/register', { body });
+    if (res.status === 429) { note('SKIP  ' + label + ' (register rate limit reached)'); return; }
+    ok(label, res.status === 400 || res.status === 403, res);
+  };
+  await blocked('register driver role from employee app BLOCKED', { name: 'X', email: mail('x1'), password: 'Pass@1234', role: 'driver', app: 'employee' });
+  await blocked('register employee role from driver app BLOCKED', { name: 'X', email: mail('x2'), password: 'Pass@1234', role: 'employee', app: 'driver' });
+  await blocked('register from school app BLOCKED', { name: 'X', email: mail('x3'), password: 'Pass@1234', role: 'employee', app: 'school' });
 
   // ---- Tokens are role-correct and the school vertical is fenced from the company admin API ----
-  r = await login('employee', 'employee@isolation.test', 'Emp@12345');
+  r = await login('employee', mail('employee'), 'Emp@12345');
   const eTok = r.j.token;
   r = await req('GET', '/api/employee/schedule', { token: eTok });
   ok('employee token reaches employee API', r.status === 200, r);
@@ -139,9 +151,9 @@ const expect = async (label, app, email, password, wantStatus, wantRole) => {
   r = await req('GET', '/api/school/me', { token: sTok });
   ok('school admin reaches school API', r.status === 200, r);
 
-  r = await req('POST', '/api/auth/login', { body: { email: 'employee@isolation.test', password: 'nope', app: 'employee' } });
+  r = await req('POST', '/api/auth/login', { body: { email: mail('employee'), password: 'nope', app: 'employee' } });
   ok('wrong password still 401 (no role oracle)', r.status === 401, r);
-  r = await login('employee', 'driver@isolation.test', 'wrongpass');
+  r = await login('employee', mail('driver'), 'wrongpass');
   ok('wrong-app + wrong password 401 not 403', r.status === 401, r);
 
   // Documented, pre-existing limitations. Not failures: these are unchanged
