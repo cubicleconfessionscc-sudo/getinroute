@@ -181,11 +181,20 @@ $env:GRADLE_USER_HOME = 'D:\gradle-home'
 $env:NODE_ENV         = 'production'
 $env:EXPO_NO_TELEMETRY = '1'
 
-Write-Host "[3/4] gradlew assembleRelease bundleRelease ..." -ForegroundColor Cyan
+Write-Host "[3/4] gradlew assembleRelease ... then bundleRelease ..." -ForegroundColor Cyan
 Push-Location (Join-Path $mobile 'android')
 try {
-  .\gradlew.bat assembleRelease bundleRelease --no-daemon
-  if ($LASTEXITCODE -ne 0) { throw "gradle failed ($LASTEXITCODE)" }
+  # R8 is the memory high-water mark on a 5-6 GB machine: running assembleRelease
+  # and bundleRelease in one invocation keeps both R8 outputs resident and got
+  # the process OOM-killed. Two sequential --no-daemon invocations with bounded
+  # workers cap the peak instead, at the cost of some shared-task reuse.
+  $gradleCommon = @('--no-daemon', '--max-workers=2', '-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=640m')
+  Write-Host "      assembleRelease (workers=2)" -ForegroundColor DarkGray
+  .\gradlew.bat assembleRelease @gradleCommon
+  if ($LASTEXITCODE -ne 0) { throw "gradle assembleRelease failed ($LASTEXITCODE)" }
+  Write-Host "      bundleRelease (workers=2)" -ForegroundColor DarkGray
+  .\gradlew.bat bundleRelease @gradleCommon
+  if ($LASTEXITCODE -ne 0) { throw "gradle bundleRelease failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 
 # ---------------------------------------------------------------- collect

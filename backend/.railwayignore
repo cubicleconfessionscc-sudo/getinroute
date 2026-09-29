@@ -12,6 +12,8 @@ apk-backup
 _apk_view.zip
 binaries/*
 !binaries/GetInRoute.apk
+!binaries/GetInRouteDriver.apk
+!binaries/GetInRouteSchool.apk
 public/assets
 public/download
 data

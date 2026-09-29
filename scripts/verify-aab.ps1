@@ -3,6 +3,8 @@ param(
   [Parameter(Mandatory=$true)][string]$ExpectPackage,
   [Parameter(Mandatory=$true)][int]$ExpectVersionCode,
   [string]$ExpectVersionName = '',
+  [int]$ExpectTargetSdk = 36,
+  [string]$ExpectCertSha256 = '',
   [string]$Label = ''
 )
 $ErrorActionPreference = 'Continue'
@@ -27,7 +29,19 @@ $work = Join-Path $env:TEMP ("aabv_" + [guid]::NewGuid().ToString('N').Substring
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 try {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
-  [System.IO.Compression.ZipFile]::ExtractToDirectory($File, $work)
+  # Selectively pull base/manifest, base/lib and the JS bundle. Extracting the
+  # whole bundle can collide on Windows' case-insensitive filesystem.
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($File)
+  try {
+    foreach ($e in $zip.Entries) {
+      if ($e.FullName -match '^base/(manifest|lib|root)/' -or $e.FullName -match '^base/assets/(index\.android\.bundle|expo-root\.pem)$' -or $e.FullName -eq 'BundleConfig.pb' -or $e.FullName -match '^BUNDLE-METADATA/com\.android\.tools\.build\.gradle/app-metadata\.properties$') {
+        $dest = Join-Path $work ($e.FullName -replace '/','\')
+        $dir = Split-Path $dest -Parent
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest, $true)
+      }
+    }
+  } finally { $zip.Dispose() }
 
   # ---- 1. manifest identity (protobuf) ----
   $mf = Join-Path $work 'base\manifest\AndroidManifest.xml'
@@ -40,7 +54,8 @@ try {
     if ($ExpectVersionName -and $j.versionName -eq $ExpectVersionName) { Pass "versionName = $($j.versionName)" } elseif ($ExpectVersionName) { Fail "versionName: got '$($j.versionName)'" }
     if ($j.minSdkVersion -ge 21) { Pass "minSdk = $($j.minSdkVersion)" } else { Fail "minSdk too low: $($j.minSdkVersion)" }
     if ($j.launchableActivity) { Pass "launchable activity = $($j.launchableActivity)" } else { Fail "no MAIN/LAUNCHER activity found in bundle manifest" }
-    if ($j.compileSdkVersion -ge 35) { Pass "compileSdk = $($j.compileSdkVersion) (>= 35 required for Android 15 16 KB)" } else { Fail "compileSdk = $($j.compileSdkVersion) too low for 16 KB page-size support" }
+    if ($j.compileSdkVersion -ge $ExpectTargetSdk) { Pass "compileSdk = $($j.compileSdkVersion) (16 KB page-size support requires >= 35; release targets $ExpectTargetSdk)" } else { Fail "compileSdk = $($j.compileSdkVersion) below the required $ExpectTargetSdk for 16 KB page-size support" }
+    if ([int]$j.targetSdkVersion -eq $ExpectTargetSdk) { Pass "targetSdk = $($j.targetSdkVersion)" } else { Fail "targetSdk = $($j.targetSdkVersion), expected $ExpectTargetSdk" }
   }
 
   # ---- 2. every ABI present ----
@@ -64,46 +79,40 @@ try {
   # not required to be 16 KB aligned.
   $LIB64 = @('arm64-v8a','x86_64')
   if (Test-Path $libRoot) {
-    $sos = Get-ChildItem $libRoot -Recurse -Filter '*.so'
-    Write-Host "  native libs: $($sos.Count) ($(($abis | ForEach-Object { "$_=$((Get-ChildItem (Join-Path $libRoot $_) -Filter '*.so').Count)" }) -join ' '))"
-    $bad = New-Object System.Collections.Generic.List[string]
-    $checked64 = 0
-    $summary = @()
+    # elf-align.js reads the program headers in-process; spawning llvm-readelf
+    # once per .so dominated verification time.
+    $ea = (& node 'D:\GetInRoute\scripts\elf-align.js' (Join-Path $work 'base') 2>&1 | Out-String)
+    $ej = $ea | ConvertFrom-Json
+    $summary = @(); $bad64 = @(); $checked64 = 0
     foreach ($abi in $wantAbis) {
-      $abiDir = Join-Path $libRoot $abi
-      if (-not (Test-Path $abiDir)) { continue }
-      $minAlign = 0
-      $count = 0
-      foreach ($so in (Get-ChildItem $abiDir -Filter '*.so')) {
-        $lines = & $READELF -lW $so.FullName 2>&1 | Select-String -Pattern '^\s*LOAD\s'
-        $vals = New-Object System.Collections.Generic.List[int]
-        foreach ($l in $lines) {
-          $parts = ($l.ToString().Trim() -split '\s+')
-          if ($parts.Count -ge 8 -and $parts[-1] -match '^0x[0-9a-fA-F]+$') {
-            $vals.Add([Convert]::ToInt32($parts[-1].Substring(2), 16))
-          }
-        }
-        $count++
-        $libMin = 0
-        if ($vals.Count -gt 0) { $libMin = ($vals | Measure-Object -Minimum).Minimum }
-        if ($libMin -eq 0) { $libMin = 1 }
-        if ($libMin -lt $minAlign -or $minAlign -eq 0) { $minAlign = $libMin }
-        if ($LIB64 -contains $abi) {
-          $checked64++
-          if ($vals.Count -eq 0 -or $libMin -lt 16384) { $bad.Add($abi + '/' + $so.Name + ' minAlign=' + $libMin) }
-        }
+      if (-not $ej.abis.$abi) { $bad64 += "$abi missing"; continue }
+      $summary += ('{0}={1} ({2}-bit) min {3}' -f $abi, $ej.abis.$abi.count, $ej.abis.$abi.class, $ej.abis.$abi.minAlignHex)
+      if ($LIB64 -contains $abi) {
+        $checked64 += $ej.abis.$abi.count
+        if ($ej.abis.$abi.minAlign -lt 16384) { $bad64 += "$abi minAlign=$($ej.abis.$abi.minAlignHex)" }
       }
-      $summary += ('{0}={1} libs min 0x{2}' -f $abi, $count, ([int]$minAlign).ToString('X'))
     }
-    Write-Host "  ELF LOAD alignment: $($summary -join ' | ')"
+    Write-Host "  native libs: $($ej.totalLibs) ($($summary -join ' | '))"
     Write-Host "  64-bit ABIs are the ones that must be 16 KB aligned (16 KB devices are always 64-bit); 32-bit ABIs reported for information."
-    if ($bad.Count -eq 0) { Pass "all $checked64 native libs in arm64-v8a + x86_64 have every ELF LOAD segment aligned to >= 16 KB (0x4000)" }
-    else { Fail ("64-bit native libs not 16 KB aligned (" + $bad.Count + "): " + ($bad -join '; ')) }
+    if ($bad64.Count -eq 0) { Pass "all $checked64 native libs in arm64-v8a + x86_64 have every ELF LOAD segment aligned to >= 16 KB (0x4000)" }
+    else { Fail ("64-bit native libs not 16 KB aligned: " + ($bad64 -join '; ')) }
+    if ($ej.bad.Count -eq 0) { Pass "every native lib has readable PT_LOAD segments" }
+    else { Fail ("libs with no PT_LOAD: " + (($ej.bad | Select-Object -First 3) -join '; ')) }
   }
 
   # ---- 5. signature ----
   $js = (& jarsigner -verify $File 2>&1 | Out-String)
   if ($js -match 'jar verified') { Pass "bundle signature: jar verified" } else { Fail "bundle signature: $js" }
+  $jc = (& keytool -printcert -jarfile $File 2>&1 | Out-String)
+  $fp = ''
+  if ($jc -match 'SHA256:\s*([0-9A-Fa-f:]+)') { $fp = ($Matches[1] -replace ':','').ToLower() }
+  $owner = if ($jc -match 'Owner:\s*(.+)') { $Matches[1].Trim() } else { '' }
+  Write-Host "  signer: $owner"
+  Write-Host "  signer cert sha256: $fp"
+  if ($ExpectCertSha256) {
+    if ($fp -eq $ExpectCertSha256.ToLower()) { Pass "bundle certificate fingerprint matches the shared release key" }
+    else { Fail "bundle certificate fingerprint mismatch: got $fp expected $ExpectCertSha256" }
+  }
 
   # ---- 6. production JS bundle ----
   $bundle = Join-Path $work 'base\assets\index.android.bundle'
@@ -119,7 +128,15 @@ try {
   }
 
   # ---- 7. Play metadata ----
-  if (Test-Path (Join-Path $work 'BUNDLE-METADATA')) { Pass "BUNDLE-METADATA present (Play/bundletool consumable)" } else { Fail "no BUNDLE-METADATA" }
+  if (Test-Path (Join-Path $work 'BUNDLE-METADATA')) {
+    $am = Get-ChildItem (Join-Path $work 'BUNDLE-METADATA') -Recurse -Filter 'app-metadata.properties' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($am) {
+      $amc = Get-Content $am.FullName -Raw
+      Pass "BUNDLE-METADATA present (Play/bundletool consumable); app-metadata.properties found"
+      if ($amc -match 'minSdkVersion=(\d+)') { Write-Host "    app-metadata minSdkVersion=$($Matches[1])" }
+      if ($amc -match 'compileSdkVersion=(\d+)') { Write-Host "    app-metadata compileSdkVersion=$($Matches[1])" }
+    } else { Pass "BUNDLE-METADATA present" }
+  } else { Fail "no BUNDLE-METADATA" }
   if (Test-Path (Join-Path $work 'BundleConfig.pb')) { Pass "BundleConfig.pb present" } else { Fail "no BundleConfig.pb" }
   $ab = Join-Path $work 'base\assets\app.config'
   if (Test-Path $ab) {
