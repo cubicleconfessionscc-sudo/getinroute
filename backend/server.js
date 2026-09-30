@@ -99,7 +99,7 @@ app.get('/apk', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.download(apkPath, serveName);
   } else {
-    res.status(404).json({ error: 'APK not available yet. Download from Google Play Store.', playStore: 'https://play.google.com/store/apps/details?id=com.getinroute.app' });
+    res.status(404).json({ error: 'APK temporarily unavailable. Try again shortly, or use the direct download link.', download: '/download/GetInRoute.apk' });
   }
 });
 
@@ -214,33 +214,35 @@ app.post('/api/geo/route', auth, guard(30, 60 * 1000), (req, res) => {
  */
 const MOBILE_UPDATE_DEFAULTS = {
   employee: {
-    latestVersion: '1.0.4',
+    latestVersion: '1.0.5',
     minimumSupportedVersion: '1.0.0',
-    recommendedVersion: '1.0.4',
+    recommendedVersion: '1.0.5',
     mandatoryUpdate: false,
     recommendedUpdate: false,
     releaseNotes: 'Live tracking, OTP check-in and safety improvements.',
-    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.app', ios: null },
+    // Not published on Google Play yet, so point at the build that is actually
+    // downloadable rather than a Play listing that does not exist.
+    storeUrls: { android: 'https://www.getinroute.in/download/GetInRoute.apk', ios: null },
     apiCompatibilityVersion: '1'
   },
   driver: {
-    latestVersion: '1.0.4',
+    latestVersion: '1.0.5',
     minimumSupportedVersion: '1.0.0',
-    recommendedVersion: '1.0.4',
+    recommendedVersion: '1.0.5',
     mandatoryUpdate: false,
     recommendedUpdate: false,
     releaseNotes: 'Trip navigation, OTP boarding and live position reporting.',
-    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.app', ios: null },
+    storeUrls: { android: 'https://www.getinroute.in/download/GetInRouteDriver.apk', ios: null },
     apiCompatibilityVersion: '1'
   },
   school: {
-    latestVersion: '1.0.0',
+    latestVersion: '1.0.5',
     minimumSupportedVersion: '1.0.0',
-    recommendedVersion: '1.0.0',
+    recommendedVersion: '1.0.5',
     mandatoryUpdate: false,
     recommendedUpdate: false,
     releaseNotes: 'GetInRoute School student transport.',
-    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.school', ios: null },
+    storeUrls: { android: 'https://www.getinroute.in/download/GetInRouteSchool.apk', ios: null },
     apiCompatibilityVersion: '1'
   },
   schoolDriver: {
@@ -250,7 +252,7 @@ const MOBILE_UPDATE_DEFAULTS = {
     mandatoryUpdate: false,
     recommendedUpdate: false,
     releaseNotes: 'School driver trips, student status and navigation.',
-    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.school', ios: null },
+    storeUrls: { android: 'https://www.getinroute.in/download/GetInRouteSchool.apk', ios: null },
     apiCompatibilityVersion: '1'
   },
   parent: {
@@ -260,7 +262,8 @@ const MOBILE_UPDATE_DEFAULTS = {
     mandatoryUpdate: false,
     recommendedUpdate: false,
     releaseNotes: "Track your child's school cab in real time.",
-    storeUrls: { android: 'https://play.google.com/store/apps/details?id=com.getinroute.school', ios: null },
+    // The Parent app is still in development, so it has no APK to point at yet.
+    storeUrls: { android: null, ios: null },
     apiCompatibilityVersion: '1'
   }
 };
