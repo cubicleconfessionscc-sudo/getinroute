@@ -43,3 +43,5 @@ backend/public/admin/assets/*.map
 # OS
 Thumbs.db
 Desktop.ini
+# Scratch/temp output kept inside the repo root
+Temp/

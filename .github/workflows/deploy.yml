@@ -62,13 +62,42 @@ jobs:
       - name: Deploy to Railway (production)
         working-directory: backend
         run: |
-          # NOT --detach: `railway up --detach` returns 0 as soon as the source
-          # is uploaded, so a failed Railway build looked like a successful
-          # deploy while production kept serving the previous code.
+          # --detach avoids depending on Railway's build-log stream, which
+          # intermittently dies with "Failed to retrieve build log" and fails the
+          # job *after* the code has already been uploaded. Because --detach also
+          # returns before the build finishes, the next step polls the deployment
+          # to a terminal state and requires SUCCESS, so a failed Railway build
+          # can never be reported as a successful deploy.
           railway up \
             --project df871066-14b2-4fbc-b218-1782d72063be \
             --environment production \
-            --service getinroute-app
+            --service getinroute-app \
+            --detach
+
+      - name: Wait for the Railway deployment to succeed
+        run: |
+          set -uo pipefail
+          TERMINAL='SUCCESS FAILED CRASHED REMOVED'
+          for i in $(seq 1 40); do
+            STATUS=$(railway deployment list --limit 1 --service getinroute-app --json 2>/dev/null \
+                     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                         try{process.stdout.write(JSON.parse(s)[0].status||"")}catch{}})')
+            ID=$(railway deployment list --limit 1 --service getinroute-app --json 2>/dev/null \
+                 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                     try{process.stdout.write(JSON.parse(s)[0].id||"")}catch{}})')
+            echo "  attempt $i: deployment ${ID:-unknown} is ${STATUS:-unknown}"
+            if [ -n "$STATUS" ] && printf '%s' "$STATUS" | grep -qE "^(SUCCESS|FAILED|CRASHED|REMOVED)$"; then
+              if [ "$STATUS" = "SUCCESS" ]; then
+                echo "RAILWAY DEPLOY CONFIRMED: $ID succeeded"
+                exit 0
+              fi
+              echo "::error::Railway deployment $ID finished as $STATUS"
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "::error::Railway deployment did not reach a terminal state in time"
+          exit 1
 
       - name: Verify the new build is actually live
         run: |
@@ -90,6 +119,32 @@ jobs:
             fi
             sleep 10
           done
+
+      - name: Verify the live frontend is the bundle this run built
+        run: |
+          # /health only hashes server.js, so a website-only release never moves
+          # it and cannot be distinguished from a no-op deploy. Compare the
+          # hashed asset filename that was built here with the one production
+          # actually serves.
+          set -uo pipefail
+          BUILT=$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' backend/public/admin/index.html | head -1 | cut -d/ -f2)
+          echo "  built bundle: $BUILT"
+          if [ -z "$BUILT" ]; then
+            echo "::error::could not find a hashed bundle in backend/public/admin/index.html"
+            exit 1
+          fi
+          for i in $(seq 1 20); do
+            LIVE=$(curl -fsS --max-time 20 https://www.getinroute.in/ \
+                   | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 | cut -d/ -f2 || true)
+            echo "  attempt $i: live bundle ${LIVE:-none}"
+            if [ "$LIVE" = "$BUILT" ]; then
+              echo "FRONTEND VERIFIED: production serves $LIVE"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::production serves '${LIVE:-none}', expected '$BUILT'"
+          exit 1
 
       - name: Verify the live APKs are the ones that were committed
         run: |
