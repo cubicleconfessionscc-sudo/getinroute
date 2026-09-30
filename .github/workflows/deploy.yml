@@ -6,7 +6,12 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      # The deploy gate itself lives in scripts/. Without these, changing the
+      # app-link config generator or the config verifier would not run the gate.
+      - 'scripts/sync-site-apps.mjs'
+      - 'scripts/verify-site-config.mjs'
       - '.github/workflows/deploy.yml'
+      - '.gitattributes'
   workflow_dispatch: {}
 
 jobs:
