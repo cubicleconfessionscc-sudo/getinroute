@@ -6,6 +6,18 @@
 // (App.js) reads extra.appVariant to mount the matching root, so each build is
 // a real, separate app and never shows another variant's branding.
 const VARIANT = (process.env.APP_VARIANT || 'company').toLowerCase();
+
+// 'company' and 'employee' are the same build (the employee app); eas.json uses
+// both spellings. A typo must never silently fall through to the employee
+// build, because that would publish the wrong app to the App Store under the
+// employee bundle id. Validate before anything is generated.
+const KNOWN_VARIANTS = ['company', 'employee', 'driver', 'school'];
+if (process.env.EAS_BUILD_PROFILE === 'production' && !KNOWN_VARIANTS.includes(VARIANT)) {
+  throw new Error(
+    `Unknown APP_VARIANT "${process.env.APP_VARIANT}". Expected one of: ` +
+      KNOWN_VARIANTS.join(', ')
+  );
+}
 const IS_SCHOOL = VARIANT === 'school';
 const IS_DRIVER = VARIANT === 'driver';
 const VERSION = '1.0.5';
@@ -73,7 +85,20 @@ module.exports = {
         NSLocationAlwaysAndWhenInUseUsageDescription: 'GetInRoute needs background location during an active trip so live tracking keeps working while the app is minimized.',
         // React Native's template turns this on to reach a Metro dev server on
         // the LAN. A release build must not carry the local-network exemption.
-        NSAppTransportSecurity: { NSAllowsLocalNetworking: false }
+        NSAppTransportSecurity: { NSAllowsLocalNetworking: false },
+        // iOS suspends location updates when the app is backgrounded unless the
+        // capability is declared. The driver app shares live position with the
+        // employee app and admins for the whole trip, so this is required for the
+        // feature to work at all on a real device.
+        UIBackgroundModes: ['location'],
+        // The app collects location and delivers it to the operator's own
+        // backend. It does not track the user across apps/websites owned by
+        // other companies, so tracking must be declared false. See
+        // docs/APP_STORE_SUBMISSION.md for the remaining App Store Connect
+        // privacy declarations that are answered in App Store Connect rather
+        // than in Info.plist.
+        NSPrivacyTracking: false,
+        NSPrivacyTrackingDomains: []
       },
       runtimeVersion: VERSION
     },

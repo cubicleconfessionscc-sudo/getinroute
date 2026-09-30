@@ -9,8 +9,10 @@
 *.mjs    text eol=lf
 *.cjs    text eol=lf
 *.json   text eol=lf
-*.yml    text eol=lf
-*.yaml   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.example text eol=lf
 
 # This file must stay LF or git can misread its patterns.
 .gitattributes text eol=lf

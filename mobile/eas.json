@@ -26,8 +26,12 @@
       }
     },
     "ios-testflight": {
-      "distribution": "internal",
+      "distribution": "store",
       "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "employee",
+        "NODE_ENV": "production"
+      },
       "ios": {
         "simulator": false,
         "buildConfiguration": "Release"
