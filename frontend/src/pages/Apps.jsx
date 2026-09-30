@@ -77,6 +77,15 @@ export default function Apps() {
                     Installs as <code>{app.android.pkg}</code> &middot; v1.0.5 &middot; Android 7.0+ &middot; 16&nbsp;KB page-size safe
                   </p>
                 )}
+                {app.ios.url ? (
+                  <p className="apps-note" style={{ marginTop: 10 }}>
+                    App Store app &middot; <code>{app.ios.bundleId}</code>
+                  </p>
+                ) : app.ios.bundleId ? (
+                  <p className="apps-note" style={{ marginTop: 10 }}>
+                    iPhone build is ready as <code>{app.ios.bundleId}</code> &middot; awaiting App Store release
+                  </p>
+                ) : null}
                 {app.web && app.web.state === 'available' && (
                   <Link to={app.web.url} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center', width: '100%', marginTop: 10 }}>{app.web.label}</Link>
                 )}

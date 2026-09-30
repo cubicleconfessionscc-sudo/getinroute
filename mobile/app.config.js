@@ -10,11 +10,15 @@ const IS_SCHOOL = VARIANT === 'school';
 const IS_DRIVER = VARIANT === 'driver';
 const VERSION = '1.0.5';
 
+// `vc` is the Android versionCode and `iosb` is the iOS CFBundleVersion. They
+// are tracked separately because Android has a long release history while iOS
+// ships its first build now. iOS must increment `iosb` on every App Store
+// submission; never lower either number.
 const identity = IS_SCHOOL
-  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 2, bg: '#0F766E' }
+  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 2, iosb: 1, bg: '#0F766E' }
   : IS_DRIVER
-    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 2, bg: '#10141A' }
-    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 24, bg: '#10141A' };
+    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 2, iosb: 1, bg: '#10141A' }
+    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 24, iosb: 1, bg: '#10141A' };
 
 module.exports = {
   expo: {
@@ -38,10 +42,14 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: identity.pkg,
+      buildNumber: String(identity.iosb),
       config: { usesNonExemptEncryption: false },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'GetInRoute needs your location to track your commute and, for drivers, to share live position with employees and admins.',
-        NSLocationAlwaysAndWhenInUseUsageDescription: 'GetInRoute needs background location during an active trip so live tracking keeps working while the app is minimized.'
+        NSLocationAlwaysAndWhenInUseUsageDescription: 'GetInRoute needs background location during an active trip so live tracking keeps working while the app is minimized.',
+        // React Native's template turns this on to reach a Metro dev server on
+        // the LAN. A release build must not carry the local-network exemption.
+        NSAppTransportSecurity: { NSAllowsLocalNetworking: false }
       },
       runtimeVersion: VERSION
     },

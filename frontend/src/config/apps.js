@@ -1,7 +1,9 @@
 /* Central app download configuration for the public website.
    Update links here only — every page (Landing, /apps, footer) reads from this file.
-   state: 'available'  -> real, tested download URL exists
-          'coming-soon' -> not published yet (show the "Coming Soon" button, never a fake URL)
+   state: 'available'    -> real, tested download URL exists
+           'coming-soon'  -> not published yet (show a disabled button, never a fake URL)
+   bundleId on ios       -> the App Store identifier a signed build already carries, so the
+                            page can name it honestly while the listing does not exist.
    web:   real web sign-in route when the app is usable in the browser today.
 */
 export const APP_LINKS = {
@@ -20,7 +22,7 @@ export const APP_LINKS = {
     ],
     web: { state: 'available', url: '/employee-login', label: 'Sign in on Web' },
     android: { state: 'available', url: '/download/GetInRoute.apk', label: 'Android APK', pkg: 'com.getinroute.employee' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone' }
+    ios: { state: 'coming-soon', url: '', label: 'iPhone', bundleId: 'com.getinroute.employee' }
   },
   driver: {
     key: 'driver',
@@ -39,7 +41,7 @@ export const APP_LINKS = {
     ],
     web: { state: 'available', url: '/driver/login', label: 'Sign in on Web' },
     android: { state: 'available', url: '/download/GetInRouteDriver.apk', label: 'Android APK', pkg: 'com.getinroute.driver' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone' }
+    ios: { state: 'coming-soon', url: '', label: 'iPhone', bundleId: 'com.getinroute.driver' }
   },
   parent: {
     key: 'parent',
@@ -75,7 +77,7 @@ export const APP_LINKS = {
     ],
     web: { state: 'available', url: '/school/login', label: 'Sign in on Web' },
     android: { state: 'available', url: '/download/GetInRouteSchool.apk', label: 'Android APK', pkg: 'com.getinroute.school' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone' }
+    ios: { state: 'coming-soon', url: '', label: 'iPhone', bundleId: 'com.getinroute.school' }
   }
 };
 

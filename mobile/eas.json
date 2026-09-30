@@ -33,6 +33,78 @@
         "buildConfiguration": "Release"
       }
     },
+    "ios-employee": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "employee",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-driver": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "driver",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-school": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "school",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-archive-employee": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "employee",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-archive-driver": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "driver",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-archive-school": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "school",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
     "school": {
       "distribution": "internal",
       "env": {
