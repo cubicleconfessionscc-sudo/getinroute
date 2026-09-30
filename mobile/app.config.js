@@ -56,6 +56,15 @@ const identity = IS_SCHOOL
     ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 2, iosb: 1, bg: '#10141A' }
     : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 24, iosb: 1, bg: '#10141A' };
 
+// Splash image support is opt-in: it activates only when an approved asset is
+// actually present, so nothing breaks today and no branding is invented. Drop a
+// 1242x2436 (or larger, same 9:19.5 ratio) PNG named splash.png (all apps) or
+// school-splash.png (School only) into mobile/assets/ and it is picked up
+// automatically on the next build. See docs/MOBILE_BRANDING_ASSETS.md.
+const SPLASH_FILE = ['school-splash.png', 'splash.png'].find((f) =>
+  require('fs').existsSync(require('path').join(__dirname, 'assets', f))
+);
+
 module.exports = {
   expo: {
     name: identity.name,
@@ -71,9 +80,9 @@ module.exports = {
       runtimeVersion: VERSION
     },
     icon: IS_SCHOOL ? './assets/school-icon.png' : './assets/icon.png',
-    splash: {
-      backgroundColor: identity.bg
-    },
+    splash: SPLASH_FILE
+      ? { image: `./assets/${SPLASH_FILE}`, resizeMode: 'contain', backgroundColor: identity.bg }
+      : { backgroundColor: identity.bg },
     assetBundlePatterns: ['**/*'],
     ios: {
       supportsTablet: true,
