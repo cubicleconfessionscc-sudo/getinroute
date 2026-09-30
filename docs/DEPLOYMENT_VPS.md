@@ -91,7 +91,13 @@ Create `/etc/getinroute.env`:
 HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=postgresql://getinroute:CHANGE_ME_STRONG@127.0.0.1:5432/getinroute
-JWT_SECRET=openssl rand -hex 32        # run this, paste result
+# Generate ONCE with:  openssl rand -hex 32
+# and store the result only in this file (chmod 600) or a secret manager.
+# Never commit a real secret, never reuse one across environments.
+# Production MUST supply JWT_SECRET via the environment. backend/server.js has
+# no hard-coded default: if the variable is missing it generates a random
+# secret at boot, which silently invalidates every existing login session.
+JWT_SECRET=<GENERATE_SECURE_JWT_SECRET>
 FRONTEND_URL=https://www.getinroute.in
 ALLOWED_ORIGINS=https://www.getinroute.in,https://getinroute.in
 APP_TIMEZONE=Asia/Kolkata

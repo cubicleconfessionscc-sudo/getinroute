@@ -10,6 +10,30 @@ const IS_SCHOOL = VARIANT === 'school';
 const IS_DRIVER = VARIANT === 'driver';
 const VERSION = '1.0.5';
 
+// Google Maps is genuinely required on mobile: DriverHomeScreen and
+// EmployeeHomeScreen render react-native-maps, which uses the Google provider.
+// Expo writes this value into AndroidManifest as com.google.android.geo.API_KEY,
+// so a store build without it renders a blank map instead of failing loudly.
+//
+// The key is read from the environment instead of being committed. Note that a
+// mobile maps key is not a secret in the usual sense - it is shipped inside
+// every APK/IPA binary and can be extracted from it. Restricting it in the
+// Google Cloud console (Android package + signing certificate, iOS bundle id,
+// and only the Maps SDK for iOS/Android + Places APIs) is the actual
+// mitigation; see docs/MOBILE_MAPS_SETUP.md.
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+
+// EAS sets EAS_BUILD_PROFILE for hosted builds. Only a release build is
+// required to have the key, so local development and preview builds are
+// unaffected, but a store build can never silently ship a broken map.
+if (process.env.EAS_BUILD_PROFILE === 'production' && !GOOGLE_MAPS_API_KEY) {
+  throw new Error(
+    'GOOGLE_MAPS_API_KEY is required for a production (store) build. Set it in ' +
+      'EAS: eas env:create --environment production --name GOOGLE_MAPS_API_KEY ' +
+      '--visibility plaintext. Do not commit the key to git.'
+  );
+}
+
 // `vc` is the Android versionCode and `iosb` is the iOS CFBundleVersion. They
 // are tracked separately because Android has a long release history while iOS
 // ships its first build now. iOS must increment `iosb` on every App Store
@@ -64,7 +88,7 @@ module.exports = {
       },
       permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION'],
       config: {
-        googleMaps: { apiKey: 'AIzaSyDZ6JqrpMh1o8_zbtR_N1RNjaPDJQKSEgE' }
+        googleMaps: { apiKey: GOOGLE_MAPS_API_KEY }
       },
       versionCode: identity.vc
     },

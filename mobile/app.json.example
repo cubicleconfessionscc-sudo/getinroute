@@ -53,7 +53,7 @@
       ],
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyDZ6JqrpMh1o8_zbtR_N1RNjaPDJQKSEgE"
+          "apiKey": "<GOOGLE_MAPS_API_KEY>"
         }
       },
       "versionCode": 18
