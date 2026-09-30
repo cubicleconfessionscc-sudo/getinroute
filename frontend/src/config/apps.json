@@ -2,7 +2,7 @@
   "_comment": [
     "SINGLE SOURCE OF TRUTH for every GetInRoute app link on the website.",
     "frontend/src/config/apps.js derives the UI view-model from this file, and",
-    "scripts/sync-site-apps.ps1 regenerates the static page's app blocks from it.",
+    "scripts/sync-site-apps.mjs regenerates the static page's app blocks from it.",
     "Add an App Store / TestFlight URL by setting iosUrl; the iPhone button",
     "enables itself automatically. While iosUrl is null the button stays disabled",
     "and no placeholder URL is ever rendered."

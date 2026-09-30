@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           # Guards against a fabricated App Store URL, an iOS url with no bundle
           # id, a missing app, a stale static page, and leaked secrets.
-          pwsh -File scripts/sync-site-apps.ps1 -Verify
+          node scripts/sync-site-apps.mjs --verify
           node scripts/verify-site-config.mjs
 
       - name: Install Railway CLI (pinned 5.30.4)

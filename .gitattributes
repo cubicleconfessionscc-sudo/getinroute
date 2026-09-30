@@ -1,0 +1,32 @@
+# Keep text files as LF in the working tree so that generated-output
+# verification (scripts/sync-site-apps.mjs --verify) is not affected by the
+# line endings a particular machine checks out. Without this, core.autocrlf=true
+# on Windows rewrites the generated static page to CRLF and a content check
+# fails on line endings alone.
+*.html   text eol=lf
+*.css    text eol=lf
+*.js     text eol=lf
+*.mjs    text eol=lf
+*.cjs    text eol=lf
+*.json   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+
+# This file must stay LF or git can misread its patterns.
+.gitattributes text eol=lf
+
+# Never line-ending translate binaries or key material.
+*.apk              binary
+*.aab              binary
+*.png              binary
+*.jpg              binary
+*.jpeg             binary
+*.gif              binary
+*.ico              binary
+*.webp             binary
+*.pdf              binary
+*.jks              binary
+*.keystore         binary
+*.p12              binary
+*.cer              binary
+*.mobileprovision  binary
