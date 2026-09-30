@@ -111,7 +111,18 @@ module.exports = {
         foregroundImage: IS_SCHOOL ? './assets/school-adaptive-icon.png' : './assets/adaptive-icon.png',
         backgroundColor: identity.bg
       },
-      permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION'],
+      permissions: [
+        'ACCESS_FINE_LOCATION',
+        'ACCESS_COARSE_LOCATION',
+        'ACCESS_BACKGROUND_LOCATION',
+        // notifications.js uses expo-notifications (requestPermissionsAsync and
+        // scheduleNotificationAsync). Android 13 / API 33 silently drops
+        // scheduled notifications unless this is declared. The expo-notifications
+        // config plugin adds it today, but relying on a transitive plugin means
+        // an unattended dependency change could quietly break notifications, so
+        // it is declared explicitly here.
+        'POST_NOTIFICATIONS'
+      ],
       config: {
         googleMaps: { apiKey: GOOGLE_MAPS_API_KEY }
       },
