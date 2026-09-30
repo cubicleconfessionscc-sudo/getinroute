@@ -1,87 +1,83 @@
-/* Central app download configuration for the public website.
-   Update links here only — every page (Landing, /apps, footer) reads from this file.
-   state: 'available'    -> real, tested download URL exists
-           'coming-soon'  -> not published yet (show a disabled button, never a fake URL)
-   bundleId on ios       -> the App Store identifier a signed build already carries, so the
-                            page can name it honestly while the listing does not exist.
-   web:   real web sign-in route when the app is usable in the browser today.
-*/
-export const APP_LINKS = {
-  employee: {
-    key: 'employee',
-    name: 'GetInRoute Employee',
-    desc: 'Your daily transportation companion.',
-    features: [
-      'pickup and drop-off information',
-      'trip status',
-      'live vehicle tracking',
-      'boarding',
-      'notifications',
-      'SOS',
-      'support'
-    ],
-    web: { state: 'available', url: '/employee-login', label: 'Sign in on Web' },
-    android: { state: 'available', url: '/download/GetInRoute.apk', label: 'Android APK', pkg: 'com.getinroute.employee' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone', bundleId: 'com.getinroute.employee' }
+/* Central app configuration for the public website.
+ *
+ * apps.json is the single source of truth. This module only derives a view
+ * model from it so every page (Landing, /apps) behaves identically and no URL
+ * is ever hard-coded in a component.
+ *
+ * iOS behaviour is derived, never hand-set:
+ *   iosUrl present  -> iPhone button renders as a real link
+ *   iosUrl null     -> iPhone button renders disabled, no href, no placeholder
+ */
+import appsConfig from './apps.json';
+
+export const RELEASE_VERSION = appsConfig.releaseVersion;
+export const ANDROID_MIN = appsConfig.androidMinVersion;
+export const DISTRIBUTION_EMAIL = appsConfig.distributionEmail;
+
+export const APP_KEYS = ['employee', 'driver', 'school', 'parent'];
+
+/** Raw config, in a stable order. */
+export const APP_CONFIG = APP_KEYS
+  .filter((k) => appsConfig.apps[k])
+  .map((key) => ({ key, ...appsConfig.apps[key] }));
+
+/**
+ * A platform is available only when a real URL exists. This is the single
+ * decision point the UI uses, so a null url can never render as a link.
+ */
+export function platform(app, name) {
+  const url = name === 'ios' ? app.iosUrl : app.androidUrl;
+  const id = name === 'ios' ? app.iosBundleId : app.androidPackage;
+  const available = typeof url === 'string' && url.trim().length > 0;
+  return {
+    name,
+    url: available ? url : null,
+    id: id || null,
+    available,
+    label: name === 'ios' ? 'iPhone' : 'Android APK',
+    // Copy shown next to a platform that is not yet installable.
+    pendingNote: name === 'ios' && !available && id
+      ? `iPhone build is ready as ${id} · awaiting App Store release`
+      : null
+  };
+}
+
+export const androidOf = (app) => platform(app, 'android');
+export const iosOf = (app) => platform(app, 'ios');
+
+/**
+ * Back-compat view model for existing call sites: `app.android.state`,
+ * `app.android.url`, `app.ios.*`, `app.web.*`.
+ */
+export const APP_LINKS = APP_CONFIG.map((app) => ({
+  key: app.key,
+  name: app.name,
+  shortName: app.shortName,
+  desc: app.blurb,
+  features: app.features,
+  web: {
+    state: app.webUrl ? 'available' : 'coming-soon',
+    url: app.webUrl || '',
+    label: app.webLabel
   },
-  driver: {
-    key: 'driver',
-    name: 'GetInRoute Driver',
-    desc: 'Everything a driver needs for the daily journey.',
-    features: [
-      'assigned trips',
-      'daily schedule',
-      'passenger list',
-      'navigation',
-      'boarding',
-      'trip start/end',
-      'incident reporting',
-      'SOS',
-      'vehicle information'
-    ],
-    web: { state: 'available', url: '/driver/login', label: 'Sign in on Web' },
-    android: { state: 'available', url: '/download/GetInRouteDriver.apk', label: 'Android APK', pkg: 'com.getinroute.driver' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone', bundleId: 'com.getinroute.driver' }
+  android: {
+    state: app.androidUrl ? 'available' : 'coming-soon',
+    url: app.androidUrl || '',
+    label: 'Android APK',
+    pkg: app.androidPackage
   },
-  parent: {
-    key: 'parent',
-    name: 'GetInRoute Parent',
-    desc: 'Stay connected to your child\u2019s school journey.',
-    features: [
-      'child information',
-      'assigned route',
-      'pickup location',
-      'bus tracking',
-      'pickup/drop-off updates',
-      'attendance',
-      'notifications',
-      'emergency alerts'
-    ],
-    web: { state: 'available', url: '/parent/login', label: 'Sign in on Web' },
-    android: { state: 'coming-soon', url: '', label: 'Android APK' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone' }
-  },
-  school: {
-    key: 'school',
-    name: 'GetInRoute School',
-    desc: 'A simple command center for school transportation.',
-    features: [
-      'students',
-      'routes',
-      'buses',
-      'drivers',
-      'attendance',
-      'live tracking',
-      'incidents',
-      'notifications'
-    ],
-    web: { state: 'available', url: '/school/login', label: 'Sign in on Web' },
-    android: { state: 'available', url: '/download/GetInRouteSchool.apk', label: 'Android APK', pkg: 'com.getinroute.school' },
-    ios: { state: 'coming-soon', url: '', label: 'iPhone', bundleId: 'com.getinroute.school' }
+  ios: {
+    state: app.iosUrl ? 'available' : 'coming-soon',
+    url: app.iosUrl || '',
+    label: 'iPhone',
+    bundleId: app.iosBundleId
   }
-};
+}));
 
 export const APP_STATUS_LABEL = {
   available: 'AVAILABLE',
   'coming-soon': 'COMING SOON'
 };
+
+/** The three shipped mobile apps, in the order the site lists them. */
+export const SHIPPED_APPS = APP_CONFIG.filter((a) => a.androidUrl || a.iosUrl);

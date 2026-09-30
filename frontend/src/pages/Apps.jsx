@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Smartphone, School, Navigation, Users, Download, Apple, Check } from 'lucide-react';
-import { APP_LINKS, APP_STATUS_LABEL } from '../config/apps';
+import { APP_CONFIG, APP_STATUS_LABEL, androidOf, iosOf, RELEASE_VERSION, ANDROID_MIN } from '../config/apps';
 
 const ICONS = {
   employee: Smartphone,
@@ -41,56 +41,64 @@ export default function Apps() {
 
       <section className="pub-section" style={{ maxWidth: 1080 }}>
         <div className="apps-grid">
-          {Object.values(APP_LINKS).map((app) => {
+          {APP_CONFIG.map((app) => {
             const Icon = ICONS[app.key] || Smartphone;
+            const android = androidOf(app);
+            const ios = iosOf(app);
             return (
               <div className="pub-card apps-card" key={app.key}>
                 <div className="apps-card-head">
                   <div className="pub-card-ico ico-indigo"><Icon size={26} /></div>
-                  <span className={`apps-state ${app.android.state}`}>{APP_STATUS_LABEL[app.android.state]}</span>
+                  <span className={`apps-state ${android.available ? 'available' : 'coming-soon'}`}>
+                    {APP_STATUS_LABEL[android.available ? 'available' : 'coming-soon']}
+                  </span>
                 </div>
                 <h3>{app.name}</h3>
-                <p className="apps-desc">{app.desc}</p>
+                <p className="apps-desc">{app.blurb}</p>
                 <ul className="apps-feats">
                   {app.features.map((f, i) => (
                     <li key={i}><Check size={14} /> {f}</li>
                   ))}
                 </ul>
-                <div className="apps-btns">
-                  {app.android.url ? (
-                    <a className="btn btn-primary btn-sm" href={app.android.url} download style={{ justifyContent: 'center', flex: 1 }}>
-                      <Download size={15} /> {app.android.label}
-                    </a>
-                  ) : (
-                    <span className="btn btn-sm btn-soon" style={{ flex: 1 }}><Download size={15} /> {app.android.label}</span>
-                  )}
-                  {app.ios.url ? (
-                    <a className="btn btn-sm" href={app.ios.url} target="_blank" rel="noopener noreferrer" style={{ justifyContent: 'center', flex: 1, background: 'rgba(124,58,237,.2)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,.4)' }}>
-                      <Apple size={15} /> {app.ios.label}
-                    </a>
-                  ) : (
-                    <span className="btn btn-sm btn-soon" style={{ flex: 1 }}><Apple size={15} /> {app.ios.label}</span>
-                  )}
+
+                <div className="apps-platforms">
+                  {/* Android: a real link whenever androidUrl is set. */}
+                  <div className="apps-platform">
+                    {android.available ? (
+                      <a className="btn btn-primary btn-sm apps-platform-btn" href={android.url} download>
+                        <Download size={15} /> {android.label}
+                      </a>
+                    ) : (
+                      <span className="btn btn-sm btn-soon apps-platform-btn" aria-disabled="true">
+                        <Download size={15} /> {android.label}
+                      </span>
+                    )}
+                    <span className="apps-platform-meta">
+                      {android.available ? `v${RELEASE_VERSION} · ${ANDROID_MIN}` : 'Not yet released'}
+                    </span>
+                    {android.id && <code className="apps-platform-id">{android.id}</code>}
+                  </div>
+
+                  {/* iPhone: enables itself only when iosUrl is a real URL. */}
+                  <div className="apps-platform">
+                    {ios.available ? (
+                      <a className="btn btn-sm apps-platform-btn apps-ios-btn" href={ios.url} target="_blank" rel="noopener noreferrer">
+                        <Apple size={15} /> {ios.label}
+                      </a>
+                    ) : (
+                      <span className="btn btn-sm btn-soon apps-platform-btn" aria-disabled="true">
+                        <Apple size={15} /> iPhone &mdash; Coming Soon
+                      </span>
+                    )}
+                    <span className="apps-platform-meta">
+                      {ios.available ? 'App Store / TestFlight' : 'Awaiting App Store release'}
+                    </span>
+                    {ios.id && <code className="apps-platform-id">{ios.id}</code>}
+                  </div>
                 </div>
-                {app.android.state === 'available' && (
-                  <p className="apps-note" style={{ marginTop: 10 }}>
-                    Installs as <code>{app.android.pkg}</code> &middot; v1.0.5 &middot; Android 7.0+ &middot; 16&nbsp;KB page-size safe
-                  </p>
-                )}
-                {app.ios.url ? (
-                  <p className="apps-note" style={{ marginTop: 10 }}>
-                    App Store app &middot; <code>{app.ios.bundleId}</code>
-                  </p>
-                ) : app.ios.bundleId ? (
-                  <p className="apps-note" style={{ marginTop: 10 }}>
-                    iPhone build is ready as <code>{app.ios.bundleId}</code> &middot; awaiting App Store release
-                  </p>
-                ) : null}
-                {app.web && app.web.state === 'available' && (
-                  <Link to={app.web.url} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center', width: '100%', marginTop: 10 }}>{app.web.label}</Link>
-                )}
-                {app.android.state !== 'available' && app.ios.state !== 'available' && (
-                  <p className="apps-note">Native apps coming soon — the web app is live right now.</p>
+
+                {app.webUrl && (
+                  <Link to={app.webUrl} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center', width: '100%', marginTop: 10 }}>{app.webLabel}</Link>
                 )}
               </div>
             );

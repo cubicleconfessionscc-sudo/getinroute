@@ -1,0 +1,103 @@
+{
+  "_comment": [
+    "SINGLE SOURCE OF TRUTH for every GetInRoute app link on the website.",
+    "frontend/src/config/apps.js derives the UI view-model from this file, and",
+    "scripts/sync-site-apps.ps1 regenerates the static page's app blocks from it.",
+    "Add an App Store / TestFlight URL by setting iosUrl; the iPhone button",
+    "enables itself automatically. While iosUrl is null the button stays disabled",
+    "and no placeholder URL is ever rendered."
+  ],
+  "releaseVersion": "1.0.5",
+  "androidMinVersion": "Android 7.0+",
+  "distributionEmail": "support@getinroute.in",
+  "apps": {
+    "employee": {
+      "name": "GetInRoute Employee",
+      "shortName": "Employee",
+      "blurb": "Your daily transportation companion.",
+      "features": [
+        "pickup and drop-off information",
+        "trip status",
+        "live vehicle tracking",
+        "boarding",
+        "notifications",
+        "SOS",
+        "support"
+      ],
+      "androidUrl": "/download/GetInRoute.apk",
+      "androidPackage": "com.getinroute.employee",
+      "iosUrl": null,
+      "iosBundleId": "com.getinroute.employee",
+      "webUrl": "/employee-login",
+      "webLabel": "Sign in on Web",
+      "showOnSite": true
+    },
+    "driver": {
+      "name": "GetInRoute Driver",
+      "shortName": "Driver",
+      "blurb": "Everything a driver needs for the daily journey.",
+      "features": [
+        "assigned trips",
+        "daily schedule",
+        "passenger list",
+        "navigation",
+        "boarding",
+        "trip start/end",
+        "incident reporting",
+        "SOS",
+        "vehicle information"
+      ],
+      "androidUrl": "/download/GetInRouteDriver.apk",
+      "androidPackage": "com.getinroute.driver",
+      "iosUrl": null,
+      "iosBundleId": "com.getinroute.driver",
+      "webUrl": "/driver-login",
+      "webLabel": "Sign in on Web",
+      "showOnSite": true
+    },
+    "school": {
+      "name": "GetInRoute School",
+      "shortName": "School",
+      "blurb": "A simple command center for school transportation.",
+      "features": [
+        "students",
+        "routes",
+        "buses",
+        "drivers",
+        "attendance",
+        "live tracking",
+        "incidents",
+        "notifications"
+      ],
+      "androidUrl": "/download/GetInRouteSchool.apk",
+      "androidPackage": "com.getinroute.school",
+      "iosUrl": null,
+      "iosBundleId": "com.getinroute.school",
+      "webUrl": "/school-login",
+      "webLabel": "Sign in on Web",
+      "showOnSite": true
+    },
+    "parent": {
+      "name": "GetInRoute Parent",
+      "shortName": "Parent",
+      "blurb": "Stay connected to your child's school journey.",
+      "features": [
+        "child information",
+        "assigned route",
+        "pickup location",
+        "bus tracking",
+        "pickup/drop-off updates",
+        "attendance",
+        "notifications",
+        "emergency alerts"
+      ],
+      "androidUrl": null,
+      "androidPackage": null,
+      "iosUrl": null,
+      "iosBundleId": null,
+      "webUrl": "/parent-login",
+      "webLabel": "Sign in on Web",
+      "showOnSite": true
+    }
+  }
+}

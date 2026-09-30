@@ -6,7 +6,9 @@ import {
   Gauge, Siren, MoonStar, HelpCircle, LifeBuoy, MessageCircle, MapPin, Navigation, ShieldAlert,
   RadioTower, AlertTriangle, BrainCircuit, Repeat, Activity, Radar, Target, CheckCircle2, ArrowRight
 } from 'lucide-react';
-import { APP_LINKS } from '../config/apps';
+import { APP_LINKS, APP_CONFIG, SHIPPED_APPS, androidOf, iosOf, RELEASE_VERSION } from '../config/apps';
+
+const APP_BY_KEY = Object.fromEntries(APP_LINKS.map((a) => [a.key, a]));
 
 const NAV = [
   { label: 'Home', id: 'top' },
@@ -402,36 +404,46 @@ export default function Landing() {
         <h2 className="pub-h2">ONE PLATFORM. EVERY JOURNEY.</h2>
         <p className="pub-sub">Employee, Driver, Parent, School and Admin — one connected experience.</p>
         <div className="pub-apps-row" style={{ marginBottom: 18 }}>
-          {Object.values(APP_LINKS).map((app) => (
-            <Link to="/apps" className="pub-app-chip" key={app.key}>
-              <div className="pub-card-ico ico-indigo">{app.key === 'school' ? <School size={22} /> : app.key === 'driver' ? <Navigation size={22} /> : app.key === 'parent' ? <Users size={22} /> : <Smartphone size={22} />}</div>
-              <div>
-                <b>{app.name.replace('GetInRoute ', '')} App</b>
-                <div className="pub-a">
-                  {app.android.state === 'available' ? `Android APK · v1.0.5` : 'Coming soon'}
-                  {app.web?.state === 'available' ? ' · also on web' : ''}
+          {APP_CONFIG.map((raw) => {
+            const android = androidOf(raw);
+            const ios = iosOf(raw);
+            return (
+              <Link to="/apps" className="pub-app-chip" key={raw.key}>
+                <div className="pub-card-ico ico-indigo">{raw.key === 'school' ? <School size={22} /> : raw.key === 'driver' ? <Navigation size={22} /> : raw.key === 'parent' ? <Users size={22} /> : <Smartphone size={22} />}</div>
+                <div>
+                  <b>{raw.shortName} App</b>
+                  <div className="pub-a">
+                    {android.available ? `Android APK · v${RELEASE_VERSION}` : 'Android: coming soon'}
+                    {' · '}
+                    {ios.available ? 'iPhone: App Store' : 'iPhone: coming soon'}
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
         <div style={{ textAlign: 'center', display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-          {['employee', 'driver', 'school'].map((k) => {
-            const app = APP_LINKS[k];
-            if (!app?.android?.url) return null;
+          {SHIPPED_APPS.map((raw) => {
+            const app = APP_BY_KEY[raw.key];
+            const android = androidOf(raw);
+            if (!android.available) return null;
             return (
               <a
-                key={k}
+                key={raw.key}
                 className="btn btn-primary"
-                href={app.android.url}
-                download={`${app.name.replace(/\s+/g, '')}-v1.0.5.apk`}
+                href={android.url}
+                download={`${app.name.replace(/\s+/g, '')}-v${RELEASE_VERSION}.apk`}
               >
-                <Download size={17} /> {app.name} APK
+                <Download size={17} /> {raw.shortName} APK
               </a>
             );
           })}
           <Link to="/apps" className="btn btn-ghost"><Smartphone size={17} /> All Apps</Link>
         </div>
+        <p className="pub-muted-note" style={{ textAlign: 'center', marginTop: 14 }}>
+          Android APKs install directly. iPhone builds ship through the Apple App Store / TestFlight &mdash;
+          the button activates automatically once each listing is live. No placeholder links are published.
+        </p>
       </section>
 
       {/* ================= COMMAND CENTER ================= */}
