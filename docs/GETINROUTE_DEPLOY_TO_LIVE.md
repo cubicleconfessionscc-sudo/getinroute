@@ -1,3 +1,16 @@
+> **SUPERSEDED - DO NOT FOLLOW.** This runbook describes a manual file-overlay
+> onto a separate live checkout (`D:\Default Project Portable\Project`), the
+> procedure used before the project moved to automated deployment.
+>
+> Production now deploys exclusively through `.github/workflows/deploy.yml`
+> (`actions/checkout` -> frontend build -> `railway up` from `backend/`). The
+> `deploy/getinroute-update/` package this document pointed at was removed on
+> 2026-09-30; see `docs/OBSOLETE_DEPLOY_SNAPSHOT.md` for the investigation,
+> including the two hazards (it would have downgraded `backend/server.js`, and it
+> embedded a Google Maps API key).
+>
+> Retained for history only.
+
 # GetInRoute — Deploying the improved local build to www.getinroute.in
 
 Date: 2026-09-10
