@@ -76,24 +76,36 @@ jobs:
 
       - name: Wait for the Railway deployment to succeed
         run: |
-          set -uo pipefail
-          TERMINAL='SUCCESS FAILED CRASHED REMOVED'
+          # Deliberately no `set -e`: a transient CLI failure or a non-JSON reply
+          # must not abort the poll. Strip ANSI colour before parsing, and parse
+          # with python3 (already used above) rather than trusting the shell.
+          set +e
           for i in $(seq 1 40); do
-            STATUS=$(railway deployment list --limit 1 --service getinroute-app --json 2>/dev/null \
-                     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-                         try{process.stdout.write(JSON.parse(s)[0].status||"")}catch{}})')
-            ID=$(railway deployment list --limit 1 --service getinroute-app --json 2>/dev/null \
-                 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-                     try{process.stdout.write(JSON.parse(s)[0].id||"")}catch{}})')
+            RAW=$(railway deployment list --limit 1 --service getinroute-app --json 2>/dev/null \
+                  | sed 's/\x1b\[[0-9;]*m//g')
+            STATUS=$(printf '%s' "$RAW" | python3 -c \
+              "import sys,json
+try:
+    d=json.load(sys.stdin); print(d[0]['status'])
+except Exception:
+    print('')" 2>/dev/null)
+            ID=$(printf '%s' "$RAW" | python3 -c \
+              "import sys,json
+try:
+    d=json.load(sys.stdin); print(d[0]['id'])
+except Exception:
+    print('')" 2>/dev/null)
             echo "  attempt $i: deployment ${ID:-unknown} is ${STATUS:-unknown}"
-            if [ -n "$STATUS" ] && printf '%s' "$STATUS" | grep -qE "^(SUCCESS|FAILED|CRASHED|REMOVED)$"; then
-              if [ "$STATUS" = "SUCCESS" ]; then
+            case "$STATUS" in
+              SUCCESS)
                 echo "RAILWAY DEPLOY CONFIRMED: $ID succeeded"
                 exit 0
-              fi
-              echo "::error::Railway deployment $ID finished as $STATUS"
-              exit 1
-            fi
+                ;;
+              FAILED|CRASHED|REMOVED)
+                echo "::error::Railway deployment $ID finished as $STATUS"
+                exit 1
+                ;;
+            esac
             sleep 15
           done
           echo "::error::Railway deployment did not reach a terminal state in time"
