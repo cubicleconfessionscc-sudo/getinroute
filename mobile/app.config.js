@@ -51,10 +51,10 @@ if (process.env.EAS_BUILD_PROFILE === 'production' && !GOOGLE_MAPS_API_KEY) {
 // ships its first build now. iOS must increment `iosb` on every App Store
 // submission; never lower either number.
 const identity = IS_SCHOOL
-  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 2, iosb: 1, bg: '#0F766E' }
+  ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 3, iosb: 1, bg: '#0F766E' }
   : IS_DRIVER
-    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 2, iosb: 1, bg: '#10141A' }
-    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 24, iosb: 1, bg: '#10141A' };
+    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 3, iosb: 1, bg: '#10141A' }
+    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 25, iosb: 1, bg: '#10141A' };
 
 // Splash image support is opt-in: it activates only when an approved asset is
 // actually present, so nothing breaks today and no branding is invented. Drop a
@@ -72,12 +72,29 @@ module.exports = {
     version: VERSION,
     orientation: 'portrait',
     userInterfaceStyle: 'light',
+    // expo-updates is DISABLED on purpose.
+    //
+    // With updates.enabled = true these APKs shipped with
+    //   expo.modules.updates.ENABLED              = true
+    //   expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH = ALWAYS
+    //   expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS   = 0
+    // so every cold start blocks on a manifest fetch from u.expo.dev for the
+    // project this build was made under. That project is owned by a different
+    // EAS account than the one intended for these apps, so the check cannot
+    // resolve. With a 0 ms launch wait there is no grace period before the
+    // embedded bundle, and the failure happens in the native updates layer
+    // BEFORE any JS runs - which is why the release build shows a bare white
+    // screen with no splash, no ErrorBoundary and no log line.
+    //
+    // Store-shipped APKs must run the bundle that was signed and reviewed with
+    // them. Turning OTA off makes the APK immutable and self-contained, which is
+    // what an install-from-website distribution model requires. Re-enabling OTA
+    // is only safe once the correct EAS account owns the project and the update
+    // server has been verified to serve this runtimeVersion.
     updates: {
-      url: 'https://u.expo.dev/25f0833c-90f8-426f-bacb-0e2e12527a3e',
-      enabled: true,
-      checkAutomatically: 'ON_LOAD',
-      fallbackToCacheTimeout: 0,
-      runtimeVersion: VERSION
+      enabled: false,
+      checkAutomatically: 'NEVER',
+      fallbackToCacheTimeout: 0
     },
     icon: IS_SCHOOL ? './assets/school-icon.png' : './assets/icon.png',
     splash: SPLASH_FILE
