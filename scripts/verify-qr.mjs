@@ -1,4 +1,4 @@
-// Independent round-trip check for the generated QR codes.
+﻿// Independent round-trip check for the generated QR codes.
 //
 // generate-qr.mjs proves the files are real SVG; this proves they actually
 // SCAN. It renders each URL to a PNG with the encoder, then decodes that PNG
@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfgPath = path.join(repoRoot, 'frontend/src/config/apps.json');
-const outDir = path.join(repoRoot, 'frontend/public/apps/qr');
+const outDir = path.join(repoRoot, 'frontend/public/assets/qr');
 
 const require = createRequire(import.meta.url);
 const load = (c) => require(c);

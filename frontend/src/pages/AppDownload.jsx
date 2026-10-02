@@ -125,7 +125,7 @@ export default function AppDownload() {
   const art = artifactManifest.apps[app.key] || null;
   const comingSoon = app.status === 'coming-soon';
   const hasAndroid = !!app.androidUrl;
-  const qrSrc = `/apps/qr/${app.key}.svg`;
+  const qrSrc = `/assets/qr/${app.key}.svg`;
   const shareUrl = `${window.location.origin}${app.downloadPage || `/apps/${app.key}`}`;
 
   let cta = null;

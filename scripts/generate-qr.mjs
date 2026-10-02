@@ -1,7 +1,7 @@
-// Generates the one shared QR code per app as a static SVG.
+﻿// Generates the one shared QR code per app as a static SVG.
 //
 // Deliberately a build-time generator with NO runtime dependency: the QR is a
-// committed asset under frontend/public/apps/qr/, so the shipped bundle gains
+// committed asset under frontend/public/assets/qr/, so the shipped bundle gains
 // nothing and the page cannot break because a QR library failed to load.
 //
 // Usage:  node scripts/generate-qr.mjs
@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfgPath = path.join(repoRoot, 'frontend/src/config/apps.json');
-const outDir = path.join(repoRoot, 'frontend/public/apps/qr');
+const outDir = path.join(repoRoot, 'frontend/public/assets/qr');
 
 // Resolve `qrcode` from the throwaway install next to this repo's temp area,
 // not from the frontend (which must not gain a dependency).
