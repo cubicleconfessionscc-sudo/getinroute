@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Smartphone, School, Navigation, Users, Download, Apple, Check } from 'lucide-react';
+import { Smartphone, School, Navigation, Users, Download, Apple, Check, QrCode } from 'lucide-react';
 import { APP_CONFIG, APP_STATUS_LABEL, androidOf, iosOf, RELEASE_VERSION, ANDROID_MIN } from '../config/apps';
 
 const ICONS = {
@@ -49,8 +49,8 @@ export default function Apps() {
               <div className="pub-card apps-card" key={app.key}>
                 <div className="apps-card-head">
                   <div className="pub-card-ico ico-indigo"><Icon size={26} /></div>
-                  <span className={`apps-state ${android.available ? 'available' : 'coming-soon'}`}>
-                    {APP_STATUS_LABEL[android.available ? 'available' : 'coming-soon']}
+                  <span className={`apps-state ${app.status === 'coming-soon' ? 'coming-soon' : 'available'}`}>
+                    {APP_STATUS_LABEL[app.status === 'coming-soon' ? 'coming-soon' : 'available']}
                   </span>
                 </div>
                 <h3>{app.name}</h3>
@@ -64,17 +64,19 @@ export default function Apps() {
                 <div className="apps-platforms">
                   {/* Android: a real link whenever androidUrl is set. */}
                   <div className="apps-platform">
-                    {android.available ? (
+                    {android.available && app.status !== 'coming-soon' ? (
                       <a className="btn btn-primary btn-sm apps-platform-btn" href={android.url} download>
                         <Download size={15} /> {android.label}
                       </a>
                     ) : (
                       <span className="btn btn-sm btn-soon apps-platform-btn" aria-disabled="true">
-                        <Download size={15} /> {android.label}
+                        <Download size={15} /> {app.status === 'coming-soon' ? 'Coming soon' : android.label}
                       </span>
                     )}
                     <span className="apps-platform-meta">
-                      {android.available ? `v${RELEASE_VERSION} · ${ANDROID_MIN}` : 'Not yet released'}
+                      {app.status === 'coming-soon'
+                        ? 'Not published yet'
+                        : android.available ? `v${RELEASE_VERSION} · ${ANDROID_MIN}` : 'Not yet released'}
                     </span>
                     {android.id && <code className="apps-platform-id">{android.id}</code>}
                   </div>
@@ -97,8 +99,19 @@ export default function Apps() {
                   </div>
                 </div>
 
+                <Link
+                  to={app.downloadPage || `/apps/${app.key}`}
+                  className={app.status === 'coming-soon'
+                    ? 'btn btn-ghost btn-sm apps-install-guide'
+                    : 'btn btn-primary btn-sm apps-install-guide'}
+                  style={{ justifyContent: 'center', width: '100%', marginTop: 10 }}
+                >
+                  <QrCode size={15} />
+                  {app.status === 'coming-soon' ? 'Preview install page' : 'Install guide & QR code'}
+                </Link>
+
                 {app.webUrl && (
-                  <Link to={app.webUrl} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center', width: '100%', marginTop: 10 }}>{app.webLabel}</Link>
+                  <Link to={app.webUrl} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center', width: '100%', marginTop: 8 }}>{app.webLabel}</Link>
                 )}
               </div>
             );

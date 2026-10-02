@@ -15,6 +15,7 @@ import EmployeeLogin from './pages/EmployeeLogin';
 import Register from './pages/Register';
 import CompanyOnboard from './pages/CompanyOnboard';
 import Apps from './pages/Apps';
+import AppDownload from './pages/AppDownload';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 
@@ -142,6 +143,7 @@ export default function App() {
           <Route path="/vendor/login" element={<VendorLogin />} />
           <Route path="/school/login" element={<SchoolLogin />} />
           <Route path="/apps" element={<Apps />} />
+          <Route path="/apps/:appKey" element={<AppDownload />} />
           <Route path="/get-started" element={<Navigate to="/register-company" replace />} />
           <Route path="/platform" element={<Navigate to="/#platform" replace />} />
           <Route path="/solutions" element={<Navigate to="/#solutions" replace />} />

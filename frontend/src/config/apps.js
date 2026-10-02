@@ -26,7 +26,9 @@ export const APP_CONFIG = APP_KEYS
  * decision point the UI uses, so a null url can never render as a link.
  */
 export function platform(app, name) {
-  const url = name === 'ios' ? app.iosUrl : app.androidUrl;
+  // Android prefers a Google Play listing when one is configured; until then the
+  // hosted APK is the install path. Setting playUrl is the only change needed.
+  const url = name === 'ios' ? app.iosUrl : (app.playUrl || app.androidUrl);
   const id = name === 'ios' ? app.iosBundleId : app.androidPackage;
   const available = typeof url === 'string' && url.trim().length > 0;
   return {
@@ -34,10 +36,11 @@ export function platform(app, name) {
     url: available ? url : null,
     id: id || null,
     available,
-    label: name === 'ios' ? 'iPhone' : 'Android APK',
+    fromStore: name === 'android' && !!(app.playUrl && app.playUrl.trim()),
+    label: name === 'ios' ? 'iPhone' : (app.playUrl ? 'Google Play' : 'Android APK'),
     // Copy shown next to a platform that is not yet installable.
     pendingNote: name === 'ios' && !available && id
-      ? `iPhone build is ready as ${id} · awaiting App Store release`
+      ? `iPhone build is ready as ${id} \u2014 awaiting App Store release`
       : null
   };
 }
@@ -55,15 +58,20 @@ export const APP_LINKS = APP_CONFIG.map((app) => ({
   shortName: app.shortName,
   desc: app.blurb,
   features: app.features,
+  // 'coming-soon' hides the install affordances without removing the card, so
+  // flipping apps.json back to 'available' is the only change needed to publish.
+  status: app.status === 'coming-soon' ? 'coming-soon' : 'available',
+  downloadPage: app.downloadPage || `/apps/${app.key}`,
+  version: app.version || appsConfig.releaseVersion,
   web: {
     state: app.webUrl ? 'available' : 'coming-soon',
     url: app.webUrl || '',
     label: app.webLabel
   },
   android: {
-    state: app.androidUrl ? 'available' : 'coming-soon',
-    url: app.androidUrl || '',
-    label: 'Android APK',
+    state: app.androidUrl || app.playUrl ? 'available' : 'coming-soon',
+    url: app.playUrl || app.androidUrl || '',
+    label: app.playUrl ? 'Google Play' : 'Android APK',
     pkg: app.androidPackage
   },
   ios: {

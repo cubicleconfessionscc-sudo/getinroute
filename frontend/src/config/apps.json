@@ -5,7 +5,24 @@
     "scripts/sync-site-apps.mjs regenerates the static page's app blocks from it.",
     "Add an App Store / TestFlight URL by setting iosUrl; the iPhone button",
     "enables itself automatically. While iosUrl is null the button stays disabled",
-    "and no placeholder URL is ever rendered."
+    "and no placeholder URL is ever rendered.",
+    "",
+    "NEW FLAGS (Stage A4):",
+    "  status       'available' | 'coming-soon'. Drives the homepage card state.",
+    "                School and Parent ship as 'coming-soon' until you flip them;",
+    "                flipping to 'available' needs no code change.",
+    "  playUrl      Google Play listing URL. When set it REPLACES the direct-APK",
+    "                button on Android with a 'Get it on Google Play' button,",
+    "                automatically. Leave null to keep serving the hosted APK.",
+    "  downloadPage In-app route for the per-app smart download page (QR +",
+    "                device detection). One page per app, shared QR target.",
+    "  version/versionCode mirror mobile/app.config.js. Bump them with",
+    "                scripts/bump-version.ps1 - it updates both files together.",
+    "  APK size is NOT stored here: sync-site-apps.mjs measures the real file in",
+    "  backend/binaries so the number on the page can never go stale.",
+    "  pwaPath       Path to the installable web app for iPhone. null until Stage B",
+    "                ships it; while null the iPhone install path stays disabled so",
+    "                no button ever points at something that does not exist yet."
   ],
   "releaseVersion": "1.0.5",
   "androidMinVersion": "Android 7.0+",
@@ -24,13 +41,19 @@
         "SOS",
         "support"
       ],
+      "status": "available",
+      "downloadPage": "/apps/employee",
       "androidUrl": "/download/GetInRoute.apk",
       "androidPackage": "com.getinroute.employee",
+      "playUrl": null,
       "iosUrl": null,
       "iosBundleId": "com.getinroute.employee",
+      "version": "1.0.5",
+      "versionCode": 25,
       "webUrl": "/employee-login",
       "webLabel": "Sign in on Web",
-      "showOnSite": true
+      "showOnSite": true,
+      "pwaPath": null
     },
     "driver": {
       "name": "GetInRoute Driver",
@@ -47,13 +70,19 @@
         "SOS",
         "vehicle information"
       ],
+      "status": "available",
+      "downloadPage": "/apps/driver",
       "androidUrl": "/download/GetInRouteDriver.apk",
       "androidPackage": "com.getinroute.driver",
+      "playUrl": null,
       "iosUrl": null,
       "iosBundleId": "com.getinroute.driver",
+      "version": "1.0.5",
+      "versionCode": 3,
       "webUrl": "/driver-login",
       "webLabel": "Sign in on Web",
-      "showOnSite": true
+      "showOnSite": true,
+      "pwaPath": null
     },
     "school": {
       "name": "GetInRoute School",
@@ -69,13 +98,19 @@
         "incidents",
         "notifications"
       ],
+      "status": "coming-soon",
+      "downloadPage": "/apps/school",
       "androidUrl": "/download/GetInRouteSchool.apk",
       "androidPackage": "com.getinroute.school",
+      "playUrl": null,
       "iosUrl": null,
       "iosBundleId": "com.getinroute.school",
+      "version": "1.0.5",
+      "versionCode": 3,
       "webUrl": "/school-login",
       "webLabel": "Sign in on Web",
-      "showOnSite": true
+      "showOnSite": true,
+      "pwaPath": null
     },
     "parent": {
       "name": "GetInRoute Parent",
@@ -91,13 +126,19 @@
         "notifications",
         "emergency alerts"
       ],
+      "status": "coming-soon",
+      "downloadPage": "/apps/parent",
       "androidUrl": null,
       "androidPackage": null,
+      "playUrl": null,
       "iosUrl": null,
       "iosBundleId": null,
+      "version": "1.0.5",
+      "versionCode": 1,
       "webUrl": "/parent-login",
       "webLabel": "Sign in on Web",
-      "showOnSite": true
+      "showOnSite": true,
+      "pwaPath": null
     }
   }
 }

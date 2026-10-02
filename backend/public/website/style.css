@@ -415,6 +415,7 @@ img{ max-width: 100%; display:block; }
 }
 .apps-static-meta{ font-size: 11.5px; color: rgba(6,32,28,.55); text-align: center; }
 .apps-static-meta code{ font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+.apps-static-note{ font-size: 11.5px; line-height: 1.5; color: rgba(6,32,28,.66); text-align: center; margin: 2px 0 0; max-width: 34ch; }
 
 .download-badge{
   font-family: var(--font-mono);

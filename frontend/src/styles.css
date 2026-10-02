@@ -432,6 +432,73 @@ a.pub-card:hover, .pub-card.pub-access:hover { transform: translateY(-3px); box-
 .apps-btns { display: flex; gap: 8px; }
   .btn-soon { background: rgba(255,255,255,.06); color: var(--muted); border: 1px solid var(--line); cursor: default; }
   .apps-note { text-align: center; color: var(--muted); font-size: 12px; margin-top: 10px; }
+.apps-install-guide svg { flex-shrink: 0; }
+
+  /* ---------------------------------------------- per-app smart download page */
+  .dl-wrap { max-width: 720px; }
+  .dl-back { display: inline-flex; align-items: center; gap: 6px; color: var(--slate); text-decoration: none; font-size: 13px; margin-bottom: 14px; }
+  .dl-back:hover { color: var(--text); }
+  .dl-card { padding: 26px 24px 28px; text-align: center; }
+  .dl-title { font-size: 26px; margin: 6px 0 4px; color: var(--text); }
+  .dl-cta-row { margin: 20px 0 6px; }
+  .dl-cta { display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    font-size: 16px; font-weight: 700; padding: 15px 30px; border-radius: 12px; min-width: 260px; }
+  .dl-meta { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .dl-meta > span, .dl-meta > code { font-size: 12px; color: var(--slate); background: var(--line);
+    border-radius: 999px; padding: 4px 11px; }
+  .dl-meta > code { font-family: 'IBM Plex Mono', monospace; }
+  .dl-note { font-size: 12px; line-height: 1.55; color: var(--muted); margin: 16px auto 0; max-width: 46ch; }
+  .dl-callout { display: flex; gap: 10px; align-items: flex-start; text-align: left;
+    font-size: 13px; line-height: 1.5; color: var(--slate); background: var(--line);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 18px 0 0; }
+  .dl-callout svg { flex-shrink: 0; margin-top: 1px; color: var(--green); }
+  .dl-callout-warn { border-color: rgba(245,158,11,.45); }
+  .dl-callout-warn svg { color: #fbbf24; }
+  .dl-qr { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+  .dl-qr-img { width: 220px; height: 220px; background: #fff; border-radius: 12px; padding: 10px; }
+  .dl-qr-cap { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .dl-qr-fallback { display: flex; flex-direction: column; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--slate); }
+  .dl-qr-fallback code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text);
+    word-break: break-all; }
+
+  /* ------------------------------------------- iOS "add to home screen" overlay */
+  .ios-overlay { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-end;
+    justify-content: center; background: rgba(2,10,16,.72); backdrop-filter: blur(3px);
+    padding: 18px; animation: iosFade .22s ease-out; }
+  .ios-overlay-card { position: relative; width: 100%; max-width: 440px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 18px; padding: 22px 20px 20px;
+    box-shadow: 0 30px 70px -20px rgba(0,0,0,.75); animation: iosRise .28s cubic-bezier(.2,.8,.3,1); }
+  .ios-overlay-card h3 { font-size: 18px; color: var(--text); margin: 0 0 4px; }
+  .ios-overlay-sub { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
+  .ios-overlay-close { position: absolute; top: 12px; right: 14px; background: none; border: 0;
+    color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer; }
+  .ios-steps { list-style: none; counter-reset: iosstep; margin: 0 0 16px; padding: 0;
+    display: grid; gap: 11px; }
+  .ios-steps li { counter-increment: iosstep; display: flex; gap: 11px; align-items: center;
+    font-size: 13.5px; line-height: 1.45; color: var(--slate);
+    background: var(--line); border-radius: 12px; padding: 11px 13px; }
+  .ios-steps li::before { content: counter(iosstep); flex-shrink: 0; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--green); color: #04241c; font-weight: 800; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; }
+  .ios-steps li svg { flex-shrink: 0; color: var(--green); }
+  .ios-steps b { color: var(--text); }
+  .ios-share-hint { display: flex; gap: 10px; align-items: center; font-size: 12px;
+    line-height: 1.5; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px;
+    padding: 10px 12px; margin-bottom: 16px; }
+  .ios-share-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: #fbbf24;
+    box-shadow: 0 0 0 0 rgba(251,191,36,.6); animation: iosPulse 1.9s infinite; }
+  .ios-share-icon { display: inline-flex; vertical-align: -3px; color: var(--text); }
+  .ios-overlay-done { width: 100%; justify-content: center; padding: 13px; font-weight: 700; }
+  @keyframes iosFade { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes iosRise { from { transform: translateY(26px); opacity: 0 } to { transform: none; opacity: 1 } }
+  @keyframes iosPulse { 0% { box-shadow: 0 0 0 0 rgba(251,191,36,.55) } 70% { box-shadow: 0 0 0 11px rgba(251,191,36,0) } 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0) } }
+  @media (prefers-reduced-motion: reduce) {
+    .ios-overlay, .ios-overlay-card, .ios-share-dot { animation: none; }
+  }
+  @media (min-width: 720px) {
+    .ios-overlay { align-items: center; }
+  }
 
   /* ---- Per-platform rows on an app card ----
      Android and iPhone are listed as separate, clearly-labelled choices so a

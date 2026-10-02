@@ -29,6 +29,15 @@ $root   = 'D:\GetInRoute'
 $mobile = Join-Path $root 'mobile'
 $envFile = Join-Path $root 'secrets\signing.env'
 
+# Single source of truth for artifact naming + pre-publish assertions.
+# Must stay in step with mobile/app.config.js (android.versionCode / versionName).
+$VariantMeta = @{
+  'employee' = @{ package = 'com.getinroute.employee'; versionCode = 25; version = '1.0.5' }
+  'driver'   = @{ package = 'com.getinroute.driver';   versionCode = 3;  version = '1.0.5' }
+  'school'   = @{ package = 'com.getinroute.school';   versionCode = 3;  version = '1.0.5' }
+}
+$meta = $VariantMeta[$Variant]
+
 if (-not (Test-Path $envFile)) {
   throw "Missing $envFile - cannot sign. See scripts\init-signing.ps1"
 }
@@ -306,6 +315,14 @@ $env:GRADLE_USER_HOME = 'D:\gradle-home'
 $env:NODE_ENV         = 'production'
 $env:EXPO_NO_TELEMETRY = '1'
 
+# Stale-output guard: gradle leaves the previous app-release.apk/aab in place when a
+# build dies part-way through. Collecting blindly then re-copies that old file under a
+# fresh timestamp, which looks like a successful build. Remove them up front so a
+# missing output fails loudly instead of shipping the previous APK.
+$apk = Join-Path $mobile 'android\app\build\outputs\apk\release\app-release.apk'
+$aab = Join-Path $mobile 'android\app\build\outputs\bundle\release\app-release.aab'
+foreach ($stale in @($apk, $aab)) { Remove-Item -LiteralPath $stale -Force -ErrorAction SilentlyContinue }
+
 Write-Host "[3/4] gradlew assembleRelease ... then bundleRelease ..." -ForegroundColor Cyan
 Push-Location (Join-Path $mobile 'android')
 try {
@@ -328,12 +345,25 @@ try {
 } finally { Pop-Location }
 
 # ---------------------------------------------------------------- collect
-$apk = Join-Path $mobile 'android\app\build\outputs\apk\release\app-release.apk'
-$aab = Join-Path $mobile 'android\app\build\outputs\bundle\release\app-release.aab'
 $out = Join-Path $root "artifacts\$Variant"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
-if (Test-Path $apk) { Copy-Item $apk (Join-Path $out "$Variant-1.0.5.apk") -Force }
-if (Test-Path $aab) { Copy-Item $aab (Join-Path $out "$Variant-1.0.5.aab") -Force }
+$apkName = "$Variant-$($meta.version).apk"
+$aabName = "$Variant-$($meta.version).aab"
+foreach ($pair in @(@($apk, $apkName), @($aab, $aabName))) {
+  if (-not (Test-Path -LiteralPath $pair[0])) { throw "expected build output missing: $($pair[0]) - refusing to publish a stale artifact" }
+  Copy-Item -LiteralPath $pair[0] -Destination (Join-Path $out $pair[1]) -Force
+}
+
+Write-Host "[4/4] verifying $apkName before publish ..." -ForegroundColor Green
+$verify = Join-Path $root 'scripts\verify-apk.ps1'
+if (Test-Path -LiteralPath $verify) {
+  $apkOut = Join-Path $out $apkName
+  $vlog = & $verify -File $apkOut -ExpectPackage $meta.package -ExpectVersionCode $meta.versionCode 2>&1 | Out-String
+  Write-Host $vlog
+  if ($vlog -notmatch 'ALL CHECKS PASSED') { throw "verify-apk.ps1 did not pass - artifact not publishable (see output above)" }
+} else {
+  Write-Host "      (verify-apk.ps1 not found - skipping)" -ForegroundColor Yellow
+}
 
 Write-Host "[4/4] artifacts in $out" -ForegroundColor Green
 Get-ChildItem $out | ForEach-Object { "    $($_.Name)  $($_.Length) bytes" }
