@@ -61,10 +61,10 @@ async function posterSvg(app, key) {
   const short = url.replace(/^https:\/\//, '');
 
   const rows = [
-    ['Version', a.version ? `v${a.version}` : 'â€”'],
-    ['Download size', a.sizeLabel || 'â€”'],
-    ['Requires', cfg.androidMinVersion || 'â€”'],
-    ['Package', a.packageName || 'â€”']
+    ['Version', a.version ? `v${a.version}` : '—'],
+    ['Download size', a.sizeLabel || '—'],
+    ['Requires', cfg.androidMinVersion || '—'],
+    ['Package', a.packageName || '—']
   ];
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
