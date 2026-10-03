@@ -36,7 +36,7 @@ export default class ErrorBoundary extends React.Component {
             The app hit an unexpected error. Your details are safe — tap reload to continue.
           </Text>
           {this.state.message ? (
-            <ScrollView style={styles.detailBox}>
+            <ScrollView style={styles.detailBox} testID="error-detail">
               <Text style={styles.detail}>{this.state.message}</Text>
               {this.state.stack ? <Text style={styles.detailStack}>{this.state.stack}</Text> : null}
             </ScrollView>
@@ -44,6 +44,7 @@ export default class ErrorBoundary extends React.Component {
           <TouchableOpacity
             style={styles.button}
             onPress={() => this.setState({ hasError: false, message: "", stack: "" })}
+            activeOpacity={0.7}
           >
             <Text style={styles.buttonText}>Reload</Text>
           </TouchableOpacity>

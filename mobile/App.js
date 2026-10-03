@@ -51,9 +51,27 @@ function SchoolAppRoot() {
   );
 }
 
+function FallbackView() {
+  return (
+    <ErrorBoundary>
+      <StartupGate>
+        <AuthProvider>
+          <StatusBar style="dark" />
+          <RootNavigator />
+        </AuthProvider>
+      </StartupGate>
+    </ErrorBoundary>
+  );
+}
+
 export default function App() {
-  if (VARIANT === "school") {
-    return <SchoolAppRoot />;
+  try {
+    if (VARIANT === "school") {
+      return <SchoolAppRoot />;
+    }
+    return <CompanyApp />;
+  } catch (e) {
+    console.error("FATAL: App render failed", e);
+    return <FallbackView />;
   }
-  return <CompanyApp />;
 }

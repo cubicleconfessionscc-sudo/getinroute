@@ -4,7 +4,7 @@ import { colors, radius, spacing, font } from "../theme";
 
 // Shown when the backend reports a MANDATORY update (the installed binary can
 // no longer talk to the API safely). The user is told clearly that a store
-// update is required and is given the store link â€” never forced to reinstall
+// update is required and is given the store link — never forced to reinstall
 // or left with a blank screen.
 export default function MandatoryUpdateScreen({ config, onRetry }) {
   const latest = config?.latestVersion || "a newer version";
@@ -41,7 +41,7 @@ export default function MandatoryUpdateScreen({ config, onRetry }) {
           <Text style={styles.primaryButtonText}>Update from {Platform.OS === "android" ? "Google Play" : "the App Store"}</Text>
         </TouchableOpacity>
       ) : (
-        <Text style={styles.footnote}>The store link was not configured yet â€” please check for updates in your app store.</Text>
+        <Text style={styles.footnote}>The store link was not configured yet — please check for updates in your app store.</Text>
       )}
 
       <TouchableOpacity style={styles.button} onPress={onRetry}>
