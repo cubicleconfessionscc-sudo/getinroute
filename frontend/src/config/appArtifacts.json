@@ -6,7 +6,7 @@
     "employee": {
       "file": "GetInRoute.apk",
       "url": "/download/GetInRoute.apk",
-      "bytes": 28721006,
+      "bytes": 28721014,
       "sizeLabel": "27 MB",
       "version": "1.0.5",
       "versionCode": 25,
@@ -15,7 +15,7 @@
     "driver": {
       "file": "GetInRouteDriver.apk",
       "url": "/download/GetInRouteDriver.apk",
-      "bytes": 28715390,
+      "bytes": 28721018,
       "sizeLabel": "27 MB",
       "version": "1.0.5",
       "versionCode": 3,
