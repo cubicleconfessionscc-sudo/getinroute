@@ -5,7 +5,9 @@ import { useToast } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
 import MapPicker from '../../components/MapPicker';
 import { reverseGeocode } from '../../lib/geo';
-import { MapPin, Loader2, Send } from 'lucide-react';
+import { MapPin, Loader2, Send, Map, Search, LocateFixed } from 'lucide-react';
+
+const METHOD = { MAP: 'map', SEARCH: 'search', CURRENT: 'current' };
 
 export default function AddressSettings() {
   const { user } = useAuth();
@@ -13,6 +15,8 @@ export default function AddressSettings() {
   const [updates, setUpdates] = useState([]);
   const [pick, setPick] = useState(null);
   const [manual, setManual] = useState('');
+  const [method, setMethod] = useState(METHOD.MAP);
+  const [locating, setLocating] = useState(false);
   const [sending, setSending] = useState(false);
 
   const load = () => {
@@ -32,9 +36,24 @@ export default function AddressSettings() {
     setPick({ lat, lng, address });
   };
 
+  const useMyLocation = () => {
+    if (!navigator.geolocation) return toast('Location is not available in this browser.', 'err');
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (p) => {
+        await handleMapPick(p.coords.latitude, p.coords.longitude);
+        setMethod(METHOD.MAP);
+        setLocating(false);
+        toast('Location captured — confirm below.');
+      },
+      () => { setLocating(false); toast('Could not get your location. Allow location access or pick on the map.', 'err'); },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    );
+  };
+
   const submit = async () => {
     const address = pick?.address || manual.trim();
-    if (!address) return toast('Search & pick an address, use your location, or type one.', 'err');
+    if (!address) return toast('Select on the map, search, use your location, or type an address.', 'err');
     setSending(true);
     try {
       const r = await api.post('/api/me/address-update', {
@@ -42,7 +61,7 @@ export default function AddressSettings() {
         lat: pick?.lat ?? null,
         lng: pick?.lng ?? null
       });
-      toast(r.message || 'Address change submitted');
+      toast(r.message || 'Address change submitted for approval');
       setPick(null); setManual(''); load();
     } catch (e) { toast(e.message || e.response?.data?.error || 'Submission failed', 'err'); }
     finally { setSending(false); }
@@ -56,11 +75,28 @@ export default function AddressSettings() {
     rejected: ['badge-slate', 'Rejected']
   }[s] || ['badge-slate', s]);
 
+  const MethodBtn = ({ id, icon, label }) => (
+    <button
+      className={`addr-method ${method === id ? 'on' : ''}`}
+      onClick={() => setMethod(id)}
+      type="button"
+    >
+      {icon} <span>{label}</span>
+    </button>
+  );
+
   return (
     <div>
+      <div className="eh-hero">
+        <div>
+          <h2 className="eh-greet">My Address</h2>
+          <div className="eh-sub">Set where the cab should pick you up. This is the same location your app, admin and vendor see.</div>
+        </div>
+      </div>
+
       <div className="m-card">
-        <div className="m-label"><MapPin size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />My pickup address</div>
-        <div style={{ fontSize: 13, marginTop: 6 }}>{user?.home_address || 'No address on file yet'}</div>
+        <div className="m-label"><MapPin size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Current pickup address</div>
+        <div style={{ fontSize: 14, marginTop: 6, fontWeight: 600 }}>{user?.home_address || 'No address on file yet'}</div>
         {user?.home_lat != null && (
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
             📍 {Number(user.home_lat).toFixed(5)}, {Number(user.home_lng).toFixed(5)}
@@ -68,7 +104,7 @@ export default function AddressSettings() {
         )}
       </div>
 
-      {pending && (
+      {pending ? (
         <div className="m-card" style={{ border: '1.5px solid var(--amber)' }}>
           <div className="m-label" style={{ color: 'var(--amber)' }}>⏳ Pending change</div>
           <div style={{ fontSize: 13, marginTop: 6 }}>
@@ -76,42 +112,68 @@ export default function AddressSettings() {
             {pending.new_lat != null && <div className="muted" style={{ fontSize: 12 }}>📍 {Number(pending.new_lat).toFixed(5)}, {Number(pending.new_lng).toFixed(5)}</div>}
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
-            You cannot book a cab until the transport team approves it. To change it, cancel and re-submit — pending again allowed after dismissal.
+            You cannot book a cab until the transport team approves it.
           </div>
         </div>
-      )}
-
-      {!pending && (
+      ) : (
         <>
           <div className="m-card">
-            <div className="m-label">Change my address</div>
-            <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '6px 0 10px', lineHeight: 17 }}>
-              Search & pick from the suggestions, tap the map, or press <b>Use my location</b>. The exact pin matters — the pickup crew navigates to it.
-            </p>
-            <AddressPicker value={pick} onChange={(item) => setPick(item)} />
-            <div style={{ margin: '12px 0 4px' }}>
-              <MapPicker
-                lat={pick?.lat ?? null}
-                lng={pick?.lng ?? null}
-                height={240}
-                label="Tap the map or drag the pin to set your pickup point."
-                onPick={handleMapPick}
-              />
+            <div className="m-label">Pickup point — choose a method</div>
+            <div className="addr-methods">
+              <MethodBtn id={METHOD.MAP} icon={<Map size={16} />} label="Select on Map" />
+              <MethodBtn id={METHOD.SEARCH} icon={<Search size={16} />} label="Search / Enter Address" />
+              <MethodBtn id={METHOD.CURRENT} icon={<LocateFixed size={16} />} label="Set to My Location" />
             </div>
-            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
-              or type it manually:
-            </div>
-            <textarea
-              rows={2}
-              placeholder="Full address without coordinates, e.g. 42, 5th Cross, Indiranagar, Bengaluru 560038"
-              value={manual}
-              onChange={(e) => setManual(e.target.value)}
-              style={{ width: '100%', marginTop: 6 }}
-            />
-            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} disabled={sending || !(pick?.address || manual.trim())} onClick={submit}>
-              {sending ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={16} />} {sending ? 'Submitting…' : 'Submit for approval'}
-            </button>
+
+            {method === METHOD.SEARCH && (
+              <div style={{ marginTop: 12 }}>
+                <AddressPicker value={pick} onChange={(item) => setPick(item)} />
+                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>or type it manually:</div>
+                <textarea
+                  rows={2}
+                  placeholder="Full address, e.g. 42, 5th Cross, Indiranagar, Bengaluru 560038"
+                  value={manual}
+                  onChange={(e) => setManual(e.target.value)}
+                  style={{ width: '100%', marginTop: 6 }}
+                />
+              </div>
+            )}
+
+            {method === METHOD.MAP && (
+              <div style={{ marginTop: 12 }}>
+                <MapPicker
+                  lat={pick?.lat ?? null}
+                  lng={pick?.lng ?? null}
+                  height={280}
+                  label="Tap the map or drag the pin to set your pickup point."
+                  onPick={handleMapPick}
+                />
+              </div>
+            )}
+
+            {method === METHOD.CURRENT && (
+              <div style={{ marginTop: 12 }}>
+                <button className="btn btn-outline" style={{ width: '100%', justifyContent: 'center' }} onClick={useMyLocation} disabled={locating} type="button">
+                  {locating ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <LocateFixed size={16} />} {locating ? 'Locating…' : 'Use my current location'}
+                </button>
+              </div>
+            )}
           </div>
+
+          {(pick || manual.trim()) && (
+            <div className="m-card" style={{ border: '1.5px solid var(--primary)' }}>
+              <div className="m-label">Selected location</div>
+              <div style={{ fontSize: 14, marginTop: 6, fontWeight: 600 }}>{pick?.address || manual.trim()}</div>
+              {pick?.lat != null && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                  Latitude: {Number(pick.lat).toFixed(5)} · Longitude: {Number(pick.lng).toFixed(5)}
+                </div>
+              )}
+              <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} disabled={sending} onClick={submit}>
+                {sending ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={16} />} {sending ? 'Submitting…' : 'Confirm Location & Submit for Approval'}
+              </button>
+            </div>
+          )}
 
           {updates.length > 0 && (
             <div className="m-card">

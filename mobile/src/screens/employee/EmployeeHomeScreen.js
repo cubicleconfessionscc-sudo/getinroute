@@ -1,150 +1,142 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, Linking, Platform, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, Linking, Modal, ActivityIndicator } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getMyTrips, checkIn, checkOut } from "../../api/trips";
-import { getMyLiveAllotment, allotmentCheckIn, allotmentCheckOut, confirmReachedHome } from "../../api/schedules";
+import {
+  getMyLiveAllotment,
+  getMySchedules,
+  allotmentCheckIn,
+  allotmentCheckOut,
+  confirmReachedHome,
+  reportNotReachedHome
+} from "../../api/schedules";
 import { getLocationProfile } from "../../api/locations";
 import { getSupportConfig } from "../../api/support";
 import { connectSocket, joinTrip, leaveTrip, getSocket } from "../../services/socket";
-import { speakTripAssigned } from "../../services/voice";
-import { notifyTripAssigned, notifyChatMessage } from "../../services/notifications";
 import { useAuth } from "../../context/AuthContext";
 import SwipeButton from "../../components/SwipeButton";
-import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
 import OfflineBanner from "../../components/OfflineBanner";
-import { colors, spacing, radius } from "../../theme";
+import EmployeeBottomNav from "../../components/EmployeeBottomNav";
+import { colors, spacing, radius, shadow } from "../../theme";
+
+const DIR_LABEL = { toOffice: "Login", toHome: "Logout" };
+const dirLabel = (d) => DIR_LABEL[d] || "Login";
+
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function statusMeta(status) {
+  switch (status) {
+    case "assigned": return { label: "Vehicle allocated", tone: "ok" };
+    case "started": return { label: "Driver started", tone: "ok" };
+    case "in_progress": return { label: "On the way", tone: "ok" };
+    case "completed": return { label: "Completed", tone: "muted" };
+    case "confirmed": return { label: "Scheduled", tone: "ok" };
+    case "requested": return { label: "Awaiting approval", tone: "warn" };
+    case "cancelled": return { label: "Cancelled", tone: "muted" };
+    default: return { label: "Vehicle pending", tone: "warn" };
+  }
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return "";
+  const today = localToday();
+  if (dateStr === today) return "Today";
+  const d = new Date(dateStr + "T00:00:00");
+  const t = new Date(); t.setDate(t.getDate() + 1);
+  const tomorrow = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  if (dateStr === tomorrow) return "Tomorrow";
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function fmtTime(t) {
+  if (!t) return "—";
+  const [h, m] = String(t).split(":").map(Number);
+  if (isNaN(h)) return t;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const hh = h % 12 === 0 ? 12 : h % 12;
+  return `${String(hh).padStart(2, "0")}:${String(m || 0).padStart(2, "0")} ${ampm}`;
+}
 
 export default function EmployeeHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
-  const [allotment, setAllotment] = useState(null); // the allotted cab run, if any
+  const [allotment, setAllotment] = useState(null);
   const [trip, setTrip] = useState(null);
+  const [schedules, setSchedules] = useState([]);
   const [driverLocation, setDriverLocation] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [myStop, setMyStop] = useState(null); // this employee's stop within a legacy trip
   const [locationStatus, setLocationStatus] = useState("none");
-  const [addressChangeCount, setAddressChangeCount] = useState(0);
+  const [locationProfile, setLocationProfile] = useState(null);
   const [helpline, setHelpline] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const mapRef = useRef(null);
-  // Announces a newly allotted cab exactly once per session (voice + local
-  // notification), mirroring the driver app; never on the very first load.
-  const announcedAllotmentRef = useRef(new Set());
   const isFirstLoadRef = useRef(true);
 
-  useEffect(() => {
-    getSupportConfig()
-      .then((c) => setHelpline(c.helplinePhone || ""))
-      .catch(() => {});
-  }, []);
-
-  function callHelpline() {
-    if (!helpline) return;
-    Linking.openURL(`tel:${helpline.replace(/[^+\d]/g, "")}`).catch(() => {});
-  }
-
-  function callNumber(phone) {
+  const callHelpline = () => {
+    if (helpline) Linking.openURL(`tel:${helpline.replace(/[^+\d]/g, "")}`).catch(() => {});
+  };
+  const callNumber = (phone) => {
     if (!phone) return;
     Linking.openURL(`tel:${String(phone).replace(/[^+\d]/g, "")}`).catch(() =>
       Alert.alert("Can't call", "No phone app is available.")
     );
-  }
+  };
 
-  const loadTrip = useCallback(async () => {
-    const [requests, live, loc] = await Promise.all([
-      getMyTrips(),
-      getMyLiveAllotment(),
-      getLocationProfile().catch(() => ({ locationStatus: "none", pickupLocation: null, dropLocation: null }))
+  const load = useCallback(async () => {
+    const [requests, live, loc, sched] = await Promise.all([
+      getMyTrips().catch(() => []),
+      getMyLiveAllotment().catch(() => []),
+      getLocationProfile().catch(() => ({ locationStatus: "none" })),
+      getMySchedules().catch(() => [])
     ]);
     setLocationStatus(loc?.locationStatus || "none");
-    setAddressChangeCount(loc?.addressChangeCount || 0);
-    const activeRequest = requests.find((r) => r.trip && r.trip.status !== "completed" && r.trip.status !== "cancelled");
+    setLocationProfile(loc || null);
+
+    const activeRequest = (Array.isArray(requests) ? requests : []).find(
+      (r) => r.trip && r.trip.status !== "completed" && r.trip.status !== "cancelled"
+    );
     setTrip(activeRequest?.trip || null);
 
-    const activeAllotment = (live || []).find((a) => a.status === "assigned" || a.status === "started") || null;
+    const activeAllotment =
+      (Array.isArray(live) ? live : []).find((a) => a.status === "assigned" || a.status === "started") || null;
     setAllotment(activeAllotment);
     setDriverLocation(activeAllotment?.driverLocation || null);
 
-    // Voice + local notification when a cab is freshly alloted to the employee.
-    const newId = activeAllotment ? activeAllotment._id : null;
-    if (newId && !announcedAllotmentRef.current.has(newId)) {
-      announcedAllotmentRef.current.add(newId);
-      if (!isFirstLoadRef.current) {
-        speakTripAssigned(newId);
-        notifyTripAssigned();
-      }
-    }
+    setSchedules(Array.isArray(sched) ? sched : []);
     isFirstLoadRef.current = false;
+    setLoading(false);
+  }, []);
 
-    const t = activeRequest?.trip;
-    if (t) {
-      const pickup = t.route.find((s) => s.type === "pickup" && String(s.employeeId) === user?.id);
-      setMyStop(pickup || t.route.find((s) => String(s.employeeId) === user?.id));
-    } else {
-      setMyStop(null);
-    }
-  }, [user]);
-
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    loadTrip();
-  }, [loadTrip]);
-
-  // Reload the location banner whenever this screen regains focus (e.g. after
-  // returning from "My Locations" where the admin may have just approved).
-  useEffect(() => {
-    const sub = navigation.addListener("focus", () => { loadTrip(); });
+    const sub = navigation.addListener("focus", () => load());
     return sub;
-  }, [navigation, loadTrip]);
+  }, [navigation, load]);
 
-  // Live refresh when the admin approves/rejects an address change while the
-  // home screen is open.
-  const locRefreshRef = useRef(null);
   useEffect(() => {
-    (async () => {
-      const sock = await connectSocket();
-      sock.on("location:approval", () => loadTrip());
-      locRefreshRef.current = sock;
-    })();
-    return () => {
-      locRefreshRef.current?.off("location:approval");
-    };
-  }, [loadTrip]);
+    getSupportConfig().then((c) => setHelpline(c?.helplinePhone || "")).catch(() => {});
+  }, []);
 
   const activeRoom = allotment ? allotment._id : trip ? trip._id : null;
-
-  // Only the cab marker/region is safe for the map: react-native-maps crashes
-  // natively if given a non-number or non-finite coordinate.
-  const driverLoc =
-    driverLocation &&
-    typeof driverLocation.lat === "number" &&
-    Number.isFinite(driverLocation.lat) &&
-    typeof driverLocation.lng === "number" &&
-    Number.isFinite(driverLocation.lng)
-      ? { latitude: driverLocation.lat, longitude: driverLocation.lng }
-      : null;
-
-  // Fallback anchor for the map marker: the employee's pickup point.
-  const pickupCoords =
-    allotment?.myStop &&
-    typeof allotment.myStop.pickup?.lat === "number" &&
-    Number.isFinite(allotment.myStop.pickup.lat) &&
-    typeof allotment.myStop.pickup?.lng === "number" &&
-    Number.isFinite(allotment.myStop.pickup.lng)
-      ? { latitude: allotment.myStop.pickup.lat, longitude: allotment.myStop.pickup.lng }
-      : null;
-
   useEffect(() => {
     if (!activeRoom) return;
     let cancelled = false;
     (async () => {
       const sock = await connectSocket();
       if (cancelled) return;
-      sock.on("location:broadcast", (data) => {
-        setDriverLocation(data);
-        setAllotment((prev) => (prev ? { ...prev, sharingLive: true } : prev));
-      });
-      sock.on("trip:statusBroadcast", () => loadTrip());
-      sock.on("allotment:statusBroadcast", () => loadTrip());
+      sock.on("location:broadcast", (data) => { setDriverLocation(data); });
+      sock.on("trip:statusBroadcast", () => load());
+      sock.on("allotment:statusBroadcast", () => load());
       joinTrip(activeRoom);
     })();
     return () => {
@@ -155,540 +147,269 @@ export default function EmployeeHomeScreen({ navigation }) {
       sock?.off("trip:statusBroadcast");
       sock?.off("allotment:statusBroadcast");
     };
-  }, [activeRoom, loadTrip]);
+  }, [activeRoom, load]);
 
-  // Chat push notifications (item 9): the backend emits 'chat:incoming' to the
-  // receiver's user room for every message not sent by them, so both directions
-  // (driver -> employee and employee -> driver) surface a banner + sound.
-  useEffect(() => {
-    let sock;
-    (async () => {
-      sock = await connectSocket();
-      sock.on("chat:incoming", (evt) => {
-        if (!evt) return;
-        const fromLabel = evt.role === "driver" ? evt.from : evt.from;
-        notifyChatMessage(fromLabel, evt.text);
-      });
-    })();
-    return () => {
-      sock?.off("chat:incoming");
-    };
-  }, []);
+  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  // Keep the map centred on the cab as the driver moves.
-  useEffect(() => {
-    if (driverLoc) {
-      mapRef.current?.animateToRegion(
-        { ...driverLoc, latitudeDelta: 0.03, longitudeDelta: 0.03 },
-        500
-      );
-    }
-  }, [driverLoc]);
+  const driverLoc =
+    driverLocation && Number.isFinite(driverLocation.lat) && Number.isFinite(driverLocation.lng)
+      ? { latitude: driverLocation.lat, longitude: driverLocation.lng }
+      : null;
 
-  const menuItems = [
-    { label: "Trip history", onPress: () => navigation.navigate("EmployeeHistory") },
-    { label: "Book cab", onPress: () => navigation.navigate("EmployeeSchedule") },
-    { label: "My Locations", onPress: () => navigation.navigate("EmployeeLocations") },
-    { label: "Feedback", onPress: () => navigation.navigate("Feedback", { allotmentId: allotment?._id, tripId: trip?._id }) },
-    { label: "Settings", onPress: () => navigation.navigate("Settings") },
-    { label: "Help & support", onPress: () => navigation.navigate("Help") },
-    { label: "Sign out", onPress: logout }
-  ];
+  const firstName = (user?.name || "there").split(" ")[0];
+  const empId = user?.emp_id || user?.id || "—";
 
-  function MenuButton() {
-    return (
-      <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} style={styles.menuBtn}>
-        <View style={styles.menuLine} />
-        <View style={styles.menuLine} />
-        <View style={styles.menuLine} />
-      </TouchableOpacity>
-    );
-  }
+  // Next trip = live allotment, else the soonest upcoming schedule, else legacy trip.
+  const today = localToday();
+  const upcoming = (schedules || [])
+    .filter((s) => s.date >= today && ["confirmed", "requested", "in_progress"].includes(s.status))
+    .sort((a, b) => (a.date + (a.pickup_time || a.login_time || "")).localeCompare(b.date + (b.pickup_time || b.login_time || "")));
 
-  function MenuModal() {
-    return (
-      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)}>
-          <View style={styles.menuSheet}>
-            <Text style={styles.menuTitle}>Menu</Text>
-            {menuItems.map((item) => (
-              <TouchableOpacity
-                key={item.label}
-                style={styles.menuItem}
-                onPress={() => {
-                  setMenuOpen(false);
-                  item.onPress();
-                }}
-              >
-                <Text style={[styles.menuItemText, item.label === "Sign out" && styles.menuItemLogout]}>{item.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    );
-  }
+  const v = allotment?.vehicle || {};
+  const d = allotment?.driver || {};
+  const ms = allotment?.myStop || {};
+  const canCheckIn = ms?.status === "pending" && allotment?.status !== "completed";
+  const canCheckOut = ms?.status === "picked_up" && allotment?.status !== "completed";
 
-  async function handleAllotmentCheckIn() {
+  const nextSchedule = upcoming[0] || null;
+  const hasLiveTrip = !!allotment;
+
+  async function doCheckIn() {
     if (!allotment) return;
-    try {
-      await allotmentCheckIn(allotment._id);
-      loadTrip();
-    } catch (e) {
-      const msg = e.response?.data?.message || e.message;
-      Alert.alert("Check-in not allowed", msg);
-      loadTrip();
-    }
+    try { await allotmentCheckIn(allotment._id); load(); }
+    catch (e) { Alert.alert("Check-in not allowed", e.response?.data?.message || e.message); load(); }
   }
-
-  async function handleAllotmentCheckOut() {
+  async function doCheckOut() {
     if (!allotment) return;
-    try {
-      await allotmentCheckOut(allotment._id);
-      loadTrip();
-    } catch (e) {
-      const msg = e.response?.data?.message || e.message;
-      Alert.alert("Check-out not allowed", msg);
-      loadTrip();
-    }
+    try { await allotmentCheckOut(allotment._id); load(); }
+    catch (e) { Alert.alert("Check-out not allowed", e.response?.data?.message || e.message); load(); }
   }
-
-  async function handleTripCheckIn() {
-    if (!trip) return;
-    await checkIn(trip._id);
-    loadTrip();
-  }
-
-  async function handleTripCheckOut() {
-    if (!trip) return;
-    await checkOut(trip._id);
-    loadTrip();
-  }
-
-  async function handleSafeDrop() {
+  async function doSafeDrop() {
     if (!allotment) return;
-    try {
-      await confirmReachedHome(allotment.scheduleId);
-      loadTrip();
-    } catch (e) {
-      Alert.alert("Couldn't confirm", e.response?.data?.message || e.message);
-    }
+    try { await confirmReachedHome(allotment.scheduleId); load(); }
+    catch (e) { Alert.alert("Couldn't confirm", e.response?.data?.message || e.message); }
+  }
+  async function doNotReached() {
+    if (!allotment) return;
+    Alert.alert("Send help request?", "This alerts your transport team that you have NOT reached home safely.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Send", style: "destructive", onPress: async () => {
+        try { await reportNotReachedHome(allotment.scheduleId); load(); }
+        catch (e) { Alert.alert("Couldn't send", e.response?.data?.message || e.message); }
+      } }
+    ]);
   }
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadTrip();
-    setRefreshing(false);
-  };
-
-  if (!allotment && !trip) {
-    return (
-      <View style={styles.root}>
-        <Text style={styles.watermark} numberOfLines={1}>GetInRoute</Text>
-        <View style={styles.topLinks}>
-          <MenuButton />
-          {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
-          <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
-        </View>
-        <ScrollView
-          style={styles.fill}
-          contentContainerStyle={styles.emptyState}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
-        >
-          <Text style={styles.emptyTitle}>No active ride right now</Text>
-          <Text style={styles.emptyBody}>Once the admin allots a cab for your shift, your driver's live location and drop position will show up here.</Text>
-          {locationStatus !== "approved" && (
-            <View style={[styles.card, styles.pendingCard, styles.waitGateCard]}>
-              <View style={styles.pendingIconWrap}>
-                <Text style={styles.pendingIcon}>⚠</Text>
-              </View>
-              <Text style={styles.pendingTitle}>
-                {locationStatus === "none"
-                  ? "Home address required"
-                  : locationStatus === "pending"
-                  ? "Address awaiting approval"
-                  : "Address update rejected"}
-              </Text>
-              <Text style={styles.pendingBody}>
-                {locationStatus === "none"
-                  ? "You need an approved home address before you can book a cab. Submit it below — the transport admin will review it."
-                  : locationStatus === "pending"
-                  ? "Your address is with the transport admin for review. Bookings unlock as soon as it's approved."
-                  : "Your address was rejected. Please correct the details in My Locations and resubmit."}
-              </Text>
-              <TouchableOpacity style={[styles.bookBtn, styles.waitGateBtn]} onPress={() => navigation.navigate("EmployeeLocations")}>
-                <Text style={styles.bookBtnText}>
-                  {locationStatus === "none" ? "Submit your address" : "Open My Locations"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          {locationStatus === "approved" && (
-            <TouchableOpacity style={styles.bookBtn} onPress={() => navigation.navigate("EmployeeSchedule")}>
-              <Text style={styles.bookBtnText}>Book your cab</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={[styles.bookBtn, styles.locBtn]} onPress={() => navigation.navigate("EmployeeLocations")}>
-            <Text style={styles.bookBtnText}>Set pickup &amp; drop</Text>
-          </TouchableOpacity>
-        </ScrollView>
-        <MenuModal />
-      </View>
-    );
+  function openMapsToStop() {
+    const addr = ms?.pickup?.address || locationProfile?.pickupLocation?.address;
+    if (!addr) { Alert.alert("No pickup point", "Set your pickup address first."); return; }
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`).catch(() => {});
   }
-
-  // --- Legacy trip flow (carpool trips), kept for backwards compatibility ---
-  if (trip && !allotment) {
-    const canCheckIn = myStop?.type === "pickup" && myStop?.status !== "completed" && trip.status !== "completed";
-    const canCheckOut = myStop?.type === "drop" || (myStop?.checkedInAt && trip.status !== "completed");
-    return (
-      <View style={styles.root}>
-        <Text style={styles.watermark} numberOfLines={1}>GetInRoute</Text>
-        <ScrollView
-          style={styles.fill}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
-        >
-        <View style={styles.header}>
-          <MenuButton />
-          <Text style={styles.headerTitle}>Today's ride</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.headerActionsScroll}
-            contentContainerStyle={styles.headerActions}
-          >
-            {trip._id ? <TouchableOpacity onPress={() => navigation.navigate("Chat", { tripId: trip._id })}><Text style={styles.link}>Chat</Text></TouchableOpacity> : null}
-            <TouchableOpacity onPress={() => navigation.navigate("EmployeeLocations")}><Text style={styles.link}>My Locations</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate("EmployeeSchedule")}><Text style={styles.link}>Book cab</Text></TouchableOpacity>
-            {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
-            <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
-            <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
-          </ScrollView>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Status</Text>
-          <Text style={styles.statusValue}>{formatStatus(trip.status)}</Text>
-        </View>
-
-        {driverLoc && (
-          <View style={styles.mapWrap}>
-            <MapView
-              style={styles.mapFill}
-              initialRegion={{ ...driverLoc, latitudeDelta: 0.03, longitudeDelta: 0.03 }}
-            >
-              <Marker coordinate={driverLoc} title="Your driver" pinColor={colors.teal} />
-            </MapView>
-          </View>
-        )}
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Pickup &amp; drop sequence</Text>
-          {trip.route.map((stop, i) => (
-            <View key={i} style={styles.stopRow}>
-              <View style={[styles.stopDot, stop.status === "completed" && { backgroundColor: colors.teal }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.stopAddress}>{stop.address || `${stop.type} stop`}</Text>
-                <Text style={styles.stopMeta}>{stop.type === "pickup" ? "Pickup" : "Drop"} · stop {i + 1}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.swipeSection}>
-          {canCheckIn && <SwipeButton label="Swipe right to check in" direction="right" color={colors.teal} onConfirm={handleTripCheckIn} />}
-          {!canCheckIn && canCheckOut && <SwipeButton label="Swipe out to check out" direction="left" color={colors.amber} onConfirm={handleTripCheckOut} />}
-        </View>
-      </ScrollView>
-      <MenuModal />
-      </View>
-    );
-  }
-
-  // --- Allotment flow: the allotted cab with live driver location ---
-  const v = allotment.vehicle || {};
-  const d = allotment.driver || {};
-  const ms = allotment.myStop || {};
-  const sharingLive = !!allotment.sharingLive;
-  const canCheckInBase = (ms.status === "pending" || ms.status === "reached") && allotment.status !== "completed";
-  const cabReached = !allotment.live_status || ["arrived", "boarding", "dropping", "idle", "completed"].includes(allotment.live_status);
-  const canCheckIn = canCheckInBase && cabReached;
-  const canCheckOut = ms.status === "picked_up" && allotment.status !== "completed";
-  const showSafeDrop = ms.checkedOutAt && ms.safeDropEnabled;
-
-  // Item 6 - Navigate: open the employee's pickup stop in the native maps app
-  // via a deep link instead of keeping them on the live map. Falls back to the
-  // cab's live location when the drop config has no pickup coordinates.
-  const openMapsToStop = () => {
-    let lat = ms?.pickup?.lat;
-    let lng = ms?.pickup?.lng;
-    if ((lat === null || lat === undefined || isNaN(Number(lat))) && driverLocation?.coords) {
-      lat = driverLocation.coords.latitude;
-      lng = driverLocation.coords.longitude;
-    }
-    if (lat === null || lat === undefined || isNaN(Number(lat))) {
-      Alert.alert("Navigate", "Pickup coordinates aren't available yet. The driver will share them when their cab starts.");
-      return;
-    }
-    const label = ms?.pickup?.address || "Pickup stop";
-    const url = Platform.OS === "ios"
-      ? `maps:${lat},${lng}?q=${encodeURIComponent(label)}`
-      : `geo:${lat},${lng}?q=${encodeURIComponent(label)}`;
-    Linking.openURL(url).catch(() => {
-      Alert.alert("Navigate", "Couldn't open maps. Please search the pickup stop manually.");
-    });
-  };
 
   return (
     <View style={styles.root}>
-      <Text style={styles.watermark} numberOfLines={1}>GetInRoute</Text>
       <ScrollView
         style={styles.fill}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-      <View style={styles.header}>
-        <MenuButton />
-        <Text style={styles.headerTitle}>Your cab</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.headerActionsScroll}
-          contentContainerStyle={styles.headerActions}
-        >
-          {activeRoom ? <TouchableOpacity onPress={() => navigation.navigate("Chat", { tripId: activeRoom, phone: d.phone })}><Text style={styles.link}>Chat</Text></TouchableOpacity> : null}
-          {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
-          <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
-          <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
-        </ScrollView>
-      </View>
-
-      {user?.company_id ? (
-        <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xs }}>
-          <SubscriptionStatusBar companyId={user.company_id} compact />
-        </View>
-      ) : null}
-
-      <View style={styles.bannerWrap}>
-        <OfflineBanner onOpenSync={() => navigation.navigate("PendingSync")} />
-      </View>
-
-      {locationStatus !== "none" && locationStatus !== "approved" && (
-        <View style={[styles.card, styles.pendingCard]}>
-          <Text style={styles.pendingTitle}>
-            {locationStatus === "pending" ? "Pickup/drop awaiting approval" : "Pickup/drop update rejected"}
-          </Text>
-          <Text style={styles.pendingBody}>
-            Drivers can only navigate to approved points. Open My Locations to check the status or resubmit.
-          </Text>
-        </View>
-      )}
-
-      {addressChangeCount > 0 && (
-        <View style={styles.addressChangeInfo}>
-          <Text style={styles.addressChangeText}>
-            Address changes used this month: {addressChangeCount}
-          </Text>
-        </View>
-      )}
-
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>Allotted cab</Text>
-        <Text style={styles.cabTitle}>{v.vehicleNumber ? `${v.vehicleNumber} · ${v.vehicleType}` : "Vehicle TBD"}</Text>
-        <Text style={styles.tripIdLine}>
-          {v.line ? `Line ${v.line}` : ""}
-          {allotment.myOrder != null && allotment.total ? ` · Cab ${allotment.myOrder} of ${allotment.total}` : ""}
-          {allotment._id ? ` · Trip ${String(allotment._id).slice(-6).toUpperCase()}` : ""}
-        </Text>
-        <Text style={styles.cabSub}>
-          {allotment.vendorName ? `${allotment.vendorName} · ` : ""}
-          {d.name ? `${d.name}${d.phone ? ` · ${d.phone}` : ""}` : "Driver assigned soon"}
-          {"\n"}{dirLabel(allotment.direction)} · drop #{allotment.myOrder} of {allotment.total} · {allotment.slotLabel || "Shift"}
-        </Text>
-        {allotment.checkinOtp && (
-          <View style={styles.otpBox}>
-            <Text style={styles.otpLabel}>Check-in code</Text>
-            <Text style={styles.otpValue}>{allotment.checkinOtp}</Text>
-            <Text style={styles.otpHint}>Share this with your driver if the swipe check-in isn't working.</Text>
+        {/* Greeting header */}
+        <View style={styles.hero}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.heroGreet}>{greeting()}, {firstName} 👋</Text>
+            <Text style={styles.heroId}>Employee ID {empId}</Text>
           </View>
-        )}
-        {d.phone ? (
-          <TouchableOpacity style={styles.callDriverBtn} onPress={() => callNumber(d.phone)}>
-            <Text style={styles.callDriverBtnText}>Call driver</Text>
+          <TouchableOpacity style={styles.bell} onPress={() => navigation.navigate("EmployeeHistory")}>
+            <Text style={styles.bellIcon}>🔔</Text>
           </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {allotment.isEscort && (
-        <View style={styles.escortBadge}>
-          <Text style={styles.escortBadgeText}>🛡️ Escort assigned — safe journey ensured</Text>
         </View>
-      )}
 
-      {allotment.eta && (allotment.eta.minutes != null || allotment.eta.km != null) && (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Cab ETA</Text>
-          <Text style={styles.etaValue}>
-            {allotment.eta.minutes != null ? (allotment.eta.minutes > 0 ? `~${allotment.eta.minutes} min` : "Arriving now") : "—"}
-          </Text>
-          <Text style={styles.etaBody}>
-            {(allotment.eta.km != null ? `${fmtKm(allotment.eta.km)} away · ` : "")}
-            heading to your {allotment.eta.target === "home" ? "home" : "pickup point"}
-          </Text>
+        <OfflineBanner onOpenSync={() => navigation.navigate("PendingSync")} />
+
+        {/* Next trip */}
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionTitle}>Your next trip</Text>
         </View>
-      )}
 
-      {(ms.pickup?.address || ms.drop?.address) && (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Your route</Text>
-          <View style={styles.stopRow}>
-            <View style={[styles.stopDot, { backgroundColor: colors.teal }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.stopAddress}>Pickup: {ms.pickup?.address || "—"}</Text>
-              <Text style={styles.stopMeta}>where the cab picks you up</Text>
+        {loading ? (
+          <View style={styles.card}><ActivityIndicator color={colors.primary} /></View>
+        ) : hasLiveTrip ? (
+          <View style={[styles.card, styles.tripCard]}>
+            <View style={styles.tripTopRow}>
+              <View style={styles.typePill}><Text style={styles.typePillText}>{dirLabel(allotment.direction)}</Text></View>
+              <Text style={styles.tripTime}>{fmtTime(allotment.slotLabel && allotment.slotLabel.includes(":") ? allotment.slotLabel : (allotment.pickupTime || allotment.startTime))}</Text>
+            </View>
+            <View style={styles.statusRow}>
+              <View style={[styles.statusDot, { backgroundColor: statusMeta(allotment.status).tone === "ok" ? colors.green : colors.amber }]} />
+              <Text style={styles.statusText}>{statusMeta(allotment.status).label}</Text>
+            </View>
+            <Text style={styles.tripVehicle}>🚗 {v.vehicleNumber || "Vehicle TBD"} {v.vehicleType ? `· ${v.vehicleType}` : ""}</Text>
+            <View style={styles.routeRow}>
+              <View style={[styles.routeDot, { backgroundColor: colors.primary }]} />
+              <Text style={styles.routeText}>{ms.pickup?.address || locationProfile?.pickupLocation?.address || "Pickup point"}</Text>
+            </View>
+            <View style={styles.routeLine} />
+            <View style={styles.routeRow}>
+              <View style={[styles.routeDot, { backgroundColor: colors.violet }]} />
+              <Text style={styles.routeText}>{ms.drop?.address || "Destination"}</Text>
+            </View>
+            <Text style={styles.driverText}>{d.name ? `Driver: ${d.name}${d.phone ? ` · ${d.phone}` : ""}` : "Driver assigned soon"}</Text>
+            <View style={styles.tripActions}>
+              <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={() => setMapOpen(true)}>
+                <Text style={styles.smallBtnPrimaryText}>Track vehicle</Text>
+              </TouchableOpacity>
+              {d.phone ? (
+                <TouchableOpacity style={styles.smallBtn} onPress={() => callNumber(d.phone)}>
+                  <Text style={styles.smallBtnText}>Call driver</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={styles.smallBtn} onPress={() => navigation.navigate("Chat", { tripId: allotment._id, phone: d.phone })}>
+                <Text style={styles.smallBtnText}>Chat</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          <View style={styles.stopRow}>
-            <View style={[styles.stopDot, { backgroundColor: colors.violet }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.stopAddress}>Drop: {ms.drop?.address || "—"}</Text>
-              <Text style={styles.stopMeta}>where the cab drops you</Text>
+        ) : nextSchedule ? (
+          <View style={[styles.card, styles.tripCard]}>
+            <View style={styles.tripTopRow}>
+              <View style={styles.typePill}><Text style={styles.typePillText}>{dirLabel(nextSchedule.direction)}</Text></View>
+              <Text style={styles.tripTime}>{fmtTime(nextSchedule.pickup_time || nextSchedule.login_time || nextSchedule.drop_time || nextSchedule.logout_time)}</Text>
+            </View>
+            <Text style={styles.tripDate}>{fmtDate(nextSchedule.date)}</Text>
+            <View style={styles.statusRow}>
+              <View style={[styles.statusDot, { backgroundColor: statusMeta(nextSchedule.status).tone === "ok" ? colors.green : colors.amber }]} />
+              <Text style={styles.statusText}>{statusMeta(nextSchedule.status).label}</Text>
+            </View>
+            <View style={styles.routeRow}>
+              <View style={[styles.routeDot, { backgroundColor: colors.primary }]} />
+              <Text style={styles.routeText}>{nextSchedule.pickup_point || locationProfile?.pickupLocation?.address || "Pickup point"}</Text>
+            </View>
+            <View style={styles.routeLine} />
+            <View style={styles.routeRow}>
+              <View style={[styles.routeDot, { backgroundColor: colors.violet }]} />
+              <Text style={styles.routeText}>{nextSchedule.direction === "toHome" ? "Home" : "Office"}</Text>
+            </View>
+            <View style={styles.tripActions}>
+              <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={() => navigation.navigate("EmployeeSchedule")}>
+                <Text style={styles.smallBtnPrimaryText}>View details</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.smallBtn} onPress={() => navigation.navigate("EmployeeSchedule")}>
+                <Text style={styles.smallBtnText}>Edit / Cancel</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </View>
-      )}
-
-      <TouchableOpacity style={styles.liveMapBtn} onPress={() => setMapOpen(true)}>
-        <Text style={styles.liveMapBtnIcon}>📍</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.liveMapBtnTitle}>{allotment.sharingLive ? "View live map" : "View map"}</Text>
-          <Text style={styles.liveMapBtnSub}>
-            {allotment.sharingLive
-              ? "Driver is sharing their live location"
-              : "Driver hasn't started sharing their location yet"}
-          </Text>
-        </View>
-        <Text style={styles.liveMapBtnArrow}>→</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.liveMapBtn} onPress={openMapsToStop}>
-        <Text style={styles.liveMapBtnIcon}>🧭</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.liveMapBtnTitle}>Navigate</Text>
-          <Text style={styles.liveMapBtnSub}>
-            {myStop?.pickup?.address ? "Open maps to your pickup stop" : "Open maps to your pickup point"}
-          </Text>
-        </View>
-        <Text style={styles.liveMapBtnArrow}>→</Text>
-      </TouchableOpacity>
-
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>Drop sequence</Text>
-        {(Array.isArray(allotment.sequence) ? allotment.sequence : []).map((e, i) => (
-          <View key={String(e.order)} style={[styles.stopRow, e.isMe && styles.stopRowMe]}>
-            <View style={[styles.stopDot, e.status === "completed" && { backgroundColor: colors.teal }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.stopAddress}>{e.isMe ? "You" : e.name}</Text>
-              <Text style={styles.stopMeta}>Drop {i + 1} · {e.status}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.swipeSection}>
-        {canCheckInBase && !cabReached && (
-          <View style={styles.waitingBox}>
-            <Text style={styles.waitingTitle}>Waiting for driver arrival</Text>
-            <Text style={styles.waitingBody}>Your cab hasn't reached your stop yet. The check-in will unlock once the driver marks arrival.</Text>
+        ) : (
+          <View style={[styles.card, styles.emptyCard]}>
+            <Text style={styles.emptyEmoji}>🚐</Text>
+            <Text style={styles.emptyTitle}>No active ride right now</Text>
+            <Text style={styles.emptyBody}>
+              You don't have an upcoming trip. Book one and it will appear here.
+            </Text>
+            {locationStatus !== "approved" ? (
+              <TouchableOpacity style={styles.cta} onPress={() => navigation.navigate("EmployeeLocations")}>
+                <Text style={styles.ctaText}>{locationStatus === "none" ? "Set your pickup address" : "Open My Address"}</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.cta} onPress={() => navigation.navigate("EmployeeSchedule")}>
+                <Text style={styles.ctaText}>+ Book a Ride</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
-        {canCheckIn && (
+
+        {/* Booking CTA */}
+        <TouchableOpacity style={styles.bookCta} activeOpacity={0.9} onPress={() => navigation.navigate("EmployeeSchedule")}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bookCtaTitle}>Need a ride?</Text>
+            <Text style={styles.bookCtaSub}>Plan your next office trip in seconds.</Text>
+          </View>
+          <View style={styles.bookCtaBtn}><Text style={styles.bookCtaBtnText}>+ BOOK A RIDE</Text></View>
+        </TouchableOpacity>
+
+        {/* Quick actions */}
+        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Quick actions</Text></View>
+        <View style={styles.actionsGrid}>
+          <Action icon="🚗" label="Book Ride" onPress={() => navigation.navigate("EmployeeSchedule")} />
+          <Action icon="📍" label="My Address" onPress={() => navigation.navigate("EmployeeLocations")} />
+          <Action icon="📅" label="Schedule" onPress={() => navigation.navigate("EmployeeSchedule")} />
+          <Action icon="📜" label="History" onPress={() => navigation.navigate("EmployeeHistory")} />
+        </View>
+
+        {/* Live trip actions */}
+        {hasLiveTrip && (canCheckIn || canCheckOut || ms?.safeDropEnabled) && (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>Boarding</Text>
+            {canCheckIn && <SwipeButton label="Swipe right to check in" direction="right" color={colors.primary} onConfirm={doCheckIn} />}
+            {!canCheckIn && canCheckOut && <SwipeButton label="Swipe out to check out" direction="left" color={colors.amber} onConfirm={doCheckOut} />}
+            {ms?.safeDropEnabled && !ms?.safeDropConfirmedAt && (
+              <View style={{ marginTop: 12 }}>
+                <SwipeButton label="Swipe to confirm safe arrival" direction="right" color={colors.violet} onConfirm={doSafeDrop} />
+                <TouchableOpacity style={styles.helpBtn} onPress={doNotReached}>
+                  <Text style={styles.helpBtnText}>I have NOT reached home — send help</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Upcoming trips */}
+        {upcoming.length > 0 && (
           <>
-            <SwipeButton label="Swipe right to check in" direction="right" color={colors.teal} onConfirm={handleAllotmentCheckIn} />
-            <Text style={styles.otpFallbackHint}>
-              Driver can also check you in via OTP if swipe isn't available
-            </Text>
+            <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Upcoming trips</Text></View>
+            {upcoming.slice(0, 4).map((s) => (
+              <View key={String(s.id)} style={[styles.card, styles.upcomingCard]}>
+                <View style={styles.typePill}><Text style={styles.typePillText}>{dirLabel(s.direction)}</Text></View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.upcomingTime}>{fmtDate(s.date)} · {fmtTime(s.pickup_time || s.login_time || s.drop_time || s.logout_time)}</Text>
+                  <Text style={styles.upcomingSub}>{s.direction === "toHome" ? "Office → Home" : "Home → Office"} · {statusMeta(s.status).label}</Text>
+                </View>
+              </View>
+            ))}
           </>
         )}
-        {!canCheckIn && canCheckOut && (
-          <>
-            <SwipeButton label="Swipe out to check out" direction="left" color={colors.amber} onConfirm={handleAllotmentCheckOut} />
-            <Text style={styles.otpFallbackHint}>
-              Driver can also check you out via OTP
-            </Text>
-          </>
-        )}
-      </View>
 
-      {showSafeDrop && (
-        <View style={[styles.card, styles.safeDropCard]}>
-          <Text style={styles.safeDropTitle}>SafeDrop</Text>
-          <Text style={styles.safeDropBody}>
-            {ms.safeDropConfirmedAt
-              ? "You confirmed safe arrival — an admin has been notified."
-              : "Confirm you reached safely so the transport team knows you got home OK."}
-          </Text>
-          {ms.safeDropConfirmedAt ? (
-            <Text style={styles.safeDropConfirmed}>
-              Confirmed at {new Date(ms.safeDropConfirmedAt).toLocaleTimeString()}
-            </Text>
-          ) : (
-            <View style={styles.safeDropSwipe}>
-              <SwipeButton
-                label="Swipe to confirm safe arrival"
-                direction="right"
-                color={colors.violet}
-                onConfirm={handleSafeDrop}
-              />
-              <Text style={styles.safeDropDeadline}>
-                Window closes at {new Date(ms.safeDropDeadline).toLocaleTimeString()}
-              </Text>
-            </View>
-          )}
+        {/* Profile footer */}
+        <View style={styles.footerRow}>
+          <TouchableOpacity style={styles.footerLink} onPress={() => navigation.navigate("Settings")}>
+            <Text style={styles.footerLinkText}>Profile & Settings</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.footerLink} onPress={() => navigation.navigate("Help")}>
+            <Text style={styles.footerLinkText}>Help & Support</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.footerLink} onPress={logout}>
+            <Text style={[styles.footerLinkText, { color: colors.coral }]}>Sign out</Text>
+          </TouchableOpacity>
         </View>
-      )}
       </ScrollView>
-      <MenuModal />
+
+      <EmployeeBottomNav navigation={navigation} active="home" />
 
       <Modal visible={mapOpen} animationType="slide" onRequestClose={() => setMapOpen(false)}>
-        <View style={styles.mapModalWrap}>
-          <View style={styles.mapModalHead}>
-            <Text style={styles.mapModalTitle}>Live cab location</Text>
-            <TouchableOpacity onPress={() => setMapOpen(false)}>
-              <Text style={styles.mapModalClose}>Close</Text>
-            </TouchableOpacity>
+        <View style={styles.mapModal}>
+          <View style={styles.mapHead}>
+            <Text style={styles.mapTitle}>Live cab location</Text>
+            <TouchableOpacity onPress={() => setMapOpen(false)}><Text style={styles.mapClose}>Close</Text></TouchableOpacity>
           </View>
-          {(() => {
-            const initial = driverLoc || pickupCoords || { latitude: 20.5937, longitude: 78.9629 };
-            return (
-              <MapView
-                ref={mapRef}
-                style={styles.mapModalFill}
-                initialRegion={{ ...initial, latitudeDelta: driverLoc ? 0.03 : 0.5, longitudeDelta: driverLoc ? 0.03 : 0.5 }}
-                showsUserLocation={false}
-                showsMyLocationButton={false}
-              >
-                {driverLoc && (
-                  <Marker coordinate={driverLoc} title="Your cab" anchor={{ x: 0.5, y: 0.5 }}>
-                    <View style={styles.cabMarker}>
-                      <Text style={styles.cabMarkerText}>🚕</Text>
-                    </View>
-                  </Marker>
-                )}
-                {pickupCoords && (
-                  <Marker coordinate={pickupCoords} title="Your pickup point" anchor={{ x: 0.5, y: 0.5 }}>
-                    <View style={styles.pickupPin}>
-                      <View style={styles.pickupPinDot} />
-                    </View>
-                  </Marker>
-                )}
-              </MapView>
-            );
-          })()}
-          <View style={[styles.mapLiveBar, sharingLive && styles.mapLiveBarOn]}>
-            <View style={[styles.mapLiveDot, sharingLive && styles.mapLiveDotOn]} />
-            <Text style={styles.mapLiveBarText}>
-              {sharingLive ? "Cab is moving - live location" : "Driver hasn't started sharing live location yet"}
-            </Text>
+          {driverLoc || ms?.pickup ? (
+            <MapView
+              ref={mapRef}
+              style={styles.mapFill}
+              initialRegion={{
+                ...(driverLoc || { latitude: ms?.pickup?.lat || 12.97, longitude: ms?.pickup?.lng || 77.59 }),
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05
+              }}
+            >
+              {driverLoc && <Marker coordinate={driverLoc} title="Your cab" />}
+              {ms?.pickup?.lat ? <Marker coordinate={{ latitude: ms.pickup.lat, longitude: ms.pickup.lng }} title="Pickup" pinColor={colors.primary} /> : null}
+            </MapView>
+          ) : (
+            <View style={styles.mapEmpty}>
+              <Text style={styles.mapEmptyTitle}>Live location unavailable</Text>
+              <Text style={styles.mapEmptyBody}>Your driver hasn't started sharing their location yet.</Text>
+            </View>
+          )}
+          <View style={styles.mapBar}>
+            <Text style={styles.mapBarText}>{allotment?.sharingLive ? "Cab is moving — live location" : "Waiting for the driver to share live location"}</Text>
           </View>
         </View>
       </Modal>
@@ -696,149 +417,78 @@ export default function EmployeeHomeScreen({ navigation }) {
   );
 }
 
-function formatStatus(status) {
-  return { assigned: "Confirmed", started: "Driver started", in_progress: "On the way", completed: "Completed" }[status] || status;
-}
-
-function fmtKm(km) {
-  if (km == null) return "";
-  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
-}
-
-const DIR_LABEL = { toOffice: "Login", toHome: "Logout" };
-function dirLabel(dir) {
-  return DIR_LABEL[dir] || DIR_LABEL.toHome;
+function Action({ icon, label, onPress }) {
+  return (
+    <TouchableOpacity style={styles.action} onPress={onPress} activeOpacity={0.85}>
+      <View style={styles.actionIcon}><Text style={{ fontSize: 22 }}>{icon}</Text></View>
+      <Text style={styles.actionLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg, overflow: "hidden" },
+  root: { flex: 1, backgroundColor: colors.bg },
   fill: { flex: 1 },
-  bannerWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xs },
-  watermark: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: -48,
-    textAlign: "center",
-    fontSize: 110,
-    fontWeight: "900",
-    letterSpacing: -4,
-    color: "rgba(0,217,192,0.055)",
-    transform: [{ rotate: "-8deg" }]
-  },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, paddingBottom: spacing.sm },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 14, paddingRight: 4 },
-  headerActionsScroll: { flexShrink: 1, marginLeft: spacing.sm },
-  topLinks: { position: "absolute", top: spacing.lg, right: spacing.lg, zIndex: 2 },
-  headerTitle: { color: colors.text, fontSize: 22, fontWeight: "700" },
-  logout: { color: colors.textDim, fontSize: 13 },
-  link: { color: colors.teal, fontSize: 13, fontWeight: "600" },
-  card: { backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, margin: spacing.lg, marginTop: spacing.sm, padding: spacing.md },
-  cardLabel: { color: colors.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 },
-  statusValue: { color: colors.teal, fontSize: 17, fontWeight: "700" },
-  cabTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  tripIdLine: { color: colors.teal, fontSize: 12, fontWeight: "700", marginTop: 4, letterSpacing: 0.5 },
-  cabSub: { color: colors.textDim, fontSize: 13, marginTop: 4, lineHeight: 19 },
-  etaValue: { color: colors.teal, fontSize: 24, fontWeight: "800" },
-  etaBody: { color: colors.textDim, fontSize: 13, marginTop: 4, lineHeight: 19, textTransform: "none" },
-  mapWrap: { height: 220, marginHorizontal: spacing.lg, borderRadius: radius.lg, overflow: "hidden" },
+  hero: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.md },
+  heroGreet: { color: colors.text, fontSize: 22, fontWeight: "800" },
+  heroId: { color: colors.textDim, fontSize: 13, marginTop: 2 },
+  bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.panel, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line },
+  bellIcon: { fontSize: 20 },
+  sectionHead: { paddingHorizontal: spacing.lg, marginTop: spacing.lg, marginBottom: spacing.sm },
+  sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "800" },
+  card: { backgroundColor: colors.panel, borderRadius: radius.lg, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.line, ...shadow.card },
+  tripCard: { padding: spacing.lg },
+  tripTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  typePill: { backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 5, alignSelf: "flex-start" },
+  typePillText: { color: colors.primary, fontWeight: "800", fontSize: 12, letterSpacing: 0.5 },
+  tripTime: { color: colors.text, fontSize: 22, fontWeight: "800" },
+  tripDate: { color: colors.textDim, fontSize: 13, marginTop: 6, fontWeight: "600" },
+  statusRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 },
+  statusDot: { width: 9, height: 9, borderRadius: 5 },
+  statusText: { color: colors.textDim, fontSize: 13, fontWeight: "700" },
+  tripVehicle: { color: colors.text, fontSize: 15, fontWeight: "700", marginTop: 12 },
+  routeRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 10 },
+  routeDot: { width: 10, height: 10, borderRadius: 5 },
+  routeText: { color: colors.text, fontSize: 14, flex: 1 },
+  routeLine: { width: 2, height: 14, backgroundColor: colors.line, marginLeft: 4, marginTop: 2 },
+  driverText: { color: colors.textDim, fontSize: 13, marginTop: 12 },
+  tripActions: { flexDirection: "row", gap: 8, marginTop: 14, flexWrap: "wrap" },
+  smallBtn: { borderRadius: radius.md, paddingVertical: 9, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.panel },
+  smallBtnText: { color: colors.text, fontSize: 13, fontWeight: "700" },
+  smallBtnPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
+  smallBtnPrimaryText: { color: "#fff", fontSize: 13, fontWeight: "800" },
+  cardLabel: { color: colors.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, fontWeight: "700" },
+  emptyCard: { alignItems: "center", paddingVertical: spacing.xl },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { color: colors.text, fontSize: 17, fontWeight: "800", marginTop: 10 },
+  emptyBody: { color: colors.textDim, fontSize: 13, textAlign: "center", marginTop: 6, lineHeight: 19, paddingHorizontal: 10 },
+  cta: { backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 24, marginTop: 16 },
+  ctaText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  bookCta: { flexDirection: "row", alignItems: "center", backgroundColor: colors.navy, borderRadius: radius.lg, marginHorizontal: spacing.lg, marginTop: spacing.lg, padding: spacing.lg, ...shadow.card },
+  bookCtaTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  bookCtaSub: { color: "#B9C6E6", fontSize: 13, marginTop: 4 },
+  bookCtaBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 16, marginLeft: 12 },
+  bookCtaBtnText: { color: "#fff", fontWeight: "800", fontSize: 13 },
+  actionsGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg - 6 },
+  action: { width: "25%", alignItems: "center", paddingHorizontal: 6, marginBottom: 14 },
+  actionIcon: { width: 56, height: 56, borderRadius: radius.md, backgroundColor: colors.panel, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line, ...shadow.card },
+  actionLabel: { color: colors.text, fontSize: 12, fontWeight: "700", marginTop: 8, textAlign: "center" },
+  upcomingCard: { flexDirection: "row", alignItems: "center" },
+  upcomingTime: { color: colors.text, fontSize: 14, fontWeight: "700" },
+  upcomingSub: { color: colors.textDim, fontSize: 12, marginTop: 3 },
+  helpBtn: { marginTop: 10, alignItems: "center", paddingVertical: 10 },
+  helpBtnText: { color: colors.coral, fontSize: 13, fontWeight: "700" },
+  footerRow: { flexDirection: "row", justifyContent: "space-around", marginTop: spacing.xl, paddingHorizontal: spacing.lg },
+  footerLink: { padding: 8 },
+  footerLinkText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
+  mapModal: { flex: 1, backgroundColor: colors.bg },
+  mapHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: spacing.lg, backgroundColor: colors.panel, borderBottomWidth: 1, borderBottomColor: colors.line },
+  mapTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  mapClose: { color: colors.coral, fontSize: 14, fontWeight: "700" },
   mapFill: { flex: 1 },
-  liveMapBtn: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    marginHorizontal: spacing.lg, marginTop: spacing.sm,
-    backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line,
-    borderRadius: radius.lg, padding: spacing.md
-  },
-  liveMapBtnIcon: { fontSize: 20 },
-  liveMapBtnTitle: { color: colors.teal, fontSize: 15, fontWeight: "700" },
-  liveMapBtnSub: { color: colors.textDim, fontSize: 12, marginTop: 2, lineHeight: 17 },
-  liveMapBtnArrow: { color: colors.textDim, fontSize: 18, fontWeight: "700" },
-  mapModalWrap: { flex: 1, backgroundColor: colors.bg },
-  mapModalHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: spacing.lg, paddingBottom: spacing.sm, backgroundColor: colors.panel, borderBottomWidth: 1, borderBottomColor: colors.line },
-  mapModalTitle: { color: colors.text, fontSize: 18, fontWeight: "700" },
-  mapModalClose: { color: colors.coral, fontSize: 14, fontWeight: "600" },
-  mapModalFill: { flex: 1 },
-  mapLiveBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.panel, paddingVertical: 12, paddingHorizontal: spacing.lg },
-  mapLiveBarOn: { backgroundColor: "rgba(0,217,192,0.12)" },
-  mapLiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textDim },
-  mapLiveDotOn: { backgroundColor: colors.teal },
-  mapLiveBarText: { color: colors.text, fontSize: 13, fontWeight: "600" },
-  mapModalEmpty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
-  mapModalEmptyTitle: { color: colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
-  mapModalEmptyBody: { color: colors.textDim, fontSize: 13, textAlign: "center", marginTop: 8, lineHeight: 19 },
-  cabMarker: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: colors.teal,
-    borderWidth: 3,
-    borderColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5
-  },
-  cabMarkerText: { fontSize: 20 },
-  pickupPin: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.violet,
-    borderWidth: 3,
-    borderColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 3
-  },
-  pickupPinDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#FFFFFF" },
-  stopRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginTop: 10 },
-  stopRowMe: { backgroundColor: "rgba(139,124,246,0.10)", borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 5, marginHorizontal: -6 },
-  stopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.line, marginTop: 5 },
-  stopAddress: { color: colors.text, fontSize: 14, fontWeight: "600" },
-  stopMeta: { color: colors.textDim, fontSize: 12, marginTop: 2, textTransform: "capitalize" },
-  swipeSection: { alignItems: "center", marginVertical: spacing.xl },
-  safeDropCard: { borderColor: colors.violet, backgroundColor: "rgba(124,96,227,0.08)", marginTop: 0 },
-  safeDropTitle: { color: colors.violet, fontSize: 14, fontWeight: "800", letterSpacing: 0.5, textTransform: "uppercase" },
-  safeDropBody: { color: colors.text, fontSize: 13, marginTop: 6, lineHeight: 19 },
-  safeDropConfirmed: { color: colors.violet, fontSize: 13, fontWeight: "600", marginTop: 10 },
-  safeDropSwipe: { marginTop: spacing.md, alignItems: "center" },
-  safeDropDeadline: { color: colors.textDim, fontSize: 12, marginTop: 10 },
-  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
-  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8 },
-  emptyBody: { color: colors.textDim, fontSize: 14, textAlign: "center", lineHeight: 20, marginBottom: 18 },
-  bookBtn: { backgroundColor: colors.teal, borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 28 },
-  bookBtnText: { color: "#02201C", fontSize: 15, fontWeight: "700" },
-  locBtn: { backgroundColor: colors.amber, marginTop: spacing.sm },
-  waitGateCard: { width: "100%", alignItems: "center", borderRadius: radius.lg },
-  waitGateBtn: { marginTop: spacing.md },
-  pendingIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.amber, alignItems: "center", justifyContent: "center", marginBottom: 8 },
-  pendingIcon: { color: "#1A1400", fontSize: 20, fontWeight: "800" },
-  pendingCard: { borderColor: colors.amber, backgroundColor: "rgba(255,176,32,0.08)", marginTop: 0 },
-  pendingTitle: { color: colors.amber, fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.4 },
-  pendingBody: { color: colors.textDim, fontSize: 13, marginTop: 6, lineHeight: 19 },
-  menuBtn: { width: 26, height: 24, justifyContent: "space-between", paddingVertical: 3, paddingRight: 4 },
-  menuLine: { height: 3, borderRadius: 2, backgroundColor: colors.text },
-  menuBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
-  menuSheet: { backgroundColor: colors.panel, borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.line },
-  menuTitle: { color: colors.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 },
-  menuItem: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: colors.line },
-  menuItemText: { color: colors.text, fontSize: 16, fontWeight: "600" },
-  menuItemLogout: { color: colors.coral },
-  callDriverBtn: { marginTop: 10, alignSelf: "flex-start", backgroundColor: colors.violet, borderRadius: radius.sm, paddingVertical: 8, paddingHorizontal: 14 },
-  callDriverBtnText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
-  escortBadge: { backgroundColor: "rgba(0,217,192,0.1)", borderWidth: 1, borderColor: colors.teal, borderRadius: radius.md, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: 12 },
-  escortBadgeText: { color: colors.teal, fontSize: 13, fontWeight: "600" },
-  otpFallbackHint: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 8, fontStyle: "italic" },
-  otpBox: { marginTop: 12, backgroundColor: "rgba(0,217,192,0.08)", borderWidth: 1, borderColor: colors.teal, borderRadius: radius.sm, padding: 12 },
-  otpLabel: { color: colors.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: "600" },
-  otpValue: { color: colors.teal, fontSize: 28, fontWeight: "800", letterSpacing: 6, marginTop: 2 },
-  otpHint: { color: colors.textDim, fontSize: 12, marginTop: 4, lineHeight: 17 },
-  waitingBox: { alignItems: "center", backgroundColor: "rgba(255,176,32,0.10)", borderWidth: 1, borderColor: colors.amber, borderRadius: radius.md, padding: 16, marginHorizontal: spacing.lg },
-  waitingTitle: { color: colors.amber, fontSize: 14, fontWeight: "700", marginBottom: 4 },
-  waitingBody: { color: colors.textDim, fontSize: 13, textAlign: "center", lineHeight: 18 },
-  addressChangeInfo: { backgroundColor: "rgba(255,176,32,0.1)", borderWidth: 1, borderColor: colors.amber, borderRadius: radius.sm, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: 10 },
-  addressChangeText: { color: colors.amber, fontSize: 12, fontWeight: "600", textAlign: "center" }
+  mapEmpty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  mapEmptyTitle: { color: colors.text, fontSize: 16, fontWeight: "800", textAlign: "center" },
+  mapEmptyBody: { color: colors.textDim, fontSize: 13, textAlign: "center", marginTop: 8, lineHeight: 19 },
+  mapBar: { backgroundColor: colors.panel, paddingVertical: 14, paddingHorizontal: spacing.lg },
+  mapBarText: { color: colors.text, fontSize: 13, fontWeight: "700" }
 });

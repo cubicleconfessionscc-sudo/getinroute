@@ -1,54 +1,123 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, todayStr } from '../../api';
+import { useAuth } from '../../auth';
 import { useToast, useInterval } from '../../components/ui';
-import { MapPin, ChevronRight, ArrowRight, ArrowLeft, Phone, Car, Clock } from 'lucide-react';
+import { MapPin, ChevronRight, ArrowRight, ArrowLeft, Phone, Clock, Calendar, Bell, Car } from 'lucide-react';
 import AnnouncementBanner from '../../components/AnnouncementBanner';
+
+function localDateStr(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function fmtTime(t) {
+  if (!t) return '—';
+  const [h, m] = String(t).split(':').map(Number);
+  if (isNaN(h)) return t;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hh = h % 12 === 0 ? 12 : h % 12;
+  return `${String(hh).padStart(2, '0')}:${String(m || 0).padStart(2, '0')} ${ampm}`;
+}
+
+function dirLabel(d) { return d === 'toHome' ? 'Logout' : 'Login'; }
+function statusLabel(s) {
+  return { assigned: 'Vehicle allocated', started: 'Driver started', in_progress: 'On the way', completed: 'Completed', confirmed: 'Scheduled', requested: 'Awaiting approval', cancelled: 'Cancelled' }[s] || 'Vehicle pending';
+}
 
 function SwipeBtn({ direction, label, disabled, onComplete }) {
   const trackRef = useRef(null);
   const thumbRef = useRef(null);
   const [dx, setDx] = useState(0);
   const [dragging, setDragging] = useState(false);
-
   const reset = () => { setDx(0); setDragging(false); };
-
-  const onDown = (e) => {
-    if (disabled) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(true);
-  };
+  const onDown = (e) => { if (disabled) return; e.currentTarget.setPointerCapture(e.pointerId); setDragging(true); };
   const onMove = (e) => {
     if (!dragging) return;
     const max = trackRef.current.clientWidth - 58;
     const start = thumbRef.current.getBoundingClientRect().left;
-    const diff = e.clientX - start;
-    setDx(Math.max(0, Math.min(diff, max)));
+    setDx(Math.max(0, Math.min(e.clientX - start, max)));
   };
   const onUp = () => {
     if (!dragging) return;
     const max = trackRef.current.clientWidth - 58;
-    if (dx > max * 0.72) { reset(); onComplete(); }
-    else reset();
+    if (dx > max * 0.72) { reset(); onComplete(); } else reset();
   };
-
   const isRight = direction === 'right';
   return (
     <div className="swipe-track" ref={trackRef}>
       <div className="swipe-hint">{isRight ? `Swipe to ${label} →` : `← Swipe to ${label}`}</div>
-      <div
-        ref={thumbRef}
-        className={`swipe-thumb ${dragging ? 'dragging' : ''}`}
+      <div ref={thumbRef} className={`swipe-thumb ${dragging ? 'dragging' : ''}`}
         style={isRight ? { left: 5 + dx } : { right: 5 + dx, left: 'auto' }}
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-      >
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         {isRight ? <ArrowRight size={20} /> : <ArrowLeft size={20} />}
       </div>
     </div>
   );
 }
 
+function DayBooker({ config, schedules, onBook, onCancel, busy }) {
+  const [date, setDate] = useState(localDateStr());
+  const [direction, setDirection] = useState('toOffice');
+  const times = direction === 'toOffice' ? (config?.loginTimes || []) : (config?.logoutTimes || []);
+  const [slotLabel, setSlotLabel] = useState('');
+
+  useEffect(() => {
+    setSlotLabel((prev) => (times.some((t) => t.label === prev) ? prev : (times[0]?.label || '')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [direction, config]);
+
+  const active = (Array.isArray(schedules) ? schedules : []).find(
+    (s) => s.date === date && ['confirmed', 'requested', 'in_progress'].includes(s.status)
+  );
+  const selected = times.find((t) => t.label === slotLabel) || times[0] || null;
+  const isPast = date < localDateStr();
+
+  return (
+    <div className="m-card">
+      <div className="m-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Calendar size={14} /> Book a cab for a day</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'flex-end' }}>
+        <div className="field" style={{ margin: 0, flex: '1 1 140px' }}>
+          <label style={{ fontSize: 12 }}>Date</label>
+          <input type="date" value={date} min={localDateStr()} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <div className="field" style={{ margin: 0, flex: '1 1 140px' }}>
+          <label style={{ fontSize: 12 }}>Direction</label>
+          <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+            <option value="toOffice">To office (login)</option>
+            <option value="toHome">To home (logout)</option>
+          </select>
+        </div>
+        <div className="field" style={{ margin: 0, flex: '1 1 160px' }}>
+          <label style={{ fontSize: 12 }}>Shift slot</label>
+          <select value={slotLabel} onChange={(e) => setSlotLabel(e.target.value)}>
+            {times.length === 0 && <option value="">No slots configured</option>}
+            {times.map((t) => <option key={t.label} value={t.label}>{t.label} ({t.time})</option>)}
+          </select>
+        </div>
+      </div>
+      {active ? (
+        <div style={{ marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>Booking for {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}: {active.slotLabel || 'Shift'} · {dirLabel(active.direction)}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Status: {statusLabel(active.status)} · Pickup: {active.pickup_time || active.login_time || '—'}</div>
+          <button className="btn btn-outline btn-sm" style={{ marginTop: 10 }} disabled={busy} onClick={() => onCancel(active.id)}>Cancel booking</button>
+        </div>
+      ) : (
+        <button className="btn btn-primary" style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
+          disabled={busy || isPast || !selected || times.length === 0}
+          onClick={() => onBook({ dates: [date], direction, startTime: selected?.time || null, slotLabel: selected?.label })}>
+          {busy ? 'Booking...' : isPast ? 'Pick a today/future date' : `Book ${selected?.label || ''} for ${date}`}
+        </button>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Requests go to your transport admin for approval. You can book any future day.</div>
+    </div>
+  );
+}
+
 export default function EHome() {
+  const { user } = useAuth();
   const toast = useToast();
   const [allotment, setAllotment] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
@@ -56,6 +125,7 @@ export default function EHome() {
   const [config, setConfig] = useState(null);
   const [history, setHistory] = useState([]);
   const [otpInfo, setOtpInfo] = useState(null);
+  const [bookingBusy, setBookingBusy] = useState(false);
 
   const getPos = () => new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null);
@@ -71,8 +141,7 @@ export default function EHome() {
       const active = (Array.isArray(list) ? list : []).find((a) => a.status === 'assigned' || a.status === 'started') || null;
       setAllotment(active);
       if (active?.driverLocation) setDriverLocation(active.driverLocation);
-      if (active?.pendingOtp) setOtpInfo({ otp: active.pendingOtp, scheduleId: active.scheduleId });
-      else setOtpInfo(null);
+      if (active?.pendingOtp) setOtpInfo({ otp: active.pendingOtp, scheduleId: active.scheduleId }); else setOtpInfo(null);
     }).catch(() => {});
     api.get('/api/schedules/mine').then((r) => setSchedules(Array.isArray(r) ? r : [])).catch(() => {});
     api.get('/api/schedules/config').then((r) => setConfig(r && typeof r === 'object' ? r : null)).catch(() => {});
@@ -86,60 +155,37 @@ export default function EHome() {
     try {
       const pos = await getPos();
       const r = await api.post(`/api/schedules/allotments/${allotment._id}/checkin`, { lat: pos?.lat ?? null, lng: pos?.lng ?? null });
-      if (r.pendingConfirmation && r.otp) {
-        setOtpInfo({ otp: r.otp, scheduleId: allotment.scheduleId });
-        toast('Read the OTP to your driver to complete check-in', 'info');
-      } else {
-        toast('Checked in successfully');
-      }
+      if (r.pendingConfirmation && r.otp) { setOtpInfo({ otp: r.otp, scheduleId: allotment.scheduleId }); toast('Read the OTP to your driver to complete check-in', 'info'); }
+      else toast('Checked in successfully');
       load();
     } catch (e) { toast(e.message || 'Check-in failed', 'err'); }
   };
-
   const doCheckOut = async () => {
     if (!allotment) return;
     try {
       const pos = await getPos();
       await api.post(`/api/schedules/allotments/${allotment._id}/checkout`, { lat: pos?.lat ?? null, lng: pos?.lng ?? null });
-      toast('Checked out successfully');
-      load();
+      toast('Checked out successfully'); load();
     } catch (e) { toast(e.message || 'Check-out failed', 'err'); }
   };
-
   const doSafeDrop = async () => {
     if (!allotment) return;
-    try {
-      await api.post('/api/employee/safety/confirm', { scheduleId: allotment.scheduleId });
-      toast('Safe arrival confirmed');
-      load();
-    } catch (e) { toast(e.message || 'Could not confirm', 'err'); }
+    try { await api.post('/api/employee/safety/confirm', { scheduleId: allotment.scheduleId }); toast('Safe arrival confirmed'); load(); }
+    catch (e) { toast(e.message || 'Could not confirm', 'err'); }
   };
-
-  const doNotReached = async () => {
-    if (!allotment) return;
-    if (!window.confirm('This will alert your transport team that you have NOT reached home safely. Continue?')) return;
+  const doBookDay = async (payload) => {
+    setBookingBusy(true);
     try {
-      const pos = await getPos();
-      const r = await api.post('/api/employee/safety/not-reached', { scheduleId: allotment.scheduleId, lat: pos?.lat ?? null, lng: pos?.lng ?? null });
-      toast(r.message || 'Help request sent');
-      load();
-    } catch (e) { toast(e.message || 'Could not send', 'err'); }
-  };
-
-  const doBook = async (slotLabel, direction) => {
-    try {
-      await api.post('/api/schedules', { slotLabel, direction });
-      toast('Cab booked!');
+      const r = await api.post('/api/schedules', payload);
+      if (r && Array.isArray(r.skipped) && r.skipped.length) toast('A booking already exists for that day', 'info');
+      else toast('Cab requested — awaiting admin approval');
       load();
     } catch (e) { toast(e.response?.data?.message || 'Booking failed', 'err'); }
+    finally { setBookingBusy(false); }
   };
-
   const doCancel = async (id) => {
-    try {
-      await api.del(`/api/schedules/${id}`);
-      toast('Booking cancelled');
-      load();
-    } catch (e) { toast(e.response?.data?.message || 'Cancel failed', 'err'); }
+    try { await api.del(`/api/schedules/${id}`); toast('Booking cancelled'); load(); }
+    catch (e) { toast(e.response?.data?.message || 'Cancel failed', 'err'); }
   };
 
   const v = allotment?.vehicle || {};
@@ -149,206 +195,160 @@ export default function EHome() {
   const canCheckOut = ms?.status === 'picked_up' && allotment?.status !== 'completed';
   const sharingLive = !!allotment?.sharingLive;
 
-  const todayConfirmed = schedules.find((s) => s.date === todayStr() && s.status === 'confirmed');
+  const today = todayStr();
+  const upcoming = (schedules || []).filter((s) => s.date >= today && ['confirmed', 'requested', 'in_progress'].includes(s.status))
+    .sort((a, b) => (a.date + (a.pickup_time || a.login_time || '')).localeCompare(b.date + (b.pickup_time || b.login_time || '')));
+  const nextTrip = allotment || upcoming[0] || null;
+  const firstName = (user?.name || 'there').split(' ')[0];
+  const empId = user?.emp_id || user?.id || '—';
+  const weeklyOff = config?.weeklyOff || [];
+
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   return (
-    <div>
+    <div className="eh-root">
       <AnnouncementBanner audiences={['employee', 'both']} />
+
+      <div className="eh-hero">
+        <div>
+          <h2 className="eh-greet">{greet}, {firstName} 👋</h2>
+          <div className="eh-sub">Employee ID {empId} · Here's your transport overview.</div>
+        </div>
+        <Link to="/app/history" className="eh-bell" aria-label="Notifications"><Bell size={18} /></Link>
+      </div>
+
+      {/* Summary cards */}
+      <div className="eh-summary">
+        <div className="eh-sum-card">
+          <div className="eh-sum-label">Next Trip</div>
+          <div className="eh-sum-value">{nextTrip ? fmtTime(nextTrip.pickup_time || nextTrip.login_time || nextTrip.drop_time || nextTrip.logout_time) : '—'}</div>
+          <div className="eh-sum-foot">{nextTrip ? dirLabel(nextTrip.direction) : 'No trip scheduled'}</div>
+        </div>
+        <div className="eh-sum-card">
+          <div className="eh-sum-label">Upcoming</div>
+          <div className="eh-sum-value">{upcoming.length} {upcoming.length === 1 ? 'Trip' : 'Trips'}</div>
+          <div className="eh-sum-foot">next 7 days</div>
+        </div>
+        <div className="eh-sum-card">
+          <div className="eh-sum-label">Address</div>
+          <div className="eh-sum-value" style={{ fontSize: 15 }}>{user?.home_address ? 'On file' : 'Not set'}</div>
+          <div className="eh-sum-foot"><Link to="/app/address" className="eh-link">Manage</Link></div>
+        </div>
+        <div className="eh-sum-card">
+          <div className="eh-sum-label">Weekly Off</div>
+          <div className="eh-sum-value" style={{ fontSize: 15 }}>{weeklyOff.length ? weeklyOff.join(', ') : '—'}</div>
+          <div className="eh-sum-foot">rest days</div>
+        </div>
+      </div>
+
+      {/* Big Book CTA */}
+      <div className="eh-cta">
+        <div>
+          <div className="eh-cta-title">Need a ride?</div>
+          <div className="eh-cta-sub">Plan your next office trip.</div>
+        </div>
+        <Link to="/app/book" className="eh-cta-btn">+ BOOK A RIDE</Link>
+      </div>
+
+      {/* Next trip / live */}
       {allotment ? (
-        <>
-          <div className="m-card">
-            <div className="m-label">Your cab</div>
-            <div className="row" style={{ alignItems: 'center' }}>
-              <div style={{ fontSize: 30 }}>🚐</div>
-              <div style={{ flex: 1 }}>
-                <b style={{ fontSize: 15 }}>{v.vehicleNumber || 'Vehicle TBD'} · {v.vehicleType || ''}</b>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  {v.line ? `Line ${v.line}` : ''}
-                  {allotment.myOrder != null && allotment.total ? ` · Cab ${allotment.myOrder} of ${allotment.total}` : ''}
-                  {allotment._id ? ` · Trip ${String(allotment._id).slice(-6).toUpperCase()}` : ''}
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--slate)', marginTop: 4 }}>
-                  {d.name ? `${d.name}` : 'Driver assigned soon'}
-                  {d.phone ? ` · ${d.phone}` : ''}
-                </div>
-              </div>
-              {d.phone ? (
-                <a href={`tel:${d.phone.replace(/[^+\d]/g, '')}`} className="btn btn-sm btn-outline" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Phone size={14} /> Call
-                </a>
-              ) : null}
-            </div>
-            {allotment._id && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>
-                Trip #{String(allotment._id).slice(-6).toUpperCase()} · {allotment.slotLabel || 'Shift'}
-              </div>
-            )}
+        <div className="eh-trip">
+          <div className="eh-trip-head">
+            <span className="eh-pill">{dirLabel(allotment.direction)}</span>
+            <span className="eh-trip-time">{allotment.slotLabel || ''}</span>
           </div>
-
-          {ms && (ms.pickup?.address || ms.drop?.address) && (
-            <div className="m-card">
-              <div className="m-label">Your route</div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '6px 0' }}>
-                {ms.pickup?.address && <span className="chip"><MapPin size={13} /> Pickup: {ms.pickup.address}</span>}
-                {ms.drop?.address && <span className="chip">🏁 Drop: {ms.drop.address}</span>}
-              </div>
-            </div>
-          )}
-
-          {allotment.eta && (allotment.eta.minutes != null || allotment.eta.km != null) && (
-            <div className="m-card">
-              <div className="m-label">Cab ETA</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--primary)' }}>
-                {allotment.eta.minutes != null ? (allotment.eta.minutes > 0 ? `~${allotment.eta.minutes} min` : 'Arriving now') : '—'}
-              </div>
-              {allotment.eta.km != null && (
-                <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                  {allotment.eta.km < 1 ? `${Math.round(allotment.eta.km * 1000)} m` : `${allotment.eta.km.toFixed(1)} km`} away
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="m-card">
-            <div className="m-label">Drop sequence</div>
-            {(Array.isArray(allotment.sequence) ? allotment.sequence : []).map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < (Array.isArray(allotment.sequence) ? allotment.sequence : []).length - 1 ? '1px solid var(--line)' : 'none' }}>
-                <div style={{ width: 24, height: 24, borderRadius: 12, background: s.status === 'completed' ? 'var(--green)' : 'var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: s.status === 'completed' ? '#fff' : 'var(--muted)' }}>
-                  {i + 1}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{s.isMe ? 'You' : s.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.address || s.pickup?.address || '—'}</div>
-                </div>
-                <span className={`badge ${s.status === 'completed' ? 'badge-green' : s.status === 'picked_up' ? 'badge-blue' : 'badge-slate'}`}>
-                  {s.status === 'completed' ? 'Done' : s.status === 'picked_up' ? 'Picked up' : s.status === 'reached' ? 'Reached' : 'Pending'}
-                </span>
-              </div>
-            ))}
+          <div className={`eh-status ${allotment.status === 'completed' ? 'muted' : 'ok'}`}><span className="eh-dot" /> {statusLabel(allotment.status)}</div>
+          <div className="eh-trip-veh"><Car size={15} /> {v.vehicleNumber || 'Vehicle TBD'} {v.vehicleType ? `· ${v.vehicleType}` : ''}</div>
+          <div className="eh-route">
+            <div className="eh-route-row"><span className="eh-rdot primary" /> {ms.pickup?.address || 'Pickup point'}</div>
+            <div className="eh-route-row"><span className="eh-rdot violet" /> {ms.drop?.address || 'Destination'}</div>
           </div>
-
-          <div className="swipe-card">
-            <div className="m-label">Boarding status</div>
-            {otpInfo && ms?.status === 'pending' && (
-              <div style={{ textAlign: 'center', padding: '6px 0' }}>
-                <div style={{ fontSize: 30 }}>🎟️</div>
-                <b style={{ fontSize: 15 }}>Read this OTP to your driver</b>
-                <div style={{ fontSize: 40, fontWeight: 800, letterSpacing: 8, color: 'var(--primary)', padding: '8px 0' }}>{otpInfo.otp}</div>
-                <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-                  Your driver will enter it in their app to confirm your check-in. This screen refreshes automatically.
-                </div>
-              </div>
-            )}
-            {canCheckIn && (
-              <div>
-                <div style={{ textAlign: 'center', padding: '4px 0' }}>
-                  <div style={{ fontSize: 30 }}>🚶</div>
-                  <b style={{ fontSize: 15 }}>Waiting for your cab</b>
-                  <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>When the cab reaches your stop, swipe right to check in.</div>
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <SwipeBtn direction="right" label="Check-in" disabled={!canCheckIn} onComplete={doCheckIn} />
-                </div>
-              </div>
-            )}
-            {!canCheckIn && canCheckOut && (
-              <div>
-                <div style={{ textAlign: 'center', padding: '6px 0 4px' }}>
-                  <div style={{ fontSize: 30 }}>✅</div>
-                  <b style={{ fontSize: 15 }}>You checked in</b>
-                  <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Swipe left to check out when you leave the cab.</div>
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <SwipeBtn direction="left" label="Check-out" disabled={!canCheckOut} onComplete={doCheckOut} />
-                </div>
-              </div>
-            )}
-            {!canCheckIn && !canCheckOut && allotment.status === 'completed' && (
-              <div style={{ textAlign: 'center', padding: '6px 0' }}>
-                <div style={{ fontSize: 30 }}>🎉</div>
-                <b style={{ fontSize: 15 }}>Trip complete</b>
-                <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Thanks for riding today!</div>
-              </div>
-            )}
+          <div className="eh-driver">{d.name ? `${d.name}${d.phone ? ' · ' + d.phone : ''}` : 'Driver assigned soon'}</div>
+          <div className="eh-trip-actions">
+            <Link to="/app/track" className="btn btn-sm btn-primary">Track vehicle</Link>
+            {d.phone ? <a href={`tel:${d.phone.replace(/[^+\d]/g, '')}`} className="btn btn-sm btn-outline"><Phone size={14} /> Call</a> : null}
           </div>
-
-          {ms?.safeDropEnabled && ms?.status === 'completed' && (
-            <div className="m-card" style={{ border: `1.5px solid ${allotment.safety?.phase === 'alert' ? 'var(--red)' : 'var(--primary)'}` }}>
-              <div className="m-label" style={{ color: allotment.safety?.phase === 'alert' ? 'var(--red)' : 'var(--primary)' }}>Night Safety Drop</div>
-              {ms.safeDropConfirmedAt ? (
-                <div style={{ fontSize: 13 }}>✅ You confirmed reaching home. The transport team is notified.</div>
-              ) : allotment.safety?.phase === 'alert' ? (
-                <>
-                  <div style={{ fontSize: 13, marginBottom: 10 }}>
-                    🚨 Help request sent. Your transport team is viewing your live location. If you are actually home, confirm below to close the alert.
-                  </div>
-                  <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={doSafeDrop}>
-                    I'm home — close alert
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: 13, marginBottom: 10 }}>Confirm you reached home safely so the transport team knows you got home OK.</div>
-                  <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={doSafeDrop}>
-                    I reached home safely
-                  </button>
-                  <button className="btn btn-outline" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={doNotReached}>
-                    I have NOT reached home — send help
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          <Link to="/app/track" className="m-card" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'inherit' }}>
-            <div style={{ fontSize: 24 }}>📍</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)' }}>{sharingLive ? 'View live map' : 'View map'}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {sharingLive ? 'Driver is sharing their live location' : "Driver hasn't started sharing yet"}
-              </div>
-            </div>
-            <ChevronRight size={18} style={{ color: 'var(--muted)' }} />
-          </Link>
-        </>
+        </div>
+      ) : nextTrip ? (
+        <div className="eh-trip">
+          <div className="eh-trip-head">
+            <span className="eh-pill">{dirLabel(nextTrip.direction)}</span>
+            <span className="eh-trip-time">{fmtTime(nextTrip.pickup_time || nextTrip.login_time || nextTrip.drop_time || nextTrip.logout_time)}</span>
+          </div>
+          <div className="eh-trip-date">{new Date(nextTrip.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}</div>
+          <div className={`eh-status ${statusLabel(nextTrip.status) === 'Scheduled' ? 'ok' : 'warn'}`}><span className="eh-dot" /> {statusLabel(nextTrip.status)}</div>
+          <div className="eh-route">
+            <div className="eh-route-row"><span className="eh-rdot primary" /> {nextTrip.pickup_point || 'Pickup point'}</div>
+            <div className="eh-route-row"><span className="eh-rdot violet" /> {nextTrip.direction === 'toHome' ? 'Home' : 'Office'}</div>
+          </div>
+          <div className="eh-trip-actions">
+            <Link to="/app/schedule" className="btn btn-sm btn-primary">View details</Link>
+            <Link to="/app/schedule" className="btn btn-sm btn-outline">Edit / Cancel</Link>
+          </div>
+        </div>
       ) : (
-        <div className="m-card">
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>🚐</div>
-            <b style={{ fontSize: 16 }}>No active ride right now</b>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6, lineHeight: 18, maxWidth: 340, margin: '6px auto 0' }}>
-              Once the admin allots a cab for your shift, your driver's live location and drop position will show up here.
-            </div>
-          </div>
+        <div className="eh-empty">
+          <div style={{ fontSize: 40 }}>🚐</div>
+          <b>No active ride right now</b>
+          <div className="eh-empty-sub">You don't have an upcoming trip. Book one below and it will appear here.</div>
+          <Link to="/app/book" className="btn btn-primary" style={{ marginTop: 14 }}>+ Book a Ride</Link>
+        </div>
+      )}
 
-          {todayConfirmed && (
-            <div className="m-card" style={{ border: '1.5px solid var(--primary)', marginTop: 12 }}>
-              <div className="m-label">Today's booking</div>
-              <div style={{ fontWeight: 600 }}>{todayConfirmed.slotLabel || 'Shift'} · {todayConfirmed.direction === 'toOffice' ? 'Login' : 'Logout'}</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-                <Clock size={13} style={{ display: 'inline', verticalAlign: -2 }} /> Pickup: {todayConfirmed.pickupTime || '—'}
-              </div>
-              <button className="btn btn-outline btn-sm" style={{ marginTop: 10 }} onClick={() => doCancel(todayConfirmed._id)}>
-                Cancel booking
-              </button>
+      {/* Boarding */}
+      {allotment && (canCheckIn || canCheckOut || ms?.safeDropEnabled) && (
+        <div className="m-card">
+          <div className="m-label">Boarding</div>
+          {otpInfo && ms?.status === 'pending' && (
+            <div style={{ textAlign: 'center', padding: '6px 0' }}>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>Read this OTP to your driver</div>
+              <div style={{ fontSize: 40, fontWeight: 800, letterSpacing: 8, color: 'var(--primary)', padding: '8px 0' }}>{otpInfo.otp}</div>
             </div>
           )}
-
-          {!todayConfirmed && config && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Quick book for today</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {(Array.isArray(config.shiftSlots) ? config.shiftSlots : []).slice(0, 4).map((s) => (
-                  <button key={s.label} className="btn btn-sm btn-outline" disabled={s.closedForToday} onClick={() => doBook(s.label, 'toOffice')} style={{ fontSize: 12 }}>
-                    {s.label} {s.closedForToday ? '(closed)' : '→ Office'}
-                  </button>
-                ))}
-              </div>
-            </div>
+          {canCheckIn && <SwipeBtn direction="right" label="Check-in" disabled={!canCheckIn} onComplete={doCheckIn} />}
+          {!canCheckIn && canCheckOut && <SwipeBtn direction="left" label="Check-out" disabled={!canCheckOut} onComplete={doCheckOut} />}
+          {ms?.safeDropEnabled && ms?.status === 'completed' && !ms.safeDropConfirmedAt && (
+            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} onClick={doSafeDrop}>I reached home safely</button>
           )}
         </div>
       )}
 
+      {/* Booking */}
+      <div id="book" style={{ scrollMarginTop: 80 }}>
+        <DayBooker config={config} schedules={schedules} onBook={doBookDay} onCancel={doCancel} busy={bookingBusy} />
+      </div>
+
+      {/* Upcoming */}
+      {upcoming.length > 0 && (
+        <div className="m-card">
+          <div className="m-label">Upcoming trips</div>
+          {upcoming.slice(0, 5).map((s, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: i < Math.min(upcoming.length, 5) - 1 ? '1px solid var(--line)' : 'none' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{new Date(s.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · {dirLabel(s.direction)}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtTime(s.pickup_time || s.login_time || s.drop_time || s.logout_time)} · {s.direction === 'toHome' ? 'Office → Home' : 'Home → Office'}</div>
+              </div>
+              <span className={`badge ${['confirmed', 'in_progress', 'assigned', 'started'].includes(s.status) ? 'badge-green' : 'badge-slate'}`}>{statusLabel(s.status)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Get the mobile app */}
+      <div className="eh-app-card">
+        <div>
+          <div className="eh-app-title">GetInRoute Employee App</div>
+          <div className="eh-app-sub">Use the mobile app for faster access to your rides, schedules and live trip information.</div>
+          <div className="eh-app-badges">
+            <span className="eh-app-badge ok">Android App · Available now</span>
+            <span className="eh-app-badge soon">iPhone App · Coming Soon</span>
+          </div>
+        </div>
+        <a href="/download/GetInRoute.apk" className="btn btn-primary" download>Download Employee App</a>
+      </div>
+
+      {/* Recent */}
       {history.length > 0 && (
         <div className="m-card">
           <div className="m-label">Recent trips</div>

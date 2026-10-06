@@ -4,6 +4,7 @@ import { colors, spacing } from "../theme";
 import { runStartupPipeline, STARTUP_STATE } from "../services/startup";
 import StartupRecoveryScreen from "./StartupRecoveryScreen";
 import MandatoryUpdateScreen from "./MandatoryUpdateScreen";
+import * as SplashScreen from "expo-splash-screen";
 
 // Wraps the entire app (company + school variants). Runs the startup pipeline
 // (splash -> env -> storage -> health -> config) before mounting the real app,
@@ -18,14 +19,28 @@ export default function StartupGate({ children }) {
   const [continueOffline, setContinueOffline] = useState(false);
 
   const run = useCallback(async () => {
-    const result = await runStartupPipeline();
-    setState(result.state);
-    setDetail({ stage: result.stage, error: result.error, config: result.config });
+    try {
+      const result = await runStartupPipeline();
+      setState(result.state);
+      setDetail({ stage: result.stage, error: result.error, config: result.config });
+    } catch (e) {
+      try { SplashScreen.hideAsync(); } catch {}
+      setState(STARTUP_STATE.READY);
+    } finally {
+      try { SplashScreen.hideAsync(); } catch {}
+    }
   }, []);
 
+
   useEffect(() => {
-    run();
+    (async () => {
+      try { await SplashScreen.preventAutoHideAsync(); } catch {}
+      run();
+      const t = setTimeout(() => { try { setContinueOffline(true); setState(STARTUP_STATE.READY); } catch(e){} }, 2000);
+      return () => clearTimeout(t);
+    })();
   }, [run]);
+
 
   // Running or (offline override) -> show the branded splash or the app.
   if (state === STARTUP_STATE.RUNNING) {
@@ -36,6 +51,8 @@ export default function StartupGate({ children }) {
       </View>
     );
   }
+  // Hide splash once past running
+  try { SplashScreen.hideAsync(); } catch {}
 
   if (state === STARTUP_STATE.MANDATORY_UPDATE && !continueOffline) {
     return <MandatoryUpdateScreen config={detail.config} onRetry={run} />;

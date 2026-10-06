@@ -368,6 +368,9 @@ function publicUser(u) {
     safety_drop_eligible: u.safety_drop_eligible ? 1 : 0,
 lat: u.lat, lng: u.lng, last_update: u.last_update, created_at: u.created_at,
     last_login: u.last_login || null, vehicle_name: u.vehicle_name || null, plate: u.plate || null,
+    // Shared employee pickup location (set from the app or the web portal, stored
+    // on the single users row). Exposed to admin + vendor employee lists.
+    home_address: u.home_address || null, home_lat: u.home_lat ?? null, home_lng: u.home_lng ?? null,
     isOwner: u.emp_id === 'ADMIN'
   };
 }
@@ -4331,6 +4334,7 @@ app.get('/api/vendor/employees', vendorAuth, (req, res) => {
   res.json([...mine, ...zoneRows].map((u) => ({
     id: u.id, name: u.name, emp_id: u.emp_id, email: u.email, phone: u.phone,
     department: u.department, designation: u.designation, home_address: u.home_address,
+    home_lat: u.home_lat ?? null, home_lng: u.home_lng ?? null,
     vehicle_name: u.vehicle_name, status: u.status, approved: u.approved, last_login: u.last_login
   })));
 });

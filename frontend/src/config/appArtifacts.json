@@ -6,8 +6,8 @@
     "employee": {
       "file": "GetInRoute.apk",
       "url": "/download/GetInRoute.apk",
-      "bytes": 72275022,
-      "sizeLabel": "69 MB",
+      "bytes": 28721006,
+      "sizeLabel": "27 MB",
       "version": "1.0.5",
       "versionCode": 25,
       "packageName": "com.getinroute.employee"
@@ -15,8 +15,8 @@
     "driver": {
       "file": "GetInRouteDriver.apk",
       "url": "/download/GetInRouteDriver.apk",
-      "bytes": 72275026,
-      "sizeLabel": "69 MB",
+      "bytes": 28715390,
+      "sizeLabel": "27 MB",
       "version": "1.0.5",
       "versionCode": 3,
       "packageName": "com.getinroute.driver"
@@ -24,7 +24,7 @@
     "school": {
       "file": "GetInRouteSchool.apk",
       "url": "/download/GetInRouteSchool.apk",
-      "bytes": 72275026,
+      "bytes": 72275378,
       "sizeLabel": "69 MB",
       "version": "1.0.5",
       "versionCode": 3,

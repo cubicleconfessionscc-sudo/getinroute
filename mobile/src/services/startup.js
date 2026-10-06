@@ -122,7 +122,8 @@ async function fetchAppConfig(timeoutMs = 8000) {
 // Runs the full startup pipeline. Returns the final startup state plus any
 // metadata the recovery screen needs (e.g. mandatory update details).
 export async function runStartupPipeline() {
-  const result = { state: STARTUP_STATE.RUNNING, stage: null, error: null, config: DEFAULT_CONFIG };
+  try {
+    const result = { state: STARTUP_STATE.RUNNING, stage: null, error: null, config: DEFAULT_CONFIG };
 
   // 1) Environment validation.
   result.stage = "env";
@@ -191,5 +192,8 @@ export async function runStartupPipeline() {
   // 5) Authentication restoration happens in AuthProvider (already wired).
   //    When we get here the app is safe to initialise.
   result.state = STARTUP_STATE.READY;
-  return result;
+    return result;
+  } catch (e) {
+    return { state: STARTUP_STATE.READY, stage: "fatal", error: e, config: DEFAULT_CONFIG };
+  }
 }

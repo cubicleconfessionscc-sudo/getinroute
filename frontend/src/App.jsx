@@ -68,6 +68,8 @@ import WhatIfSimulator from './pages/admin/WhatIfSimulator';
 
 import EmployeeApp from './pages/employee/EmployeeApp';
 import EHome from './pages/employee/EHome';
+import ESchedule from './pages/employee/ESchedule';
+import EBook from './pages/employee/EBook';
 import ETrack from './pages/employee/ETrack';
 import EHistory from './pages/employee/EHistory';
 import EFeedback from './pages/employee/EFeedback';
@@ -229,6 +231,8 @@ export default function App() {
 
           <Route path="/app" element={<Require role="employee"><EmployeeApp /></Require>}>
             <Route index element={<EHome />} />
+            <Route path="book" element={<EBook />} />
+            <Route path="schedule" element={<ESchedule />} />
             <Route path="track" element={<ETrack />} />
             <Route path="address" element={<AddressSettings />} />
             <Route path="history" element={<EHistory />} />

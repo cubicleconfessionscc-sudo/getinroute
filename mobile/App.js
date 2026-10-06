@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { View, Text } from "react-native";
 import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider } from "./src/context/AuthContext";
@@ -51,16 +52,13 @@ function SchoolAppRoot() {
   );
 }
 
-function FallbackView() {
+function FallbackView({ error } = {}) {
   return (
-    <ErrorBoundary>
-      <StartupGate>
-        <AuthProvider>
-          <StatusBar style="dark" />
-          <RootNavigator />
-        </AuthProvider>
-      </StartupGate>
-    </ErrorBoundary>
+    <View style={{ flex: 1, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <Text style={{ fontSize: 16, color: '#333333', textAlign: 'center' }}>
+        {error ? String(error) : 'App failed to start. Please restart.'}
+      </Text>
+    </View>
   );
 }
 
@@ -71,7 +69,7 @@ export default function App() {
     }
     return <CompanyApp />;
   } catch (e) {
-    console.error("FATAL: App render failed", e);
-    return <FallbackView />;
+    console.error("FATAL: App render failed", e); try{ console.error("FATAL_STACK", e && e.stack); }catch{};
+    return <FallbackView error={e} />;
   }
 }

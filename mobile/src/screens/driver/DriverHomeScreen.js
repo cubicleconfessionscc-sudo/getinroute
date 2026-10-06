@@ -13,6 +13,7 @@ import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
 import OfflineBanner from "../../components/OfflineBanner";
 import { speakTripAssigned } from "../../services/voice";
 import { notifyTripAssigned, notifyChatMessage } from "../../services/notifications";
+import { scheduleAlarmBefore } from "../../services/alarms";
 import { colors, spacing, radius } from "../../theme";
 import client from "../../api/client";
 
@@ -37,6 +38,17 @@ function fmtTime12(t) {
   const suffix = hh >= 12 ? "PM" : "AM";
   const h = hh % 12 === 0 ? 12 : hh % 12;
   return `${h}:${pad(mm)} ${suffix}`;
+}
+
+function localPickupDate(dateValue, timeValue, nextDay) {
+  const date = String(dateValue || "").slice(0, 10);
+  const time = String(timeValue || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const result = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (nextDay) result.setDate(result.getDate() + 1);
+  return Number.isNaN(result.getTime()) ? null : result;
 }
 
 function fmtKm(km) {
@@ -120,6 +132,23 @@ export default function DriverHomeScreen({ navigation }) {
     setTrip(active || null);
     setRun(activeRun || null);
     setAllotted(al);
+
+    // Schedule one local alarm for the first still-pending pickup in an
+    // assigned run. Alarm service deduplicates across foreground refreshes and
+    // app restarts; native notification scheduling survives backgrounding.
+    if (activeRun) {
+      const nextStop = (Array.isArray(activeRun.sequence) ? activeRun.sequence : []).find(
+        (stop) => !["picked_up", "reached", "completed", "no_show"].includes(stop.status)
+      );
+      const pickupAt = localPickupDate(activeRun.date, nextStop?.pickupTime, nextStop?.nextDay);
+      if (pickupAt) {
+        scheduleAlarmBefore(pickupAt, {
+          title: "Driver trip alarm",
+          body: `Your first pickup is at ${fmtTime12(nextStop.pickupTime)}.`,
+          alarmKey: `driver:${activeRun._id}:${String(activeRun.date || "").slice(0, 10)}`,
+        }).catch(() => {});
+      }
+    }
 
     // Voice announcement + local notification when a NEW run/trip is assigned.
     // The very first load (app open) only records existing ids (without

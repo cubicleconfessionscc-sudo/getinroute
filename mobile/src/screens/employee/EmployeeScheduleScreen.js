@@ -8,6 +8,7 @@ import { getMyCompany } from "../../api/company";
 import { getLocationProfile } from "../../api/locations";
 import { speakTripScheduled, speakTripBooked } from "../../services/voice";
 import { notifyTripBooked } from "../../services/notifications";
+import { scheduleAlarmBefore } from "../../services/alarms";
 import { colors, spacing, radius } from "../../theme";
 
 function pad(n) {
@@ -15,6 +16,16 @@ function pad(n) {
 }
 function fmtDate(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function pickupDateTime(schedule) {
+  const date = String(schedule?.startDate || schedule?.date || "").slice(0, 10);
+  const time = String(schedule?.startTime || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const result = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (schedule?.nextDay) result.setDate(result.getDate() + 1);
+  return Number.isNaN(result.getTime()) ? null : result;
 }
 function fmtPretty(dateStr) {
   if (!dateStr) return "—";
@@ -192,11 +203,19 @@ export default function EmployeeScheduleScreen({ navigation }) {
       const lines = [];
       const skipped = [];
       let anyPending = false;
-      results.forEach((r) => {
-        (r.created || (r._id ? [r] : [])).forEach((s) => {
-          if (s.status === "requested") anyPending = true;
-          lines.push(`${dirLabel(s.direction)} · ${fmtPretty(s.startDate)} · pickup ${fmtTime12(s.startTime)} · ${s.status === "requested" ? "awaiting approval" : "confirmed"}`);
-        });
+        results.forEach((r) => {
+          (r.created || (r._id ? [r] : [])).forEach((s) => {
+            if (s.status === "requested") anyPending = true;
+            lines.push(`${dirLabel(s.direction)} · ${fmtPretty(s.startDate)} · pickup ${fmtTime12(s.startTime)} · ${s.status === "requested" ? "awaiting approval" : "confirmed"}`);
+            const alarmAt = pickupDateTime(s);
+            if (alarmAt) {
+              scheduleAlarmBefore(alarmAt, {
+                title: "Employee pickup alarm",
+                body: `Your ${dirLabel(s.direction).toLowerCase()} pickup is at ${fmtTime12(s.startTime)}.`,
+                alarmKey: `employee:${s._id || "schedule"}:${String(s.startDate || s.date || "").slice(0, 10)}`,
+              }).catch(() => {});
+            }
+          });
         if (r.pendingApproval) anyPending = true;
         if (r.skipped && r.skipped.length) skipped.push(...r.skipped);
       });
@@ -221,13 +240,26 @@ export default function EmployeeScheduleScreen({ navigation }) {
     }
   }
 
-  async function cancel(id) {
-    try {
-      await cancelSchedule(id);
-      await load();
-    } catch (e) {
-      Alert.alert("Could not cancel", e.response?.data?.message || e.message);
-    }
+  function cancel(id) {
+    Alert.alert(
+      "Cancel this trip?",
+      "Are you sure you want to cancel this trip? This cannot be undone.",
+      [
+        { text: "Keep Trip", style: "cancel" },
+        {
+          text: "Cancel Trip",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await cancelSchedule(id);
+              await load();
+            } catch (e) {
+              Alert.alert("Could not cancel", e.response?.data?.message || e.message);
+            }
+          }
+        }
+      ]
+    );
   }
 
   const effectiveDates = [];

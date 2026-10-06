@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from "react";
+import React from "react";
 import { TouchableOpacity, Text, View, StyleSheet, ActivityIndicator } from "react-native";
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -12,22 +12,22 @@ import PendingApprovalScreen from "../screens/auth/PendingApprovalScreen";
 import ForgotPasswordScreen from "../screens/auth/ForgotPasswordScreen";
 import ResetPasswordScreen from "../screens/auth/ResetPasswordScreen";
 
-// These screens statically themselves import react-native-maps at module
-// scope. If the installed binary predates the maps native library, that import
-// throws during bundle evaluation - below React, so the ErrorBoundary cannot
-// catch it and the app would render blank. Loading them lazily moves any such
-// failure to FIRST RENDER, where the ErrorBoundary catches it and shows a
-// recoverable error screen instead of a white void.
-const EmployeeHomeScreen = lazy(() => import("../screens/employee/EmployeeHomeScreen"));
-const EmployeeHistoryScreen = lazy(() => import("../screens/employee/EmployeeHistoryScreen"));
-const EmployeeScheduleScreen = lazy(() => import("../screens/employee/EmployeeScheduleScreen"));
-const EmployeeLocationsScreen = lazy(() => import("../screens/employee/EmployeeLocationsScreen"));
-const DriverHomeScreen = lazy(() => import("../screens/driver/DriverHomeScreen"));
-const ChatScreen = lazy(() => import("../screens/shared/ChatScreen"));
-const FeedbackScreen = lazy(() => import("../screens/shared/FeedbackScreen"));
-const HelpScreen = lazy(() => import("../screens/shared/HelpScreen"));
-const SettingsScreen = lazy(() => import("../screens/shared/SettingsScreen"));
-const PendingSyncScreen = lazy(() => import("../screens/shared/PendingSyncScreen"));
+// Screens are imported directly. React.lazy + Suspense around the map-bearing
+// screens previously left the screen area blank (native-stack renders the
+// header while the lazy chunk is pending, and a rejected/hung dynamic import
+// left an empty white body). react-native-maps is now a linked native module,
+// so a direct import is safe and the app can never show a blank body here.
+import EmployeeHomeScreen from "../screens/employee/EmployeeHomeScreen";
+import EmployeeHistoryScreen from "../screens/employee/EmployeeHistoryScreen";
+import EmployeeScheduleScreen from "../screens/employee/EmployeeScheduleScreen";
+import EmployeeLocationsScreen from "../screens/employee/EmployeeLocationsScreen";
+import EmployeeProfileScreen from "../screens/employee/EmployeeProfileScreen";
+import DriverHomeScreen from "../screens/driver/DriverHomeScreen";
+import ChatScreen from "../screens/shared/ChatScreen";
+import FeedbackScreen from "../screens/shared/FeedbackScreen";
+import HelpScreen from "../screens/shared/HelpScreen";
+import SettingsScreen from "../screens/shared/SettingsScreen";
+import PendingSyncScreen from "../screens/shared/PendingSyncScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -89,10 +89,11 @@ function AuthStack() {
 function EmployeeStack() {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
-      <Stack.Screen name="EmployeeHome" component={EmployeeHomeScreen} options={homeOptions("GetInRoute")} />
+      <Stack.Screen name="EmployeeHome" component={EmployeeHomeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="EmployeeSchedule" component={EmployeeScheduleScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Book cab" })} />
       <Stack.Screen name="EmployeeHistory" component={EmployeeHistoryScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Trip history" })} />
-      <Stack.Screen name="EmployeeLocations" component={EmployeeLocationsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "My Locations" })} />
+      <Stack.Screen name="EmployeeLocations" component={EmployeeLocationsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "My Address" })} />
+      <Stack.Screen name="EmployeeProfile" component={EmployeeProfileScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Profile" })} />
       <Stack.Screen name="Chat" component={ChatScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Chat" })} />
       <Stack.Screen name="Feedback" component={FeedbackScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Feedback" })} />
       <Stack.Screen name="Help" component={HelpScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Help" })} />
@@ -131,18 +132,10 @@ export default function RootNavigator() {
 
   return (
     <NavigationContainer theme={navTheme}>
-      <Suspense
-        fallback={
-          <View style={styles.splash}>
-            <ActivityIndicator color={colors.teal} style={styles.splashSpinner} />
-          </View>
-        }
-      >
-        {!user && <AuthStack />}
-        {(user?.role === "employee" || user?.role === "admin") && <EmployeeStack />}
-        {user?.role === "driver" && <DriverStack />}
-        {user && !["employee", "admin", "driver"].includes(user.role) && <UnsupportedRoleScreen />}
-      </Suspense>
+      {!user && <AuthStack />}
+      {(user?.role === "employee" || user?.role === "admin") && <EmployeeStack />}
+      {user?.role === "driver" && <DriverStack />}
+      {user && !["employee", "admin", "driver"].includes(user.role) && <UnsupportedRoleScreen />}
     </NavigationContainer>
   );
 }

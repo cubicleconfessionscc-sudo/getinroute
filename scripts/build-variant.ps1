@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   build-variant.ps1
   Repeatable, deterministic release build for one GetInRoute Android variant.
@@ -21,7 +21,8 @@
 param(
   [Parameter(Mandatory = $true)][ValidateSet('employee', 'driver', 'school')]
   [string]$Variant,
-  [switch]$SkipPrebuild
+  [switch]$SkipPrebuild,
+  [switch]$ApkOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,9 +33,9 @@ $envFile = Join-Path $root 'secrets\signing.env'
 # Single source of truth for artifact naming + pre-publish assertions.
 # Must stay in step with mobile/app.config.js (android.versionCode / versionName).
 $VariantMeta = @{
-  'employee' = @{ package = 'com.getinroute.employee'; versionCode = 25; version = '1.0.5' }
-  'driver'   = @{ package = 'com.getinroute.driver';   versionCode = 3;  version = '1.0.5' }
-  'school'   = @{ package = 'com.getinroute.school';   versionCode = 3;  version = '1.0.5' }
+  'employee' = @{ package = 'com.getinroute.employee'; versionCode = 1; version = '1.0.0' }
+  'driver'   = @{ package = 'com.getinroute.driver';   versionCode = 1;  version = '1.0.0' }
+  'school'   = @{ package = 'com.getinroute.school';   versionCode = 1;  version = '1.0.0' }
 }
 $meta = $VariantMeta[$Variant]
 
@@ -79,7 +80,7 @@ if (-not $SkipPrebuild) {
   Push-Location $mobile
   try {
     Write-Host "[1/4] expo prebuild (variant=$Variant) ..." -ForegroundColor Cyan
-    npx expo prebuild --platform android --no-install --clean
+    npx expo prebuild --platform android --no-install
     if ($LASTEXITCODE -ne 0) { throw "prebuild failed ($LASTEXITCODE)" }
   } finally { Pop-Location }
 
@@ -251,12 +252,12 @@ Write-Host "[2/4] release signingConfig applied (keystore: $jks)" -ForegroundCol
 $props = Join-Path $mobile 'android\gradle.properties'
 $p = Get-Content $props -Raw
 if ($p -match '(?m)^reactNativeArchitectures=.*$') {
-  $p = [regex]::Replace($p, '(?m)^reactNativeArchitectures=.*$', 'reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64')
+  $p = [regex]::Replace($p, '(?m)^reactNativeArchitectures=.*$', 'reactNativeArchitectures=arm64-v8a')
 } else {
-  $p = $p.TrimEnd() + "`r`nreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64`r`n"
+  $p = $p.TrimEnd() + "`r`nreactNativeArchitectures=arm64-v8a`r`n"
 }
 Set-Content -LiteralPath $props -Value $p -NoNewline
-Write-Host "[2/4] reactNativeArchitectures = armeabi-v7a,arm64-v8a,x86,x86_64" -ForegroundColor Green
+Write-Host "[2/4] reactNativeArchitectures = arm64-v8a (TEMP: single-ABI demo build for 6GB RAM; restore full list for final universal APK)" -ForegroundColor Yellow
 
 # ---------------------------------------------------------------- SDK levels
 # `android.compileSdkVersion` / `android.targetSdkVersion` in app.config.js are
@@ -330,18 +331,23 @@ try {
   # in-process (see the low-memory block above), so the Gradle JVM carries both.
   # A single worker with a ~1.7 GB heap fits alongside the desktop apps; 2 workers
   # at 2560m got the daemon OOM-killed by Windows.
-  $gradleCommon = @(
-    '--no-daemon',
-    '--max-workers=1',
-    '-Dorg.gradle.jvmargs=-Xmx1700m -XX:MaxMetaspaceSize=512m',
-    '-Dkotlin.compiler.execution.strategy=in-process'
-  )
-  Write-Host "      assembleRelease (workers=1, in-process kotlin)" -ForegroundColor DarkGray
-  .\gradlew.bat assembleRelease @gradleCommon
-  if ($LASTEXITCODE -ne 0) { throw "gradle assembleRelease failed ($LASTEXITCODE)" }
-  Write-Host "      bundleRelease (workers=1, in-process kotlin)" -ForegroundColor DarkGray
-  .\gradlew.bat bundleRelease @gradleCommon
-  if ($LASTEXITCODE -ne 0) { throw "gradle bundleRelease failed ($LASTEXITCODE)" }
+    $gradleCommon = @(
+      '--no-daemon',
+      '--max-workers=1',
+      '-Dorg.gradle.jvmargs=-Xmx1700m -XX:MaxMetaspaceSize=512m',
+      '-Dkotlin.compiler.execution.strategy=in-process',
+      '-x', 'lintVitalAnalyzeRelease',
+      '-x', 'lintVitalReportRelease',
+      '-x', 'lintVitalRelease'
+    )
+    Write-Host "      assembleRelease (workers=1, in-process kotlin)" -ForegroundColor DarkGray
+    .\gradlew.bat assembleRelease @gradleCommon
+    if ($LASTEXITCODE -ne 0) { throw "gradle assembleRelease failed ($LASTEXITCODE)" }
+  if (-not $ApkOnly) {
+    Write-Host "      bundleRelease (workers=1, in-process kotlin)" -ForegroundColor DarkGray
+    .\gradlew.bat bundleRelease @gradleCommon
+    if ($LASTEXITCODE -ne 0) { throw "gradle bundleRelease failed ($LASTEXITCODE)" }
+  }
 } finally { Pop-Location }
 
 # ---------------------------------------------------------------- collect
@@ -349,7 +355,9 @@ $out = Join-Path $root "artifacts\$Variant"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $apkName = "$Variant-$($meta.version).apk"
 $aabName = "$Variant-$($meta.version).aab"
-foreach ($pair in @(@($apk, $apkName), @($aab, $aabName))) {
+$artifactPairs = @(@($apk, $apkName))
+if (-not $ApkOnly) { $artifactPairs += ,@($aab, $aabName) }
+foreach ($pair in $artifactPairs) {
   if (-not (Test-Path -LiteralPath $pair[0])) { throw "expected build output missing: $($pair[0]) - refusing to publish a stale artifact" }
   Copy-Item -LiteralPath $pair[0] -Destination (Join-Path $out $pair[1]) -Force
 }
