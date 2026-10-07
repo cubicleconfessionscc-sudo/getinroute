@@ -270,7 +270,7 @@ export default function EmployeeLocationsScreen() {
                   multiline
                 />
                 {pickup.lat != null && (
-                  <Text style={styles.coordText}>{pickup.lat.toFixed(5)}, {pickup.lng.toFixed(5)}</Text>
+                  <Text style={styles.coordText}>✓ Location selected</Text>
                 )}
               </>
             ) : (
@@ -323,7 +323,7 @@ export default function EmployeeLocationsScreen() {
             multiline
           />
           {home.lat != null && (
-            <Text style={styles.coordText}>{home.lat.toFixed(5)}, {home.lng.toFixed(5)}</Text>
+            <Text style={styles.coordText}>✓ Location selected</Text>
           )}
         </View>
       )}
