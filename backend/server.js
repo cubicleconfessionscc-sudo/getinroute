@@ -166,7 +166,11 @@ app.get('/api/config/public', (req, res) => {
   res.json({
     mapsProvider: 'maplibre',
     geocodingProvider: process.env.GEOCODING_PROVIDER || 'photon',
-    routingProvider: process.env.ROUTING_PROVIDER || 'osrm'
+    routingProvider: process.env.ROUTING_PROVIDER || 'osrm',
+    // Browser key for the Google Maps JS API on Admin/Vendor ROUTE planning only.
+    // It is a browser key (referrer-restricted) so exposing it here is safe; the
+    // dashboard/live-tracking maps stay on MapLibre/OSM.
+    googleMapsKey: process.env.GOOGLE_MAPS_BROWSER_KEY || process.env.GOOGLE_MAPS_API_KEY || null
   });
 });
 

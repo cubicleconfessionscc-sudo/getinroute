@@ -4,7 +4,7 @@ import { useAuth } from '../../auth';
 import { Modal, Badge, useToast } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
 import MapPicker from '../../components/MapPicker';
-import MapLibreMap from '../../components/MapLibreMap';
+import GoogleRouteMap from '../../components/GoogleRouteMap';
 import { calculateRoute } from '../../lib/geo';
 import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2, Wand2, Play, CalendarClock } from 'lucide-react';
 
@@ -490,7 +490,7 @@ export default function RoutesPage() {
         )}
 
         {previewMarkers().length > 0 && (
-          <MapLibreMap
+          <GoogleRouteMap
             markers={previewMarkers()}
             lines={previewLines()}
             height={300}

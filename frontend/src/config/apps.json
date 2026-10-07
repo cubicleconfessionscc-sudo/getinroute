@@ -24,7 +24,7 @@
     "                ships it; while null the iPhone install path stays disabled so",
     "                no button ever points at something that does not exist yet."
   ],
-  "releaseVersion": "1.0.6",
+  "releaseVersion": "1.0.7",
   "androidMinVersion": "Android 7.0+",
   "distributionEmail": "support@getinroute.in",
   "apps": {
@@ -48,8 +48,8 @@
       "playUrl": null,
       "iosUrl": null,
       "iosBundleId": "com.getinroute.employee",
-      "version": "1.0.6",
-      "versionCode": 26,
+      "version": "1.0.7",
+      "versionCode": 27,
       "webUrl": "/employee-login",
       "webLabel": "Sign in on Web",
       "showOnSite": true,
