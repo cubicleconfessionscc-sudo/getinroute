@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { MapPin, Search, Loader2 } from 'lucide-react';
 import { searchAddress } from '../lib/geo';
+import { api } from '../api';
 
 export default function AddressPicker({ value, onChange }) {
   const [query, setQuery] = useState('');
@@ -10,9 +11,14 @@ export default function AddressPicker({ value, onChange }) {
   const [dropPos, setDropPos] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [provider, setProvider] = useState('google');
   const debounceRef = useRef(null);
   const boxRef = useRef(null);
   const ddRef = useRef(null);
+
+  useEffect(() => {
+    api.get('/api/config/public').then((c) => { if (c && c.geocodingProvider) setProvider(c.geocodingProvider); }).catch(() => {});
+  }, []);
 
   useEffect(() => { if (value) setSelected(value); }, [value && value.address, value && value.lat]);
 
@@ -99,7 +105,7 @@ export default function AddressPicker({ value, onChange }) {
               <span>{r.label || r.address}</span>
             </button>
           ))}
-          <div className="addr-dd-foot">OpenStreetMap data</div>
+          <div className="addr-dd-foot">{provider === 'google' ? 'Powered by Google' : 'OpenStreetMap data'}</div>
         </div>,
         document.body
       )

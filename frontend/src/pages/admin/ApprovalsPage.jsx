@@ -3,6 +3,7 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { Badge, useToast, Modal } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
+import GoogleMapPicker from '../../components/GoogleMapPicker';
 import { Check, X, ClipboardCheck, Building2, Users, Truck, Mail, Phone, Search, Trash2, MapPin, Home } from 'lucide-react';
 
 export default function ApprovalsPage() {
@@ -346,6 +347,15 @@ export default function ApprovalsPage() {
       <Modal open={!!fixModal} onClose={() => { setFixModal(null); setFixAddr(null); }} title={`Set correct address for ${fixModal?.user_name || ''}`} wide>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Search and select the correct address from the map dropdown, then save. This replaces the employee's requested address and keeps their access active (status: corrected, not rejected).</p>
         <AddressPicker value={null} onChange={(item) => setFixAddr(item)} />
+        <div style={{ marginTop: 12 }}>
+          <GoogleMapPicker
+            lat={fixAddr?.lat ?? null}
+            lng={fixAddr?.lng ?? null}
+            height={300}
+            label="Tap the Google map or drag the pin to set the exact corrected location."
+            onPick={(la, ln) => setFixAddr((prev) => ({ ...(prev || {}), lat: la, lng: ln, address: prev?.address || `${Number(la).toFixed(5)}, ${Number(ln).toFixed(5)}` }))}
+          />
+        </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={() => { setFixModal(null); setFixAddr(null); }}>Cancel</button>
           <button className="btn btn-primary" disabled={!fixAddr} onClick={() => decideAddress(fixModal, 'reject')}>Save corrected address</button>

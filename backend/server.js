@@ -165,8 +165,9 @@ app.get(['/health', '/api/health'], (req, res) => {
 app.get('/api/config/public', (req, res) => {
   res.json({
     mapsProvider: 'maplibre',
-    geocodingProvider: process.env.GEOCODING_PROVIDER || 'photon',
-    routingProvider: process.env.ROUTING_PROVIDER || 'osrm',
+    // Report the provider actually used: Google when its key is configured.
+    geocodingProvider: process.env.GOOGLE_MAPS_API_KEY ? 'google' : (process.env.GEOCODING_PROVIDER || 'photon'),
+    routingProvider: process.env.GOOGLE_MAPS_API_KEY ? 'google' : (process.env.ROUTING_PROVIDER || 'osrm'),
     // Browser key for the Google Maps JS API on Admin/Vendor ROUTE planning only.
     // It is a browser key (referrer-restricted) so exposing it here is safe; the
     // dashboard/live-tracking maps stay on MapLibre/OSM.
