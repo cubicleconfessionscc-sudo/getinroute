@@ -4909,7 +4909,7 @@ function aiScope(req) {
   }
   const sc = companyAdminScope(req);
   if (sc.isOwner) return { kind: 'owner' };
-  return { kind: 'company', ids: sc.ids() || [], cid: sc.cid };
+  return { kind: 'company', ids: sc.ids() || [], cid: sc.cid, vehList: sc.vehList() };
 }
 function empIdList(scope) {
   if (scope.kind === 'owner') return null; // all
@@ -4940,26 +4940,29 @@ function expEmployees(scope, { date } = {}) {
   return { filename: `GetInRoute_Employees_${d}.xlsx`, sheets: { Employees: rows } };
 }
 function expDrivers(scope) {
-  const vid = scope.kind === 'vendor' ? scope.vendorId : null;
-  const where = vid ? 'u.role=\'driver\' AND u.vendor_id=?' : "u.role='driver'";
+  let where = "u.role='driver'";
+  const params = [];
+  if (scope.kind === 'vendor') { where += ' AND u.vendor_id=?'; params.push(scope.vendorId); }
+  else if (scope.kind === 'company') { where += ` AND u.company_id = ${Number(scope.cid)}`; }
   const rows = db.prepare(`
     SELECT u.emp_id AS "Driver ID", u.name AS "Name", u.phone AS "Phone", u.status AS "Status",
       COALESCE(v.vehicle_name,'') AS "Assigned vehicle", v.plate AS "Plate",
-      COALESCE(v.line,'') AS "Line", COALESCE(v.stand,'') AS "Stand",
-      COALESCE(v.trip,'') AS "Assigned trip", v.status AS "Assignment status"
+      CAST(v.line AS TEXT) AS "Line", COALESCE(v.stand,'') AS "Stand",
+      CAST(v.trip AS TEXT) AS "Assigned trip", v.status AS "Assignment status"
     FROM users u LEFT JOIN vehicles v ON v.id=u.vehicle_id
-    WHERE ${where} ORDER BY u.name`).all(...(vid ? [vid] : []));
+    WHERE ${where} ORDER BY u.name`).all(...params);
   return { filename: `GetInRoute_Drivers_${istDateOnly(0)}.xlsx`, sheets: { Drivers: rows } };
 }
 function expVehicles(scope) {
-  const vid = scope.kind === 'vendor' ? scope.vendorId : null;
-  const where = vid ? 'v.vendor_id=?' : '1=1';
+  let where = '1=1';
+  if (scope.kind === 'vendor') where = `v.vendor_id = ${Number(scope.vendorId) || -1}`;
+  else if (scope.kind === 'company') where = `v.id IN (${scope.vehList || '0'})`;
   const rows = db.prepare(`
     SELECT v.vehicle_name AS "Vehicle number", v.plate AS "Plate", v.type AS "Type", v.capacity AS "Capacity",
       v.status AS "Status", COALESCE(u.name,'') AS "Assigned driver", COALESCE(r.name,'') AS "Assigned route",
       v.line AS "Line", v.trip AS "Trip", v.stand AS "Stand"
     FROM vehicles v LEFT JOIN users u ON u.vehicle_id=v.id AND u.role='driver' LEFT JOIN routes r ON r.id=v.route_id
-    WHERE ${where} ORDER BY v.line, v.trip`).all(...(vid ? [vid] : []));
+    WHERE ${where} ORDER BY v.line, v.trip`).all();
   return { filename: `GetInRoute_Vehicles_${istDateOnly(0)}.xlsx`, sheets: { Vehicles: rows } };
 }
 function expRoutes(scope) {
@@ -4998,7 +5001,7 @@ function expTrips(scope, { date } = {}) {
   const d = date || istDateOnly(0);
   const rows = db.prepare(`
     SELECT s.date AS "Date", COALESCE(v.vehicle_name,'') AS "Vehicle", COALESCE(v.plate,'') AS "Plate",
-      COALESCE(v.driver_name,'') AS "Driver", COALESCE(r.name,'') AS "Route", COALESCE(v.line,'') AS "Line",
+      COALESCE(v.driver_name,'') AS "Driver", COALESCE(r.name,'') AS "Route", CAST(v.line AS TEXT) AS "Line",
       COALESCE(v.stand,'') AS "Stand", s.direction AS "Direction", s.status AS "Status",
       COUNT(*) AS "Employees"
     FROM schedules s LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id
