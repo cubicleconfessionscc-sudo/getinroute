@@ -1,5 +1,10 @@
 import client from "./client";
 
+// Driver's selected assignment (Trip / Line / Stand) — tracked for Admin/Vendor.
+export function saveDriverAssignment(payload) {
+  return client.post("/driver/assignment", payload).then((r) => r.data);
+}
+
 // Driver's reported standing point (where their cab is parked at the
 // office, L1..L60). Backed by vehicles.stand on the backend.
 export function getStandingPoint() {

@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import { getMyDriverAllotments } from "../../api/schedules";
 import { getAssignedTrips } from "../../api/trips";
-import { getStandingPoint, setStandingPoint } from "../../api/driver";
+import { getStandingPoint, setStandingPoint, saveDriverAssignment } from "../../api/driver";
 import { colors, spacing, radius, shadow } from "../../theme";
 
 const ASSIGN_KEY = "gir_driver_assignment";
@@ -25,6 +25,9 @@ export default function DriverAssignmentScreen({ navigation }) {
   const [line, setLine] = useState(null);
   const [stand, setStand] = useState(null);
   const [busy, setBusy] = useState(false);
+  // First assignment requires Trip + Line + Stand. For a 2nd+ trip Line/Stand
+  // become optional (the driver may just pick another trip).
+  const [isFirst, setIsFirst] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -50,6 +53,8 @@ export default function DriverAssignmentScreen({ navigation }) {
       if (list.length === 1) { setTripId(list[0].id); setLine(list[0].line || 1); }
       const sp = await getStandingPoint().catch(() => null);
       if (sp && sp.standingPoint) setStand(sp.standingPoint);
+      const saved = await getSavedAssignment();
+      setIsFirst(!saved);
     } catch (e) {
       setError(e?.message || "Could not load your assignments.");
     } finally { setLoading(false); }
@@ -61,14 +66,16 @@ export default function DriverAssignmentScreen({ navigation }) {
   const lineOptions = selectedTrip
     ? [...new Set(trips.map((t) => t.line).filter((n) => n != null))]
     : [];
-  const canContinue = !!selectedTrip && line != null && !!stand;
+  // First trip: Line + Stand required. 2nd+ trip: only Trip required.
+  const canContinue = !!selectedTrip && (isFirst ? (line != null && !!stand) : true);
 
   const onContinue = async () => {
     if (!canContinue) return;
     setBusy(true);
     try {
-      await setStandingPoint(stand).catch(() => {});
-      await saveAssignment({ tripId, tripName: selectedTrip.name, line, stand });
+      if (stand) await setStandingPoint(stand).catch(() => {});
+      await saveDriverAssignment({ tripId, tripName: selectedTrip.name, line: line ?? null, stand: stand ?? null }).catch(() => {});
+      await saveAssignment({ tripId, tripName: selectedTrip.name, line: line ?? null, stand: stand ?? null });
       navigation.replace("DriverHome", { assignment: { tripId, tripName: selectedTrip.name, line, stand } });
     } finally { setBusy(false); }
   };
@@ -103,7 +110,7 @@ export default function DriverAssignmentScreen({ navigation }) {
 
             {selectedTrip && (
               <>
-                <Text style={styles.label}>LINE</Text>
+                <Text style={styles.label}>LINE{!isFirst ? " (optional)" : ""}</Text>
                 <View style={styles.rowWrap}>
                   {(lineOptions.length ? lineOptions : [1, 2, 3, 4, 5]).map((n) => (
                     <TouchableOpacity key={n} style={[styles.chip, line === n && styles.chipOn]} onPress={() => setLine(n)}>
@@ -112,7 +119,7 @@ export default function DriverAssignmentScreen({ navigation }) {
                   ))}
                 </View>
 
-                <Text style={styles.label}>STAND</Text>
+                <Text style={styles.label}>STAND{!isFirst ? " (optional)" : ""}</Text>
                 <View style={styles.rowWrap}>
                   {STANDS.map((s) => (
                     <TouchableOpacity key={s} style={[styles.chip, stand === s && styles.chipOn]} onPress={() => setStand(s)}>

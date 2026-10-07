@@ -58,6 +58,7 @@ const NAV_ADMIN = [
     { to: '/admin/employees', icon: <Users size={18} />, text: 'Employees' },
     { to: '/admin/approvals', icon: <ClipboardCheck size={18} />, text: 'Approvals' },
     { to: '/admin/drivers', icon: <Truck size={18} />, text: 'Driver Accounts' },
+    { to: '/admin/driver-assignments', icon: <Truck size={18} />, text: 'Driver Assignments' },
     { to: '/admin/schedules', icon: <CalendarClock size={18} />, text: 'Schedules' },
     { to: '/admin/trips', icon: <History size={18} />, text: 'All Trips' },
     { to: '/admin/vendors', icon: <Building2 size={18} />, text: 'Vendor Management' }

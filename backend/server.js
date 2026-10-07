@@ -375,6 +375,7 @@ lat: u.lat, lng: u.lng, last_update: u.last_update, created_at: u.created_at,
     // Shared employee pickup location (set from the app or the web portal, stored
     // on the single users row). Exposed to admin + vendor employee lists.
     home_address: u.home_address || null, home_lat: u.home_lat ?? null, home_lng: u.home_lng ?? null,
+    assign_trip: u.assign_trip || null, assign_line: u.assign_line || null, assign_stand: u.assign_stand || null, assign_at: u.assign_at || null,
     isOwner: u.emp_id === 'ADMIN'
   };
 }
@@ -3348,6 +3349,32 @@ app.post('/api/driver/feedback', auth, role('driver'), (req, res) => {
 // Driver reports where their cab is parked/standing at the office (L1..L60).
 // The tap-grid UI sends plain "L<n>"; we store it in the vehicles.stand column.
 const STANDING_POINT_RE = /^(L[1-9]|L[1-5][0-9]|L60)$/;
+// Driver saves the assignment they picked (Trip / Line / Stand). Optional Line
+// and Stand are allowed (2nd+ trip). Tracked for Admin/Vendor.
+app.post('/api/driver/assignment', auth, role('driver'), (req, res) => {
+  const { tripId, tripName, line, stand } = req.body || {};
+  const trip = tripName != null ? String(tripName) : (tripId != null ? String(tripId) : null);
+  db.prepare('UPDATE users SET assign_trip = ?, assign_line = ?, assign_stand = ?, assign_at = ? WHERE id = ?')
+    .run(trip, line != null && line !== '' ? String(line) : null, stand != null && stand !== '' ? String(stand) : null, ts(), req.user.id);
+  emitToAdmins('driver:assignment', { driver_id: req.user.id, trip, line: line ?? null, stand: stand ?? null });
+  res.json({ ok: true, assignment: { trip, line: line ?? null, stand: stand ?? null } });
+});
+
+// Admin/Vendor: see every driver's current assignment (company/vendor scoped).
+app.get('/api/admin/driver-assignments', auth, role('admin', 'vendor'), (req, res) => {
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  let where = "u.role='driver'";
+  if (ven) where += ` AND u.vendor_id = ${Number(req.user.vendor_id) || -1}`;
+  else if (!sc.isOwner) where += ` AND u.company_id = ${Number(sc.cid)}`;
+  const rows = db.prepare(`SELECT u.id, u.name, u.emp_id, u.phone, u.status,
+      u.assign_trip AS trip, u.assign_line AS line, u.assign_stand AS stand, u.assign_at AS assigned_at,
+      COALESCE(v.vehicle_name,'') AS vehicle, v.plate
+    FROM users u LEFT JOIN vehicles v ON v.id = u.vehicle_id
+    WHERE ${where} ORDER BY u.assign_at DESC, u.name`).all();
+  res.json(rows);
+});
+
 app.get('/api/driver/standing-point', auth, role('driver'), (req, res) => {
   const veh = db.prepare('SELECT id, stand FROM vehicles WHERE id=?').get(req.user.vehicle_id);
   if (!veh) return res.status(400).json({ error: 'No vehicle assigned' });
@@ -5143,6 +5170,11 @@ try { db.exec(`ALTER TABLE routes ADD COLUMN company_id INTEGER;`); } catch (e) 
 try { db.exec(`ALTER TABLE users ADD COLUMN active_sid TEXT;`); } catch (e) {}
 // Defensive: older DBs may predate the vehicles.driver_id column used by linkDriver.
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN driver_id INTEGER;`); } catch (e) {}
+// Driver's selected assignment (Trip / Line / Stand) — tracked for Admin/Vendor.
+try { db.exec(`ALTER TABLE users ADD COLUMN assign_trip TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN assign_line TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN assign_stand TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN assign_at TEXT;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};

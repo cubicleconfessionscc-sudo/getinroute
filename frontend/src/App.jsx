@@ -63,6 +63,7 @@ import CommandCenter from './pages/admin/CommandCenter';
 import AutomationBuilder from './pages/admin/AutomationBuilder';
 import AnnouncementsPage from './pages/admin/AnnouncementsPage';
 import DriversManagement from './pages/admin/DriversManagement';
+import DriverAssignmentsPage from './pages/admin/DriverAssignmentsPage';
 import ParentsManagement from './pages/admin/ParentsManagement';
 import WhatIfSimulator from './pages/admin/WhatIfSimulator';
 
@@ -202,6 +203,7 @@ export default function App() {
             <Route path="command-center" element={<CommandCenter />} />
             <Route path="automation" element={<AutomationBuilder />} />
             <Route path="drivers" element={<DriversManagement />} />
+            <Route path="driver-assignments" element={<DriverAssignmentsPage />} />
             <Route path="parents" element={<ParentsManagement />} />
             <Route path="what-if" element={<WhatIfSimulator />} />
           </Route>
