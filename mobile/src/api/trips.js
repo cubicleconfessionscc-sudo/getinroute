@@ -8,6 +8,11 @@ export function getMyTrips() {
   return client.get("/trips/mine").then((r) => r.data);
 }
 
+// Driver: the trips/cab runs assigned to me.
+export function getAssignedTrips() {
+  return client.get("/trips/assigned").then((r) => r.data);
+}
+
 export function checkIn(tripId) {
   return client.post(`/schedules/allotments/${tripId}/checkin`).then((r) => r.data);
 }
