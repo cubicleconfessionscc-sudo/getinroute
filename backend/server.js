@@ -4956,7 +4956,7 @@ function expDrivers(scope) {
 function expVehicles(scope) {
   let where = '1=1';
   if (scope.kind === 'vendor') where = `v.vendor_id = ${Number(scope.vendorId) || -1}`;
-  else if (scope.kind === 'company') where = `(v.id IN (${scope.vehList || '0'}) OR v.driver_id IN (SELECT id FROM users WHERE role='driver' AND company_id = ${Number(scope.cid)}))`;
+  else if (scope.kind === 'company') where = `(v.id IN (${scope.vehList || '0'}) OR v.id IN (SELECT vehicle_id FROM users WHERE role='driver' AND company_id = ${Number(scope.cid)} AND vehicle_id IS NOT NULL))`;
   const rows = db.prepare(`
     SELECT v.vehicle_name AS "Vehicle number", v.plate AS "Plate", v.type AS "Type", v.capacity AS "Capacity",
       v.status AS "Status", COALESCE(u.name,'') AS "Assigned driver", COALESCE(r.name,'') AS "Assigned route",
@@ -5112,6 +5112,8 @@ try { db.exec(`ALTER TABLE users ADD COLUMN location_profile TEXT;`); } catch (e
 try { db.exec(`ALTER TABLE routes ADD COLUMN company_id INTEGER;`); } catch (e) {}
 // Single active session for employees (see auth middleware + /api/auth/login).
 try { db.exec(`ALTER TABLE users ADD COLUMN active_sid TEXT;`); } catch (e) {}
+// Defensive: older DBs may predate the vehicles.driver_id column used by linkDriver.
+try { db.exec(`ALTER TABLE vehicles ADD COLUMN driver_id INTEGER;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};
