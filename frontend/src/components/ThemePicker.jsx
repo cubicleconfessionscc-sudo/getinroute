@@ -3,10 +3,10 @@ import React, { useEffect, useState } from 'react';
 // Four professional palettes. Each portal (Admin / Vendor) stores its own
 // preference under its own key so one never changes the other.
 export const THEMES = [
-  { id: 'navy', label: 'Navy Blue', swatch: '#0ea5e9' },
-  { id: 'emerald', label: 'Emerald Teal', swatch: '#10b981' },
-  { id: 'indigo', label: 'Indigo Purple', swatch: '#6366f1' },
-  { id: 'graphite', label: 'Graphite', swatch: '#64748b' }
+  { id: 'royal-light', label: '👑 Royal Light', swatch: '#1e3a8a' },
+  { id: 'royal-dark', label: '👑 Royal Dark', swatch: '#0b1220' },
+  { id: 'royal-sapphire', label: '👑 Royal Sapphire', swatch: '#1d4ed8' },
+  { id: 'royal-emerald', label: '👑 Royal Emerald', swatch: '#10b981' }
 ];
 
 export function applyTheme(theme) {
@@ -18,7 +18,7 @@ export function applyTheme(theme) {
 export default function ThemePicker({ storageKey = 'getinroute-theme-admin' }) {
   const [theme, setTheme] = useState(() => {
     const t = localStorage.getItem(storageKey);
-    return THEMES.some((x) => x.id === t) ? t : 'navy';
+    return THEMES.some((x) => x.id === t) ? t : 'royal-dark';
   });
   useEffect(() => {
     applyTheme(theme);

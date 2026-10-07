@@ -2018,6 +2018,7 @@ app.get('/api/admin/runs', auth, role('admin', 'vendor'), (req, res) => {
     try { stops = JSON.parse(s.route_stops || '[]'); } catch (e) {}
     const empStop = stops[s.sequence - 1] || stops[0] || {};
     run.dropSequence.push({
+      scheduleId: s.id,
       order: s.sequence || run.dropSequence.length + 1,
       status: s.status === 'completed' ? 'completed' : empCheckout ? 'dropped' : empCheckin ? 'checked_in' : 'assigned',
       checkedInAt: empCheckin?.time || null, checkedOutAt: empCheckout?.time || null,

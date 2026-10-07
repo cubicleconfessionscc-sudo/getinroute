@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, downloadCsv } from '../../api';
 import { useAuth } from '../../auth';
-import { Badge, statusColor, statusLabel, useToast } from '../../components/ui';
+import { Badge, statusColor, statusLabel, useToast, Modal } from '../../components/ui';
 import { Download, ChevronDown, ChevronRight, Truck } from 'lucide-react';
 
 export default function TripsPage() {
@@ -12,6 +12,52 @@ export default function TripsPage() {
   const [expanded, setExpanded] = useState({});
   const [filter, setFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [editRun, setEditRun] = useState(null);
+  const [editForm, setEditForm] = useState({ pickup_time: '', drop_time: '' });
+  const [busy, setBusy] = useState(false);
+
+  const openEdit = (r) => {
+    const slot = r.slotLabel && /^\d{2}:\d{2}/.test(r.slotLabel) ? r.slotLabel.slice(0, 5) : '';
+    setEditRun(r);
+    setEditForm({ pickup_time: slot, drop_time: '' });
+  };
+
+  const saveEdit = async () => {
+    if (!editRun) return;
+    const stops = (editRun.dropSequence || []).filter((s) => s.scheduleId);
+    if (!stops.length) return toast('This trip has no editable schedule rows.', 'err');
+    setBusy(true);
+    let ok = 0;
+    try {
+      for (const s of stops) {
+        try {
+          await api.put(`/api/admin/schedules/${s.scheduleId}`, {
+            pickup_time: editForm.pickup_time || undefined,
+            drop_time: editForm.drop_time || undefined
+          });
+          ok += 1;
+        } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+      }
+      toast(ok ? `✓ Trip updated successfully (${ok} stop${ok === 1 ? '' : 's'})` : 'Nothing updated');
+      setEditRun(null); load();
+    } finally { setBusy(false); }
+  };
+
+  const delRun = async (r) => {
+    if (!window.confirm('Are you sure you want to delete this trip? This removes its schedule(s) only — the route, employees, drivers and vehicles are kept.')) return;
+    const stops = (r.dropSequence || []).filter((s) => s.scheduleId);
+    if (!stops.length) return toast('This trip has no schedule rows to delete.', 'err');
+    setBusy(true);
+    let ok = 0;
+    try {
+      for (const s of stops) {
+        try { await api.del(`/api/admin/schedules/${s.scheduleId}`); ok += 1; }
+        catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+      }
+      toast(ok ? '✓ Trip deleted' : 'Nothing deleted');
+      load();
+    } finally { setBusy(false); }
+  };
 
   const load = () => {
     api.get('/api/admin/runs').then((r) => setRuns(Array.isArray(r) ? r : [])).catch(() => {});
@@ -103,6 +149,7 @@ export default function TripsPage() {
                 <th>Shift</th>
                 <th>Stops</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -133,6 +180,12 @@ export default function TripsPage() {
                       <td>
                         <Badge color={statusColor(r.status)}>{statusLabel(r.status)}</Badge>
                         {r.vendorName && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Vendor: {r.vendorName}</div>}
+                      </td>
+                      <td>
+                        <div className="actions" onClick={(e) => e.stopPropagation()}>
+                          <button className="btn btn-sm btn-outline" onClick={() => openEdit(r)}>Edit</button>
+                          <button className="btn btn-sm btn-ghost" title="Delete trip" onClick={() => delRun(r)}>Delete</button>
+                        </div>
                       </td>
                     </tr>
                     {isOpen && (
@@ -189,6 +242,21 @@ export default function TripsPage() {
           </table>
         </div>
       </div>
+
+      <Modal open={!!editRun} onClose={() => setEditRun(null)} title="Edit Trip">
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+          Updating the schedule time applies to all {editRun?.dropSequence?.length || 0} stop(s) in this trip.
+          The route, employees, driver and vehicle are not changed.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="field"><label>Pickup time</label><input type="time" value={editForm.pickup_time} onChange={(e) => setEditForm({ ...editForm, pickup_time: e.target.value })} /></div>
+          <div className="field"><label>Drop time</label><input type="time" value={editForm.drop_time} onChange={(e) => setEditForm({ ...editForm, drop_time: e.target.value })} /></div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={() => setEditRun(null)}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy} onClick={saveEdit}>{busy ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </Modal>
     </div>
   );
 }
