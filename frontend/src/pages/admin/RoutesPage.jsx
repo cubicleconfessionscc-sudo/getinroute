@@ -3,7 +3,7 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { Modal, Badge, useToast } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
-import MapPicker from '../../components/MapPicker';
+import GoogleMapPicker from '../../components/GoogleMapPicker';
 import GoogleRouteMap from '../../components/GoogleRouteMap';
 import { calculateRoute } from '../../lib/geo';
 import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2, Wand2, Play, CalendarClock } from 'lucide-react';
@@ -508,7 +508,7 @@ export default function RoutesPage() {
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Type the address and pick from the dropdown, tap anywhere on the map, drag the pin, or use your current location.</p>
         <AddressPicker onChange={(item) => applyAddress(mapFor, item)} />
         <div style={{ marginTop: 12 }}>
-          <MapPicker
+          <GoogleMapPicker
             lat={(mapCenterFor(mapFor) || {}).lat ?? null}
             lng={(mapCenterFor(mapFor) || {}).lng ?? null}
             height={300}
