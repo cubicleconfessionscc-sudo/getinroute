@@ -4956,7 +4956,7 @@ function expDrivers(scope) {
 function expVehicles(scope) {
   let where = '1=1';
   if (scope.kind === 'vendor') where = `v.vendor_id = ${Number(scope.vendorId) || -1}`;
-  else if (scope.kind === 'company') where = `v.id IN (${scope.vehList || '0'})`;
+  else if (scope.kind === 'company') where = `(v.id IN (${scope.vehList || '0'}) OR v.driver_id IN (SELECT id FROM users WHERE role='driver' AND company_id = ${Number(scope.cid)}))`;
   const rows = db.prepare(`
     SELECT v.vehicle_name AS "Vehicle number", v.plate AS "Plate", v.type AS "Type", v.capacity AS "Capacity",
       v.status AS "Status", COALESCE(u.name,'') AS "Assigned driver", COALESCE(r.name,'') AS "Assigned route",
@@ -5078,8 +5078,9 @@ app.post('/api/v3/ai/transport-manager', auth, role('admin', 'vendor'), h(async 
   else if (/\bemployee|user|people|staff/.test(q)) out = expEmployees(scope, { date });
   else out = expEmployees(scope, { date });
 
-  const firstSheet = Object.values(out.sheets)[0] || [];
-  const count = Array.isArray(firstSheet) ? firstSheet.length : 0;
+  const sheetNames = Object.keys(out.sheets);
+  const firstSheet = out.sheets[sheetNames[0]] || [];
+  const count = Object.values(out.sheets).reduce((a, rows) => a + (Array.isArray(rows) ? rows.length : 0), 0);
   if (!count) {
     return res.json({ answer: `I couldn't find any matching records to export for ${/tomorrow/.test(q) ? 'tomorrow' : 'today'}. Try a different day or type.` });
   }
@@ -5088,7 +5089,7 @@ app.post('/api/v3/ai/transport-manager', auth, role('admin', 'vendor'), h(async 
   else buf = xlsxBuffer(out.sheets);
   const token = aiExportPut({ buf, filename, userId: req.user.id, role: req.user.role, companyId: scope.kind === 'company' ? scope.cid : (scope.kind === 'vendor' ? scope.vendorId : null) });
   try { console.log('[ai-export]', { user: req.user.id, role: req.user.role, type: filename, count, at: new Date().toISOString() }); } catch {}
-  res.json({ answer: `Done. I exported ${count} record(s).`, download: { url: `/api/v3/ai/export/${token}`, filename } });
+  res.json({ answer: `Done. I exported ${count} record(s)${sheetNames.length > 1 ? ` across ${sheetNames.length} sheets` : ''}.`, download: { url: `/api/v3/ai/export/${token}`, filename } });
 }));
 
 app.get('/api/v3/ai/export/:token', auth, (req, res) => {
