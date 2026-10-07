@@ -6,7 +6,7 @@ import { useSocketEvent } from '../../socket';
 import { api } from '../../api';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import { useNoindex } from '../../components/Noindex';
-import ThemeButton from '../../components/ThemeButton';
+import ThemePicker from '../../components/ThemePicker';
 import {
   LayoutDashboard, MapPinned, Route as RouteIcon, Truck, Users, ClipboardCheck,
   CalendarClock, FileSpreadsheet, Bell, LogOut, Menu, X, MessageCircle, MessageSquare, History,
@@ -182,6 +182,10 @@ export default function AdminLayout() {
           </React.Fragment>
         ))}
         <div className="sidebar-foot">
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', padding: '6px 8px 4px' }}>Theme</div>
+          <div style={{ padding: '0 6px 10px' }}>
+            <ThemePicker storageKey={isVendor ? 'getinroute-theme-vendor' : 'getinroute-theme-admin'} />
+          </div>
           <button className="nav-item" style={{ width: '100%', border: 'none', background: 'none' }} onClick={logout}>
             <LogOut size={18} /> Sign out
           </button>
@@ -192,7 +196,6 @@ export default function AdminLayout() {
         <div className="topbar">
           <button className="menu-btn" onClick={() => setOpen(true)}><Menu size={18} /></button>
           <div className="spacer" />
-          <ThemeButton compact />
           {!isVendor && (
             <div className="bell-wrap">
               <button className="btn btn-ghost btn-icon" onClick={() => nav('/admin/notifications')}><Bell size={19} /></button>

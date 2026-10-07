@@ -809,6 +809,17 @@ a.pub-card:hover, .pub-card.pub-access:hover { transform: translateY(-3px); box-
 :root[data-theme="light"] .swipe-hint { color: var(--muted); }
 :root[data-theme="light"] .empty { color: var(--muted); }
 
+/* ===== Professional theme palettes (per-portal, chosen in Settings) ===== */
+:root[data-theme="navy"] { --primary:#0ea5e9; --primary-2:#0284c7; --accent:#22d3ee; --violet:#818cf8; --violet-2:#6366f1; --grad:linear-gradient(135deg,#0ea5e9,#0284c7); --grad-violet:linear-gradient(135deg,#6366f1,#818cf8); --shadow-glow:0 0 40px -12px rgba(14,165,233,.45); }
+:root[data-theme="emerald"] { --primary:#10b981; --primary-2:#059669; --accent:#34d399; --violet:#2dd4bf; --violet-2:#14b8a6; --grad:linear-gradient(135deg,#10b981,#059669); --grad-violet:linear-gradient(135deg,#14b8a6,#2dd4bf); --shadow-glow:0 0 40px -12px rgba(16,185,129,.45); }
+:root[data-theme="indigo"] { --primary:#6366f1; --primary-2:#4f46e5; --accent:#818cf8; --violet:#a78bfa; --violet-2:#8b5cf6; --grad:linear-gradient(135deg,#6366f1,#4f46e5); --grad-violet:linear-gradient(135deg,#8b5cf6,#a78bfa); --shadow-glow:0 0 40px -12px rgba(99,102,241,.45); }
+:root[data-theme="graphite"] { --primary:#64748b; --primary-2:#475569; --accent:#94a3b8; --violet:#94a3b8; --violet-2:#64748b; --grad:linear-gradient(135deg,#64748b,#475569); --grad-violet:linear-gradient(135deg,#475569,#94a3b8); --shadow-glow:0 0 40px -12px rgba(100,116,139,.4); }
+
+.theme-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 6px; }
+.theme-opt { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer; }
+.theme-opt.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.theme-sw { width: 16px; height: 16px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
 /* =====================================================================
    EMPLOYEE PORTAL — scoped premium light theme (does not affect admin/vendor)
    Royal blue primary, deep navy ink, light-blue accent, near-white surfaces.

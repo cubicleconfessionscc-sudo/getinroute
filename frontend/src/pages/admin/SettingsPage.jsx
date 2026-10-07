@@ -5,7 +5,8 @@ import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
 import MapPicker from '../../components/MapPicker';
 import AddressPicker from '../../components/AddressPicker';
-import { Plus, Pencil, MapPin, Building2, Clock, Bus, Shield, Bell, MapPinned, X, Lock, Key, Copy, Smartphone, AlertTriangle, MessageCircle, ShieldAlert, HelpCircle, Trash2, Search } from 'lucide-react';
+import { Plus, Pencil, MapPin, Building2, Clock, Bus, Shield, Bell, MapPinned, X, Lock, Key, Copy, Smartphone, AlertTriangle, MessageCircle, ShieldAlert, HelpCircle, Trash2, Search, Palette } from 'lucide-react';
+import ThemePicker from '../../components/ThemePicker';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -19,6 +20,22 @@ export default function SettingsPage() {
   const [npEdit, setNpEdit] = useState(null);
   const [npForm, setNpForm] = useState({ label: '', address: '', lat: 12.9716, lng: 77.5946, type: 'office', radiusMeters: 1000 });
   const [pwdForm, setPwdForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [inviteDraft, setInviteDraft] = useState('');
+  useEffect(() => {
+    setInviteDraft((s && s.account && s.account.inviteCode) || user?.invite_code || '');
+  }, [s, user]);
+
+  const saveInviteCode = async () => {
+    const code = String(inviteDraft || '').trim().toUpperCase();
+    if (code.length < 4) return toast('Invite code must be at least 4 characters.', 'err');
+    setSaving(true);
+    try {
+      const data = await api.patch('/api/admin/settings', { inviteCode: code });
+      setS((prev) => ({ ...prev, ...data }));
+      toast('✓ Invite code updated successfully', 'ok');
+    } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+    finally { setSaving(false); }
+  };
 
   const DEFAULT_S = {
     company: { name: '', contactPhone: '', supportEmail: '', domain: '', inviteCode: '' },
@@ -137,10 +154,18 @@ export default function SettingsPage() {
         </Field>
         <Field label="Invite code">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input value={s.account?.inviteCode || user?.invite_code || ''} readOnly style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.06em' }} />
+            <input value={inviteDraft} onChange={(e) => setInviteDraft(e.target.value.toUpperCase())} placeholder="e.g. ACME-4F7K" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.06em' }} />
+            <button className="btn btn-sm btn-primary" disabled={saving || !inviteDraft.trim() || inviteDraft.trim() === (s.account?.inviteCode || '')} onClick={saveInviteCode}><Key size={14} /> Save</button>
             <button className="btn btn-sm btn-outline" onClick={copyInviteCode}><Copy size={14} /> Copy</button>
           </div>
-          <span className="hint">Auto-generated once per company and permanently tied to this account. Share it with your fleet team.</span>
+          <span className="hint">Editable. Share this code with employees/drivers so their registration links to your company.</span>
+        </Field>
+      </Section>
+
+      <Section icon={<Palette size={16} />} title="Appearance">
+        <Field label="Admin portal theme">
+          <ThemePicker storageKey="getinroute-theme-admin" />
+          <span className="hint">Applies to the Admin portal only — the Vendor portal keeps its own theme. Saved on this device.</span>
         </Field>
       </Section>
 

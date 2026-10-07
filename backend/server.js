@@ -1660,7 +1660,19 @@ app.patch('/api/admin/settings', auth, role('admin'), (req, res) => {
   if (patch.contactPhone !== undefined) merged.company.contactPhone = patch.contactPhone;
   if (patch.supportEmail !== undefined) merged.company.supportEmail = patch.supportEmail;
   if (patch.companyDomain !== undefined) merged.company.domain = String(patch.companyDomain).trim().toLowerCase();
-  if (patch.inviteCode !== undefined) merged.company.inviteCode = String(patch.inviteCode).trim();
+  let inviteCodeOut = null;
+  if (patch.inviteCode !== undefined) {
+    const code = String(patch.inviteCode).trim().toUpperCase();
+    if (code && code.length < 4) return res.status(400).json({ error: 'Invite code must be at least 4 characters.' });
+    if (code) {
+      const clash = db.prepare("SELECT id FROM users WHERE upper(invite_code) = upper(?) AND id != ?").get(code, req.user.id);
+      if (clash) return res.status(400).json({ error: 'That invite code is already in use. Please choose another.' });
+      // The registration lookup reads users.invite_code, so persist it there too.
+      db.prepare('UPDATE users SET invite_code = ? WHERE id = ?').run(code, req.user.id);
+    }
+    merged.company.inviteCode = code;
+    inviteCodeOut = code;
+  }
   if (!Object.keys(merged.company).length) delete merged.company;
   if (patch.loginTimes !== undefined) merged.loginTimes = Array.isArray(patch.loginTimes) ? patch.loginTimes : [];
   if (patch.logoutTimes !== undefined) merged.logoutTimes = Array.isArray(patch.logoutTimes) ? patch.logoutTimes : [];
@@ -1672,6 +1684,8 @@ app.patch('/api/admin/settings', auth, role('admin'), (req, res) => {
   const nps = db.prepare('SELECT * FROM nodal_points ORDER BY id').all();
   merged.company = merged.company || {};
   merged.company.nodalPoints = nps.map((n) => ({ _id: n.id, label: n.label, address: n.address, lat: n.lat, lng: n.lng, type: n.type, radiusMeters: n.radius_meters }));
+  const currentIc = (db.prepare('SELECT invite_code FROM users WHERE id = ?').get(req.user.id) || {}).invite_code || null;
+  merged.account = { inviteCode: inviteCodeOut || currentIc };
   res.json(merged);
 });
 
