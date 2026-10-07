@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { View, Text } from "react-native";
 import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider } from "./src/context/AuthContext";
 import ErrorBoundary from "./src/components/ErrorBoundary";
 import StartupGate from "./src/components/StartupGate";
@@ -64,10 +65,13 @@ function FallbackView({ error } = {}) {
 
 export default function App() {
   try {
+    // SafeAreaProvider at the root makes every navigation header and screen
+    // respect the Android status bar / notch / cutout, so titles never overlap
+    // the system status area.
     if (VARIANT === "school") {
-      return <SchoolAppRoot />;
+      return <SafeAreaProvider><SchoolAppRoot /></SafeAreaProvider>;
     }
-    return <CompanyApp />;
+    return <SafeAreaProvider><CompanyApp /></SafeAreaProvider>;
   } catch (e) {
     console.error("FATAL: App render failed", e); try{ console.error("FATAL_STACK", e && e.stack); }catch{};
     return <FallbackView error={e} />;

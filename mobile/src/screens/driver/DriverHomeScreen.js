@@ -507,6 +507,7 @@ export default function DriverHomeScreen({ navigation }) {
           >
             {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
             <TouchableOpacity onPress={() => navigation.navigate("Settings")}><Text style={styles.link}>Settings</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate("DriverAssignment")}><Text style={styles.link}>Change Assignment</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
             <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
           </ScrollView>
@@ -547,6 +548,7 @@ export default function DriverHomeScreen({ navigation }) {
           {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
           {activeId ? <TouchableOpacity onPress={() => navigation.navigate("Chat", { tripId: activeId })}><Text style={styles.link}>Chat</Text></TouchableOpacity> : null}
           <TouchableOpacity onPress={() => navigation.navigate("Settings")}><Text style={styles.link}>Settings</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate("DriverAssignment")}><Text style={styles.link}>Change Assignment</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
           <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
         </ScrollView>

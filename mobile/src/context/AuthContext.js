@@ -61,6 +61,7 @@ export function AuthProvider({ children }) {
   }
 
   async function logout() {
+    try { await authApi.logout(); } catch { /* best-effort server session invalidation */ }
     await clearToken();
     disconnectSocket();
     setUser(null);

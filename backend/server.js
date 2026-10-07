@@ -387,8 +387,10 @@ function linkDriver(vehicleId, driverId, vendorId) {
 function unlinkDrivers(vehicleId) {
   db.prepare("UPDATE users SET vehicle_id=NULL WHERE role='driver' AND vehicle_id=?").run(vehicleId);
 }
-function sign(user) {
-  return jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+function sign(user, sid) {
+  const payload = { id: user.id, role: user.role };
+  if (sid) payload.sid = sid;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
 function auth(req, res, next) {
   const hh = req.headers.authorization || '';
@@ -403,6 +405,12 @@ function auth(req, res, next) {
       return res.status(401).json({ error: 'Session expired, please login again' });
     }
     if (user.status !== 'active') return res.status(403).json({ error: 'Account is deactivated' });
+    // Single active session for employees: a login on another device rotates the
+    // stored session id, so any older token is rejected here. Legacy tokens with
+    // no `sid` still work while active_sid is unset (no forced logouts on upgrade).
+    if (user.role === 'employee' && user.active_sid && payload.sid !== user.active_sid) {
+      return res.status(401).json({ error: 'This account is already signed in on another device.', code: 'SESSION_REPLACED' });
+    }
     req.user = user;
     req.tokenPayload = payload;
     next();
@@ -744,7 +752,22 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
     db.prepare("UPDATE users SET last_login = datetime('now','localtime'), login_count = login_count + 1 WHERE id = ?").run(user.id);
   }
   authLog('login ok', { id: user.id, role: user.role, vertical: user.vertical, school_id: user.school_id || null, company_id: user.company_id || null, emp_id: user.emp_id, domain: emailDomain(user.email) });
-  res.json({ token: sign(user), user: publicUser(user) });
+  // Single active session for employees: rotate the session id so a prior device
+  // holding an older token can no longer authenticate.
+  let sid = null;
+  if (user.role === 'employee') {
+    sid = require('crypto').randomBytes(16).toString('hex');
+    db.prepare('UPDATE users SET active_sid = ? WHERE id = ?').run(sid, user.id);
+  }
+  res.json({ token: sign(user, sid), user: publicUser(user) });
+});
+
+app.post('/api/auth/logout', auth, (req, res) => {
+  // Invalidate the employee's active session so the next login starts clean.
+  if (req.user.role === 'employee' && req.user.active_sid) {
+    db.prepare('UPDATE users SET active_sid = NULL WHERE id = ? AND active_sid = ?').run(req.user.id, req.user.active_sid);
+  }
+  res.json({ ok: true });
 });
 
 app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => {
@@ -4855,6 +4878,8 @@ try { db.exec(`ALTER TABLE users ADD COLUMN location_profile TEXT;`); } catch (e
 // they just created, even before any schedule references it. Existing rows stay
 // NULL (owner/global) and remain reachable via the schedule-derived route list.
 try { db.exec(`ALTER TABLE routes ADD COLUMN company_id INTEGER;`); } catch (e) {}
+// Single active session for employees (see auth middleware + /api/auth/login).
+try { db.exec(`ALTER TABLE users ADD COLUMN active_sid TEXT;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};

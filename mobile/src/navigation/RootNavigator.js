@@ -23,6 +23,7 @@ import EmployeeScheduleScreen from "../screens/employee/EmployeeScheduleScreen";
 import EmployeeLocationsScreen from "../screens/employee/EmployeeLocationsScreen";
 import EmployeeProfileScreen from "../screens/employee/EmployeeProfileScreen";
 import DriverHomeScreen from "../screens/driver/DriverHomeScreen";
+import DriverAssignmentScreen from "../screens/driver/DriverAssignmentScreen";
 import ChatScreen from "../screens/shared/ChatScreen";
 import FeedbackScreen from "../screens/shared/FeedbackScreen";
 import HelpScreen from "../screens/shared/HelpScreen";
@@ -105,7 +106,8 @@ function EmployeeStack() {
 
 function DriverStack() {
   return (
-    <Stack.Navigator screenOptions={screenOptions}>
+    <Stack.Navigator screenOptions={screenOptions} initialRouteName="DriverAssignment">
+      <Stack.Screen name="DriverAssignment" component={DriverAssignmentScreen} options={{ headerShown: false }} />
       <Stack.Screen name="DriverHome" component={DriverHomeScreen} options={homeOptions("GetInRoute Driver")} />
       <Stack.Screen name="Chat" component={ChatScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Chat" })} />
       <Stack.Screen name="Feedback" component={FeedbackScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Feedback" })} />

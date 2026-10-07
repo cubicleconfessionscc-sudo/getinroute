@@ -63,6 +63,11 @@ client.interceptors.response.use(
     return res;
   },
   async (err) => {
+    // Single-device policy: another device took over this account. Drop the
+    // stored token so the app returns to the login screen on the next launch.
+    if (err.response && err.response.status === 401 && err.response.data && err.response.data.code === 'SESSION_REPLACED') {
+      try { await clearToken(); } catch {}
+    }
     if (err.response) return Promise.reject(err); // server answered: surface the real error
     const fallback = await handleOffline(err, err.config);
     if (fallback) {

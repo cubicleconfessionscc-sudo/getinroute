@@ -22,3 +22,8 @@ export function login(email, password) {
 export function me() {
   return client.get("/auth/me").then((r) => r.data);
 }
+
+// Invalidates the server-side active session (single-device login for employees).
+export function logout() {
+  return client.post("/auth/logout").then((r) => r.data);
+}
