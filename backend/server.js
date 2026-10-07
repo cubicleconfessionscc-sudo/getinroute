@@ -4871,6 +4871,233 @@ app.get('/api/admin/export/employees-all', auth, role('admin'), (req, res) => {
     rows.map((r) => [r.name, r.emp_id, r.email, r.phone, r.department, r.designation, r.approved ? 'Active' : 'Suspended', String(r.approved), r.created_at]));
 });
 
+/* ---------------- AI TRANSPORT MANAGER (questions + data exports) ----------------
+   Answers operational questions and, when the manager asks to EXPORT, generates a
+   real downloadable XLSX/CSV from the database. Everything is server-side and
+   strictly scoped to the authenticated user's role + company (never a
+   client-supplied company id). Only a whitelist of export types exists. */
+const aiExportStore = new Map();
+function aiExportPut(entry) {
+  const token = require('crypto').randomBytes(18).toString('hex');
+  for (const [k, v] of aiExportStore) if (v.exp < Date.now()) aiExportStore.delete(k);
+  aiExportStore.set(token, { ...entry, exp: Date.now() + 15 * 60 * 1000 });
+  return token;
+}
+function xlsxBuffer(sheets) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.utils.book_new();
+  for (const [name, rows] of Object.entries(sheets)) {
+    const ws = XLSX.utils.json_to_sheet(rows && rows.length ? rows : [{ Info: 'No records' }]);
+    XLSX.utils.book_append_sheet(wb, ws, String(name).slice(0, 31));
+  }
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+function csvBuffer(rows) {
+  const arr = rows && rows.length ? rows : [{ Info: 'No records' }];
+  const headers = Object.keys(arr[0]);
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  return '\uFEFF' + [headers.join(','), ...arr.map((r) => headers.map((h) => esc(r[h])).join(','))].join('\n');
+}
+function aiScope(req) {
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    const mine = db.prepare("SELECT id FROM users WHERE role='employee' AND vendor_id=?").all(req.user.vendor_id).map((r) => Number(r.id));
+    const zones = JSON.parse((db.prepare('SELECT assigned_locations FROM vendors WHERE id=?').get(req.user.id) || {}).assigned_locations || '[]');
+    const extra = zones.length ? db.prepare("SELECT id, home_address FROM users WHERE role='employee'").all()
+      .filter((u) => zones.some((z) => String(u.home_address || '').toLowerCase().includes(String(z).toLowerCase()))).map((u) => Number(u.id)) : [];
+    return { kind: 'vendor', ids: [...new Set([...mine, ...extra])], vendorId: req.user.vendor_id, routeIds: (ctx.routeIds || []).map(Number) };
+  }
+  const sc = companyAdminScope(req);
+  if (sc.isOwner) return { kind: 'owner' };
+  return { kind: 'company', ids: sc.ids() || [], cid: sc.cid };
+}
+function empIdList(scope) {
+  if (scope.kind === 'owner') return null; // all
+  return scope.ids || [];
+}
+function istDateOnly(offsetDays = 0) {
+  const d = new Date(Date.now() + 5.5 * 3600 * 1000);
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+// --- export builders (each returns { filename, sheets }) ---
+function expEmployees(scope, { date } = {}) {
+  const ids = empIdList(scope);
+  const where = ids === null ? "u.role='employee'" : (ids.length ? `u.role='employee' AND u.id IN (${ids.join(',')})` : "u.role='employee' AND 1=0");
+  const d = date || istDateOnly(0);
+  const rows = db.prepare(`
+    SELECT u.emp_id AS "Employee ID", u.name AS "Name", u.department AS "Department",
+      COALESCE(c.name, c.department, '') AS "Company", u.email AS "Email", u.phone AS "Phone",
+      u.status AS "Status", u.home_address AS "Address",
+      COALESCE(s.status, 'Not booked') AS "Booking status", s.date AS "Schedule date",
+      s.login_time AS "Login time", s.logout_time AS "Logout time", r.name AS "Route",
+      COALESCE(s.pickup_point, u.home_address) AS "Pickup location", '' AS "Drop location"
+    FROM users u
+    LEFT JOIN users c ON c.id = u.company_id
+    LEFT JOIN schedules s ON s.employee_id = u.id AND s.date = ?
+    LEFT JOIN routes r ON r.id = s.route_id
+    WHERE ${where} ORDER BY u.name`).all(d);
+  return { filename: `GetInRoute_Employees_${d}.xlsx`, sheets: { Employees: rows } };
+}
+function expDrivers(scope) {
+  const vid = scope.kind === 'vendor' ? scope.vendorId : null;
+  const where = vid ? 'u.role=\'driver\' AND u.vendor_id=?' : "u.role='driver'";
+  const rows = db.prepare(`
+    SELECT u.emp_id AS "Driver ID", u.name AS "Name", u.phone AS "Phone", u.status AS "Status",
+      COALESCE(v.vehicle_name,'') AS "Assigned vehicle", v.plate AS "Plate",
+      COALESCE(v.line,'') AS "Line", COALESCE(v.stand,'') AS "Stand",
+      COALESCE(v.trip,'') AS "Assigned trip", v.status AS "Assignment status"
+    FROM users u LEFT JOIN vehicles v ON v.id=u.vehicle_id
+    WHERE ${where} ORDER BY u.name`).all(...(vid ? [vid] : []));
+  return { filename: `GetInRoute_Drivers_${istDateOnly(0)}.xlsx`, sheets: { Drivers: rows } };
+}
+function expVehicles(scope) {
+  const vid = scope.kind === 'vendor' ? scope.vendorId : null;
+  const where = vid ? 'v.vendor_id=?' : '1=1';
+  const rows = db.prepare(`
+    SELECT v.vehicle_name AS "Vehicle number", v.plate AS "Plate", v.type AS "Type", v.capacity AS "Capacity",
+      v.status AS "Status", COALESCE(u.name,'') AS "Assigned driver", COALESCE(r.name,'') AS "Assigned route",
+      v.line AS "Line", v.trip AS "Trip", v.stand AS "Stand"
+    FROM vehicles v LEFT JOIN users u ON u.vehicle_id=v.id AND u.role='driver' LEFT JOIN routes r ON r.id=v.route_id
+    WHERE ${where} ORDER BY v.line, v.trip`).all(...(vid ? [vid] : []));
+  return { filename: `GetInRoute_Vehicles_${istDateOnly(0)}.xlsx`, sheets: { Vehicles: rows } };
+}
+function expRoutes(scope) {
+  let where = '1=1';
+  if (scope.kind === 'company') {
+    const ids = scope.ids || [];
+    const rl = db.prepare('SELECT DISTINCT route_id AS rid FROM schedules WHERE route_id IS NOT NULL AND employee_id IN (' + (ids.length ? ids.join(',') : '0') + ')').all().map((x) => Number(x.rid)).join(',') || '0';
+    where = `(r.company_id = ${Number(scope.cid)} OR r.id IN (${rl}))`;
+  } else if (scope.kind === 'vendor') {
+    where = scope.routeIds.length ? `r.id IN (${scope.routeIds.join(',')})` : '1=0';
+  }
+  const rows = db.prepare(`
+    SELECT r.name AS "Route name", COALESCE(c.name,c.department,'') AS "Company",
+      r.start_point AS "Start point", r.end_point AS "End point", r.status AS "Route status",
+      (SELECT COUNT(*) FROM route_employees re WHERE re.route_id=r.id) AS "Employees"
+    FROM routes r LEFT JOIN users c ON c.id=r.company_id WHERE ${where} ORDER BY r.id DESC`).all();
+  return { filename: `GetInRoute_Routes_${istDateOnly(0)}.xlsx`, sheets: { Routes: rows } };
+}
+function expBookings(scope, { date, time } = {}) {
+  const ids = empIdList(scope);
+  const where = ids === null ? '1=1' : (ids.length ? `s.employee_id IN (${ids.join(',')})` : '1=0');
+  const d = date || istDateOnly(0);
+  const timeClause = time ? ` AND (s.login_time LIKE '${String(time).slice(0,2)}:%' OR s.pickup_time LIKE '${String(time).slice(0,2)}:%' OR s.logout_time LIKE '${String(time).slice(0,2)}:%' OR s.drop_time LIKE '${String(time).slice(0,2)}:%')` : '';
+  const rows = db.prepare(`
+    SELECT s.date AS "Date", u.emp_id AS "Employee ID", u.name AS "Employee", u.department AS "Department",
+      COALESCE(r.name,'') AS "Route", s.status AS "Status", s.direction AS "Direction",
+      s.login_time AS "Login time", s.logout_time AS "Logout time", s.pickup_time AS "Pickup time",
+      s.drop_time AS "Drop time", COALESCE(s.pickup_point,'') AS "Pickup location"
+    FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN routes r ON r.id=s.route_id
+    WHERE s.date = ? AND ${where}${timeClause} ORDER BY u.name`).all(d);
+  return { filename: `GetInRoute_Bookings_${d}.xlsx`, sheets: { Bookings: rows } };
+}
+function expTrips(scope, { date } = {}) {
+  const ids = empIdList(scope);
+  const where = ids === null ? '1=1' : (ids.length ? `s.employee_id IN (${ids.join(',')})` : '1=0');
+  const d = date || istDateOnly(0);
+  const rows = db.prepare(`
+    SELECT s.date AS "Date", COALESCE(v.vehicle_name,'') AS "Vehicle", COALESCE(v.plate,'') AS "Plate",
+      COALESCE(v.driver_name,'') AS "Driver", COALESCE(r.name,'') AS "Route", COALESCE(v.line,'') AS "Line",
+      COALESCE(v.stand,'') AS "Stand", s.direction AS "Direction", s.status AS "Status",
+      COUNT(*) AS "Employees"
+    FROM schedules s LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id
+    WHERE s.date = ? AND ${where}
+    GROUP BY s.vehicle_id, s.date, s.direction, s.status ORDER BY s.vehicle_id`).all(d);
+  return { filename: `GetInRoute_Trips_${d}.xlsx`, sheets: { Trips: rows } };
+}
+function expRoutingReport(scope) {
+  const r = expRoutes(scope);
+  const t = expTrips(scope, { date: istDateOnly(0) });
+  const e = expEmployees(scope, { date: istDateOnly(0) });
+  const d = expDrivers(scope);
+  const v = expVehicles(scope);
+  const b = expBookings(scope, { date: istDateOnly(0) });
+  return { filename: `GetInRoute_Routing_Report_${istDateOnly(0)}.xlsx`, sheets: { Routes: r.sheets.Routes, Trips: t.sheets.Trips, Bookings: b.sheets.Bookings, Employees: e.sheets.Employees, Drivers: d.sheets.Drivers, Vehicles: v.sheets.Vehicles } };
+}
+function expOperational(scope) {
+  const e = expEmployees(scope, {}); const d = expDrivers(scope); const v = expVehicles(scope);
+  const r = expRoutes(scope); const t = expTrips(scope, {}); const b = expBookings(scope, {});
+  return { filename: `GetInRoute_Operational_Export_${istDateOnly(0)}.xlsx`, sheets: { Employees: e.sheets.Employees, Drivers: d.sheets.Drivers, Vehicles: v.sheets.Vehicles, Routes: r.sheets.Routes, Trips: t.sheets.Trips, Bookings: b.sheets.Bookings } };
+}
+
+app.post('/api/v3/ai/transport-manager', auth, role('admin', 'vendor'), h(async (req, res) => {
+  const question = String((req.body || {}).question || '').trim();
+  if (!question) return res.status(400).json({ error: 'Question required' });
+  const q = question.toLowerCase();
+  const scope = aiScope(req);
+  const fmt = q.includes('csv') ? 'csv' : 'xlsx';
+  const wantsExport = /\b(export|download|generate|give me .*(file|excel|csv|sheet|report)|send me|create .*(file|excel|csv))\b/.test(q);
+  const wantAll = /everything|all the data|complete operational|entire database|everything you have/.test(q);
+
+  // --- pure questions (no export) ---
+  if (!wantsExport) {
+    const empCount = (() => {
+      const ids = empIdList(scope);
+      const where = ids === null ? '' : (ids.length ? ` AND s.employee_id IN (${ids.join(',')})` : ' AND 1=0');
+      const d = /tomorrow/.test(q) ? istDateOnly(1) : istDateOnly(0);
+      return db.prepare(`SELECT COUNT(DISTINCT s.employee_id) AS c FROM schedules s WHERE s.date = ?${where}`).get(d).c;
+    })();
+    const activeDrivers = (() => {
+      const vid = scope.kind === 'vendor' ? ' AND vendor_id=' + (Number(scope.vendorId) || -1) : '';
+      return db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role='driver' AND status='active'${vid}`).get().c;
+    })();
+    const activeRoutes = (() => {
+      if (scope.kind === 'owner') return db.prepare("SELECT COUNT(*) AS c FROM routes WHERE status='active'").get().c;
+      if (scope.kind === 'vendor') return scope.routeIds.length;
+      return db.prepare(`SELECT COUNT(*) AS c FROM routes WHERE status='active' AND company_id = ?`).get(scope.cid).c;
+    })();
+    let answer;
+    if (/how many.*(employee|people|staff).*(book|schedul)/.test(q)) answer = `${empCount} employee(s) are booked for ${/tomorrow/.test(q) ? 'tomorrow' : 'today'}.`;
+    else if (/how many.*driver/.test(q)) answer = `You have ${activeDrivers} active driver(s).`;
+    else if (/how many.*route/.test(q)) answer = `You have ${activeRoutes} active route(s).`;
+    else answer = `Here's a quick summary: ${empCount} employee(s) booked ${/tomorrow/.test(q) ? 'tomorrow' : 'today'}, ${activeDrivers} active driver(s), ${activeRoutes} active route(s). Ask me to "export" any of these for a file.`;
+    return res.json({ answer });
+  }
+
+  // --- export ---
+  if (wantAll && !/complete operational|all the data|everything/.test(q)) {
+    return res.json({ answer: 'I can export: Employees, Drivers, Vehicles, Routes, Trips, Schedules/Bookings, and a complete Routing Report. Would you like the complete operational export?' });
+  }
+  const date = /tomorrow/.test(q) ? istDateOnly(1) : istDateOnly(0);
+  const m = q.match(/(\d{1,2})\s*(am|pm)/);
+  const time = m ? String((Number(m[1]) % 12) + (m[2] === 'pm' ? 12 : 0)).padStart(2, '0') : null;
+
+  let out;
+  if (/routing report|route and trip|all routing|routing data|complete routing/.test(q)) out = expRoutingReport(scope);
+  else if (/complete operational|all the data|everything|operational export/.test(q)) out = expOperational(scope);
+  else if (/\bdriver/.test(q)) out = expDrivers(scope);
+  else if (/\bvehicle|fleet/.test(q)) out = expVehicles(scope);
+  else if (/\broute/.test(q)) out = expRoutes(scope);
+  else if (/\btrip|cab run|run/.test(q)) out = expTrips(scope, { date });
+  else if (/\bbooking|schedul/.test(q)) out = expBookings(scope, { date, time });
+  else if (/\bemployee|user|people|staff/.test(q)) out = expEmployees(scope, { date });
+  else out = expEmployees(scope, { date });
+
+  const firstSheet = Object.values(out.sheets)[0] || [];
+  const count = Array.isArray(firstSheet) ? firstSheet.length : 0;
+  if (!count) {
+    return res.json({ answer: `I couldn't find any matching records to export for ${/tomorrow/.test(q) ? 'tomorrow' : 'today'}. Try a different day or type.` });
+  }
+  let buf, filename = out.filename;
+  if (fmt === 'csv') { buf = Buffer.from(csvBuffer(firstSheet), 'utf8'); filename = filename.replace(/\.xlsx$/, '.csv'); }
+  else buf = xlsxBuffer(out.sheets);
+  const token = aiExportPut({ buf, filename, userId: req.user.id, role: req.user.role, companyId: scope.kind === 'company' ? scope.cid : (scope.kind === 'vendor' ? scope.vendorId : null) });
+  try { console.log('[ai-export]', { user: req.user.id, role: req.user.role, type: filename, count, at: new Date().toISOString() }); } catch {}
+  res.json({ answer: `Done. I exported ${count} record(s).`, download: { url: `/api/v3/ai/export/${token}`, filename } });
+}));
+
+app.get('/api/v3/ai/export/:token', auth, (req, res) => {
+  const e = aiExportStore.get(req.params.token);
+  if (!e || e.exp < Date.now()) return res.status(404).json({ error: 'Export link expired or not found' });
+  // Only the user who generated it may download it.
+  if (e.userId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${e.filename}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(e.buf);
+});
+
 /* ---------------- MOBILE APP ENDPOINTS ---------------- */
 
 try { db.exec(`ALTER TABLE users ADD COLUMN location_profile TEXT;`); } catch (e) {}

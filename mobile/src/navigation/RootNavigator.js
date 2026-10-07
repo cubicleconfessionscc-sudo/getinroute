@@ -4,6 +4,7 @@ import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { colors, spacing } from "../theme";
+import { withScreenHeader } from "../components/ScreenHeader";
 
 import UnsupportedRoleScreen from "../screens/shared/UnsupportedRoleScreen";
 import LoginScreen from "../screens/auth/LoginScreen";
@@ -90,33 +91,35 @@ function AuthStack() {
   );
 }
 
+// All pushed screens use the custom SafeAreaView header (headerShown:false) so
+// the title/back button always sits below the Android status bar.
 function EmployeeStack() {
   return (
-    <Stack.Navigator screenOptions={screenOptions}>
-      <Stack.Screen name="EmployeeHome" component={EmployeeHomeScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="EmployeeSchedule" component={EmployeeScheduleScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Book cab" })} />
-      <Stack.Screen name="EmployeeHistory" component={EmployeeHistoryScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Trip history" })} />
-      <Stack.Screen name="EmployeeLocations" component={EmployeeLocationsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "My Address" })} />
-      <Stack.Screen name="EmployeeProfile" component={EmployeeProfileScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Profile" })} />
-      <Stack.Screen name="Chat" component={ChatScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Chat" })} />
-      <Stack.Screen name="Feedback" component={FeedbackScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Feedback" })} />
-      <Stack.Screen name="Help" component={HelpScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Help" })} />
-      <Stack.Screen name="Settings" component={SettingsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Settings" })} />
-      <Stack.Screen name="PendingSync" component={PendingSyncScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Pending Sync" })} />
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="EmployeeHome" component={withScreenHeader(EmployeeHomeScreen, null, { back: false })} />
+      <Stack.Screen name="EmployeeSchedule" component={withScreenHeader(EmployeeScheduleScreen, "Book cab")} />
+      <Stack.Screen name="EmployeeHistory" component={withScreenHeader(EmployeeHistoryScreen, "Trip history")} />
+      <Stack.Screen name="EmployeeLocations" component={withScreenHeader(EmployeeLocationsScreen, "My Address")} />
+      <Stack.Screen name="EmployeeProfile" component={withScreenHeader(EmployeeProfileScreen, "Profile")} />
+      <Stack.Screen name="Chat" component={withScreenHeader(ChatScreen, "Chat")} />
+      <Stack.Screen name="Feedback" component={withScreenHeader(FeedbackScreen, "Feedback")} />
+      <Stack.Screen name="Help" component={withScreenHeader(HelpScreen, "Help")} />
+      <Stack.Screen name="Settings" component={withScreenHeader(SettingsScreen, "Settings")} />
+      <Stack.Screen name="PendingSync" component={withScreenHeader(PendingSyncScreen, "Pending Sync")} />
     </Stack.Navigator>
   );
 }
 
 function DriverStack() {
   return (
-    <Stack.Navigator screenOptions={screenOptions} initialRouteName="DriverAssignment">
-      <Stack.Screen name="DriverAssignment" component={DriverAssignmentScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="DriverHome" component={DriverHomeScreen} options={homeOptions("GetInRoute Driver")} />
-      <Stack.Screen name="Chat" component={ChatScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Chat" })} />
-      <Stack.Screen name="Feedback" component={FeedbackScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Feedback" })} />
-      <Stack.Screen name="Help" component={HelpScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Help" })} />
-      <Stack.Screen name="Settings" component={SettingsScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Settings" })} />
-      <Stack.Screen name="PendingSync" component={PendingSyncScreen} options={({ navigation }) => ({ ...backOptions(navigation), title: "Pending Sync" })} />
+    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="DriverAssignment">
+      <Stack.Screen name="DriverAssignment" component={DriverAssignmentScreen} />
+      <Stack.Screen name="DriverHome" component={withScreenHeader(DriverHomeScreen, null, { back: false })} />
+      <Stack.Screen name="Chat" component={withScreenHeader(ChatScreen, "Chat")} />
+      <Stack.Screen name="Feedback" component={withScreenHeader(FeedbackScreen, "Feedback")} />
+      <Stack.Screen name="Help" component={withScreenHeader(HelpScreen, "Help")} />
+      <Stack.Screen name="Settings" component={withScreenHeader(SettingsScreen, "Settings")} />
+      <Stack.Screen name="PendingSync" component={withScreenHeader(PendingSyncScreen, "Pending Sync")} />
     </Stack.Navigator>
   );
 }

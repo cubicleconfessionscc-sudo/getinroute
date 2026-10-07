@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { api } from '../../api';
+import { api, getToken } from '../../api';
 import { useToast } from '../../components/ui';
 import { MessageSquare, Send, Brain } from 'lucide-react';
 
@@ -23,6 +23,19 @@ export default function AITransportManager() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
+  const downloadFile = async (dl) => {
+    try {
+      const res = await fetch(dl.url, { headers: { Authorization: `Bearer ${getToken()}` } });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = dl.filename || 'GetInRoute_export.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { toast(e.message || 'Download failed', 'err'); }
+  };
+
   const send = async () => {
     const q = input.trim();
     if (!q || loading) return;
@@ -32,7 +45,7 @@ export default function AITransportManager() {
     try {
       const r = await api.post('/api/v3/ai/transport-manager', { question: q });
       const answer = formatAnswer(r && r.answer);
-      setMessages((prev) => [...prev, { role: 'assistant', text: answer }]);
+      setMessages((prev) => [...prev, { role: 'assistant', text: answer, download: (r && r.download) || null }]);
     } catch (e) {
       setMessages((prev) => [...prev, { role: 'assistant', text: "Sorry, I couldn't reach the intelligence service. Please try again in a moment." }]);
       toast(e.message, 'err');
@@ -52,7 +65,16 @@ export default function AITransportManager() {
       <div ref={scrollRef} className="ai-messages">
         {messages.map((m, i) => (
           <div key={i} className={`ai-row ${m.role}`}>
-            <div className="ai-bubble">{m.text}</div>
+            <div className="ai-bubble">
+              {m.text}
+              {m.download && (
+                <div style={{ marginTop: 10 }}>
+                  <button className="btn btn-primary btn-sm" onClick={() => downloadFile(m.download)}>
+                    ⬇ {m.download.filename}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         ))}
         {loading && (
