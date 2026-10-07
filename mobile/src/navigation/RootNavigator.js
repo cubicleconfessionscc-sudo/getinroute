@@ -1,5 +1,5 @@
 import React from "react";
-import { TouchableOpacity, Text, View, StyleSheet, ActivityIndicator } from "react-native";
+import { TouchableOpacity, Text, View, StyleSheet, ActivityIndicator, StatusBar, Platform } from "react-native";
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
@@ -40,7 +40,10 @@ const navTheme = {
 const screenOptions = {
   headerStyle: { backgroundColor: colors.panel },
   headerTintColor: colors.text,
-  headerShadowVisible: false
+  headerShadowVisible: false,
+  // Push every header below the Android status bar so the title/back button can
+  // never overlap the system status area (edge-to-edge builds report 0 inset).
+  headerStatusBarHeight: Platform.OS === "android" ? (StatusBar.currentHeight || 24) : undefined
 };
 
 // Explicit, always-visible back button for pushed screens, so the user can
