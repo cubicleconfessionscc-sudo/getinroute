@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS routes (
   speed_limit REAL DEFAULT 40,
   stops TEXT NOT NULL,
   status TEXT DEFAULT 'active',
+  company_id INTEGER,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 

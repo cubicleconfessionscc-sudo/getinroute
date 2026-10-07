@@ -495,7 +495,11 @@ function canAccessAdminObject(req, kind, id) {
   const sc = companyAdminScope(req);
   if (sc.isOwner) return true;
   if (kind === 'vehicle') return String(sc.vehList()).split(',').includes(String(id));
-  if (kind === 'route') return String(sc.routeList()).split(',').includes(String(id));
+  if (kind === 'route') {
+    if (String(sc.routeList()).split(',').includes(String(id))) return true;
+    const rr = db.prepare('SELECT company_id FROM routes WHERE id = ?').get(id);
+    return !!(rr && rr.company_id != null && Number(rr.company_id) === sc.cid);
+  }
   return false;
 }
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -1116,9 +1120,12 @@ app.get('/api/admin/routes', auth, role('admin', 'vendor'), (req, res) => {
     return res.json(routes.map((r) => ({ ...r, stops: JSON.parse(r.stops || '[]') })));
   }
   const sc = companyAdminScope(req);
+  // A company admin must see routes they created even before any schedule
+  // references them, so include routes owned by this company (company_id) in
+  // addition to the schedule-derived list.
   const routes = sc.isOwner
     ? db.prepare('SELECT * FROM routes ORDER BY id DESC').all()
-    : db.prepare(`SELECT * FROM routes WHERE id IN (${sc.routeList()}) ORDER BY id DESC`).all();
+    : db.prepare(`SELECT * FROM routes WHERE company_id = ? OR id IN (${sc.routeList()}) ORDER BY id DESC`).all(sc.cid);
   const roster = db.prepare(`
     SELECT re.route_id, u.id AS employee_id, u.name, u.emp_id, u.home_address, u.home_lat, u.home_lng
     FROM route_employees re JOIN users u ON u.id = re.employee_id
@@ -1159,11 +1166,20 @@ app.delete('/api/admin/routes/:id/employees/:employeeId', auth, role('admin'), (
 });
 app.post('/api/admin/routes', auth, role('admin'), (req, res) => {
   const { name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng } = req.body || {};
-  if (!name || !Array.isArray(stops) || stops.length < 2) return res.status(400).json({ error: 'Route needs a name and at least 2 stops' });
-  const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(name, start_point || stops[0].name, end_point || stops[stops.length - 1].name, Number(speed_limit) || 40, JSON.stringify(stops),
-      start_lat == null ? stops[0].lat ?? null : Number(start_lat), start_lng == null ? stops[0].lng ?? null : Number(start_lng),
-      end_lat == null ? stops[stops.length - 1].lat ?? null : Number(end_lat), end_lng == null ? stops[stops.length - 1].lng ?? null : Number(end_lng));
+  // A route is a reusable definition: start + end + at least ONE employee/stop.
+  // One employee is a valid route (previously a "< 2 stops" rule wrongly blocked it).
+  const stopList = Array.isArray(stops) ? stops.filter((s) => s && (s.name || s.lat != null)) : [];
+  if (!name) return res.status(400).json({ error: 'Please enter a route name.' });
+  if (!stopList.length) return res.status(400).json({ error: 'Please select at least one employee or stop.' });
+  // Attach the owning company so a non-owner company admin can see it immediately.
+  const sc = companyAdminScope(req);
+  const companyId = sc.isOwner ? null : sc.cid;
+  const first = stopList[0] || {};
+  const last = stopList[stopList.length - 1] || {};
+  const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, company_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(name, start_point || first.name || null, end_point || last.name || null, Number(speed_limit) || 40, JSON.stringify(stopList),
+      start_lat == null ? first.lat ?? null : Number(start_lat), start_lng == null ? first.lng ?? null : Number(start_lng),
+      end_lat == null ? last.lat ?? null : Number(end_lat), end_lng == null ? last.lng ?? null : Number(end_lng), companyId);
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 app.put('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
@@ -4820,6 +4836,10 @@ app.get('/api/admin/export/employees-all', auth, role('admin'), (req, res) => {
 /* ---------------- MOBILE APP ENDPOINTS ---------------- */
 
 try { db.exec(`ALTER TABLE users ADD COLUMN location_profile TEXT;`); } catch (e) {}
+// Routes carry the owning company so a non-owner company admin can see a route
+// they just created, even before any schedule references it. Existing rows stay
+// NULL (owner/global) and remain reachable via the schedule-derived route list.
+try { db.exec(`ALTER TABLE routes ADD COLUMN company_id INTEGER;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};

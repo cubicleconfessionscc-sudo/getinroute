@@ -80,13 +80,18 @@ export default function RoutesPage() {
   };
 
   const save = async () => {
-    if (!form.name || form.stops.length < 2) return toast('Route needs a name and at least 2 stops', 'err');
-    const stops = form.stops.map((s, i) => ({ ...s, sequence: i + 1 }));
+    if (!form.name || !form.name.trim()) return toast('Please enter a route name.', 'err');
+    if (!form.start_point) return toast('Please select a start point.', 'err');
+    if (!form.end_point) return toast('Please select an end point.', 'err');
+    const stops = form.stops
+      .filter((s) => s && (s.name || s.lat != null))
+      .map((s, i) => ({ ...s, sequence: i + 1 }));
+    if (!stops.length) return toast('Please select at least one employee.', 'err');
     const payload = { ...form, stops };
     try {
       if (editing) await api.put(`/api/admin/routes/${editing}`, payload);
       else await api.post('/api/admin/routes', payload);
-      toast(editing ? 'Route updated' : 'Route created');
+      toast(`✓ ${editing ? 'Route updated' : 'Route created'} successfully — "${form.name}" (${stops.length} stop${stops.length === 1 ? '' : 's'}).`);
       setModal(false); load();
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -177,6 +182,9 @@ export default function RoutesPage() {
   };
 
   const coords = form.stops.filter((s) => s && s.lat != null && s.lng != null && !isNaN(Number(s.lat)));
+  // Only offer to calculate once there is enough real data: a start, an end and
+  // at least one employee/stop with a location.
+  const canCalculate = form.start_lat != null && form.start_lng != null && form.end_lat != null && form.end_lng != null && coords.length >= 1;
 
   const calcDirections = async () => {
     if (coords.length < 2) return toast('Add coordinates for the start and end of the route first (search the start and end points, then add stops).', 'err');
@@ -341,7 +349,7 @@ export default function RoutesPage() {
                 <MapPinned size={15} color="#22c55e" />
               </button>
             </div>
-            {form.start_lat != null && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>📍 {Number(form.start_lat).toFixed(5)}, {Number(form.start_lng).toFixed(5)}</div>}
+            {form.start_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
           </div>
           <div className="field">
             <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#ef4444" />End point (search & pick exact location)</label>
@@ -356,7 +364,8 @@ export default function RoutesPage() {
                 <MapPinned size={15} color="#ef4444" />
               </button>
             </div>
-            {form.end_lat != null && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>📍 {Number(form.end_lat).toFixed(5)}, {Number(form.end_lng).toFixed(5)}</div>}
+            {form.end_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
+            <button type="button" className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => setForm((f) => ({ ...f, end_point: f.start_point, end_lat: f.start_lat, end_lng: f.start_lng }))}>Same as Start Point</button>
           </div>
         </div>
 
@@ -379,11 +388,9 @@ export default function RoutesPage() {
               <MapPinned size={15} color="#f59e0b" />
             </button>
             <div className="stop-coords">
-              <input type="number" placeholder="Lat" value={s.lat} onChange={(e) => { const stops = [...form.stops]; stops[i].lat = Number(e.target.value); setForm({ ...form, stops }); }} />
-              <input type="number" placeholder="Lng" value={s.lng} onChange={(e) => { const stops = [...form.stops]; stops[i].lng = Number(e.target.value); setForm({ ...form, stops }); }} />
               <button className="btn btn-sm btn-ghost" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
               <button className="btn btn-sm btn-ghost" disabled={i === form.stops.length - 1} onClick={() => move(i, 1)}>↓</button>
-              {form.stops.length > 2 && <button className="btn btn-sm btn-danger" onClick={() => setForm({ ...form, stops: form.stops.filter((_, j) => j !== i) })}><Trash2 size={13} /></button>}
+              {form.stops.length > 1 && <button className="btn btn-sm btn-danger" onClick={() => setForm({ ...form, stops: form.stops.filter((_, j) => j !== i) })}><Trash2 size={13} /></button>}
             </div>
           </div>
         ))}
@@ -398,14 +405,17 @@ export default function RoutesPage() {
           </select>
         </div>
 
-        <div style={{ margin: '14px 0 8px', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn btn-outline" disabled={dirLoading || coords.length < 2} onClick={calcDirections}>
-            {dirLoading ? <Loader2 size={15} style={{ animation: 'spin .8s linear infinite' }} /> : <Navigation size={15} />} {dirLoading ? 'Calculating…' : 'Calculate driving route'}
+        <div style={{ margin: '14px 0 8px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-outline" disabled={dirLoading || !canCalculate} onClick={calcDirections}>
+            {dirLoading ? <Loader2 size={15} style={{ animation: 'spin .8s linear infinite' }} /> : <Navigation size={15} />} {dirLoading ? 'Calculating route… please wait.' : 'Calculate route'}
           </button>
           {dir && dir.status === 'OK' && (
-            <span className="badge badge-green">Route found — {dir.distText} · {dir.timeText}</span>
+            <span className="badge badge-green">✓ Route calculated — {dir.distText} · {dir.timeText}</span>
           )}
-          {coords.length < 2 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Add coordinates to at least 2 stops, or start & end points, to calculate directions.</span>}
+          {!canCalculate && !dirLoading && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Select your start point, destination and employees to preview the route.</span>}
+          {dir && dir.status === 'ERROR' && (
+            <button className="btn btn-sm btn-outline" onClick={calcDirections}>Try Again</button>
+          )}
         </div>
 
         {dir && dir.status === 'ERROR' && (
