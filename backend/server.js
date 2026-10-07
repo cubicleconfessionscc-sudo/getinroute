@@ -2484,13 +2484,20 @@ app.post('/api/schedules', auth, h(async (req, res) => {
     let skipped = [];
     for (const dt of dates) {
       const t = timeForDay(dt);
-      const dup = db.prepare("SELECT id FROM schedules WHERE employee_id=? AND date=? AND status IN ('confirmed','in_progress','requested')").get(empId, dt);
+      // A Login and a Logout booking are DIFFERENT trips on the same day, so the
+      // duplicate check must be per direction — otherwise a login booking would
+      // wrongly block a logout booking (and vice-versa).
+      const dup = db.prepare("SELECT id FROM schedules WHERE employee_id=? AND date=? AND direction=? AND status IN ('confirmed','in_progress','requested')").get(empId, dt, direction);
       const login_time = direction === 'toOffice' ? t : null;
       const logout_time = direction === 'toHome' ? t : null;
       const pickup_time = direction === 'toOffice' ? t : null;
       const drop_time = direction === 'toHome' ? t : null;
       if (dup) {
-        skipped.push({ date: dt, reason: 'already-booked' });
+        skipped.push({ date: dt, type: direction, reason: 'already-booked' });
+        continue;
+      }
+      if (!t) {
+        skipped.push({ date: dt, type: direction, reason: 'no-time' });
         continue;
       }
       // Night-time drop is always door-to-door after settings.nightDropAfter.

@@ -252,8 +252,16 @@ export default function EmployeeScheduleScreen({ navigation, route }) {
         if (r.pendingApproval) anyPending = true;
         if (r.skipped && r.skipped.length) skipped.push(...r.skipped);
       });
+      const fmtSkips = (arr) => arr.map((s) => {
+        if (s == null) return "not created";
+        if (typeof s === "string") return s;
+        const d = s.date ? new Date(String(s.date) + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+        const type = s.type === "toHome" ? "logout" : "login";
+        const why = s.reason === "already-booked" ? "already booked" : s.reason === "no-time" ? "no time available" : (s.reason || "not created");
+        return `${d} ${type}: ${why}`.trim();
+      }).join("; ");
       if (lines.length) {
-        Alert.alert(anyPending ? "Requests sent for approval" : "Schedule created", lines.join("\n") + (skipped.length ? `\n\nSkipped: ${skipped.join(", ")}` : "") + (anyPending ? "\n\nThe transport admin will confirm your cab shortly. You'll get a notification once it's approved." : ""));
+        Alert.alert(anyPending ? "Requests sent for approval" : "Schedule created", lines.join("\n") + (skipped.length ? `\n\nSkipped: ${fmtSkips(skipped)}` : "") + (anyPending ? "\n\nThe transport admin will confirm your cab shortly. You'll get a notification once it's approved." : ""));
         // Voice + local notification at the moment the booking is made (item 1).
         if (anyPending) {
           speakTripBooked();
@@ -262,7 +270,7 @@ export default function EmployeeScheduleScreen({ navigation, route }) {
           speakTripScheduled();
         }
       } else {
-        Alert.alert("No new bookings", skipped.length ? `Skipped: ${skipped.join(", ")}` : "You already have these bookings.");
+        Alert.alert("No new bookings", skipped.length ? `Skipped: ${fmtSkips(skipped)}` : "You already have these bookings.");
       }
       clearDates();
       await load();
