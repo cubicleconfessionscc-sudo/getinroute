@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
   Alert, Modal, TextInput, Switch, FlatList
 } from "react-native";
-import { getScheduleConfig, getMySchedules, createSchedule, cancelSchedule, getMyAllotments } from "../../api/schedules";
+import { getScheduleConfig, getMySchedules, createSchedule, cancelSchedule, updateSchedule, getMyAllotments } from "../../api/schedules";
 import { getMyCompany } from "../../api/company";
 import { getLocationProfile } from "../../api/locations";
 import { speakTripScheduled, speakTripBooked } from "../../services/voice";
@@ -45,7 +45,11 @@ const DIR_LABEL = { toOffice: "Login", toHome: "Logout" };
 const dirLabel = (dir) => DIR_LABEL[dir] || "Login";
 const PICKUP_POINT = "Primary Pickup/Drop Point";
 
-export default function EmployeeScheduleScreen({ navigation }) {
+export default function EmployeeScheduleScreen({ navigation, route }) {
+  // When opened from a schedule's "Edit" action, operate in EDIT mode on that
+  // exact schedule id (never create a new one).
+  const editSchedule = route?.params?.editSchedule || null;
+  const editing = !!editSchedule;
   const [config, setConfig] = useState(null);
   const [company, setCompany] = useState(null);
   const [mine, setMine] = useState([]);
@@ -99,6 +103,19 @@ export default function EmployeeScheduleScreen({ navigation }) {
   useEffect(() => {
     load().catch((e) => Alert.alert("Error", e.response?.data?.message || e.message));
   }, [load]);
+
+  // Prefill the form from the schedule being edited.
+  useEffect(() => {
+    if (!editSchedule) return;
+    const date = String(editSchedule.date || editSchedule.startDate || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setDateMode("days");
+      setSelectedDates([new Date(date + "T00:00:00")]);
+    }
+    const dir = editSchedule.direction === "toHome" ? "toHome" : "toOffice";
+    setLoginOn(dir === "toOffice");
+    setLogoutOn(dir === "toHome");
+  }, [editSchedule]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -164,6 +181,22 @@ export default function EmployeeScheduleScreen({ navigation }) {
 
   async function submit() {
     if (!canBook) return openGate();
+    // EDIT mode: update the existing schedule in place (no duplicate created).
+    if (editing) {
+      if (!loginOn && !logoutOn) return Alert.alert("Nothing selected", "Select Login (go to work) or Logout (return home).");
+      const date = effectiveDates.length ? fmtDate(effectiveDates[0]) : String(editSchedule.date || "").slice(0, 10);
+      const payload = { date };
+      if (loginOn) { payload.direction = "toOffice"; payload.login_time = loginSlot?.time || null; payload.pickup_time = loginSlot?.time || null; }
+      else { payload.direction = "toHome"; payload.logout_time = logoutSlot?.time || null; payload.drop_time = logoutSlot?.time || null; }
+      setSubmitting(true);
+      try {
+        await updateSchedule(editSchedule.id || editSchedule._id, payload);
+        Alert.alert("Schedule updated", "Your changes were saved.");
+        navigation.goBack();
+      } catch (e) { Alert.alert("Update failed", e.response?.data?.message || e.message); }
+      finally { setSubmitting(false); }
+      return;
+    }
     if (!loginOn && !logoutOn) {
       Alert.alert("Nothing selected", "Select Login (go to work) and/or Logout (return home).");
       return;
@@ -314,7 +347,7 @@ export default function EmployeeScheduleScreen({ navigation }) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
     >
       <View style={styles.banner}>
-        <Text style={styles.bannerTitle}>Create Schedule</Text>
+        <Text style={styles.bannerTitle}>{editing ? "Edit Schedule" : "Create Schedule"}</Text>
         <Text style={styles.bannerBody}>
           Tell us when you're coming to the office and heading back.{"\n"}
           {config ? (
@@ -460,7 +493,7 @@ export default function EmployeeScheduleScreen({ navigation }) {
       </View>
 
       <TouchableOpacity style={[styles.submit, (submitting || !canBook) && styles.submitLocked]} onPress={submit} disabled={submitting || !canBook}>
-        <Text style={styles.submitText}>{!canBook ? "Address approval required" : submitting ? "Creating…" : "Create Schedule"}</Text>
+        <Text style={styles.submitText}>{!canBook ? "Address approval required" : submitting ? "Saving…" : editing ? "Save Changes" : "Create Schedule"}</Text>
       </TouchableOpacity>
 
       <View style={styles.section}>

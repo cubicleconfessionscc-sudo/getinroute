@@ -2132,7 +2132,7 @@ app.get('/api/schedules/mine', auth, role('employee', 'admin'), (req, res) => {
     SELECT s.*, v.vehicle_name, v.plate, v.type, v.driver_name, v.driver_phone, v.lat, v.lng, v.speed, v.live_status,
       r.name AS route_name, r.stops, r.speed_limit
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
-    WHERE s.employee_id = ? ORDER BY s.date DESC, s.id DESC LIMIT 20
+    WHERE s.employee_id = ? AND s.archived_at IS NULL ORDER BY s.date DESC, s.id DESC LIMIT 20
   `).all(req.user.id);
   res.json(rows.map((r) => {
     const stops = parseStops(r);
@@ -2170,7 +2170,7 @@ app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), (req,
     SELECT s.*, v.vehicle_name, v.plate, v.type, v.capacity, v.line, v.driver_name, v.driver_phone, v.lat, v.lng, v.speed, v.live_status, v.current_stop,
       r.name AS route_name, r.stops, r.speed_limit
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
-    WHERE s.employee_id = ? AND s.date >= ? AND s.status IN ('confirmed','in_progress')
+    WHERE s.employee_id = ? AND s.date >= ? AND s.status IN ('confirmed','in_progress') AND s.archived_at IS NULL
     ORDER BY s.date ASC, s.id DESC LIMIT 5`).all(req.user.id, dateOnly());
   res.json(rows.map((row) => {
     const base = allotmentShape(row, {
@@ -2226,7 +2226,7 @@ app.get('/api/schedules/allotments', auth, role('employee', 'admin'), (req, res)
     SELECT s.*, v.vehicle_name, v.plate, v.type, v.capacity, v.line, v.driver_name, v.driver_phone, v.lat, v.lng, v.live_status,
       r.name AS route_name, r.stops, r.speed_limit
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
-    WHERE s.employee_id = ? ORDER BY s.date DESC, s.id DESC LIMIT 10
+    WHERE s.employee_id = ? AND s.archived_at IS NULL ORDER BY s.date DESC, s.id DESC LIMIT 10
   `).all(req.user.id);
   res.json(rows.map((r) => allotmentShape(r, { legacyId: true })));
 });
@@ -2408,7 +2408,7 @@ app.get('/api/trips/history', auth, role('employee', 'admin'), (req, res) => {
   const rows = db.prepare(`
     SELECT s.*, v.vehicle_name, v.plate, v.driver_name, r.name AS route_name, r.stops
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
-    WHERE s.employee_id = ? ORDER BY s.date DESC, s.id DESC LIMIT 50
+    WHERE s.employee_id = ? AND s.archived_at IS NULL ORDER BY s.date DESC, s.id DESC LIMIT 50
   `).all(req.user.id);
   const result = rows.map((r) => {
     const ci = db.prepare("SELECT * FROM checkins WHERE schedule_id = ? AND type = 'checkin'").get(r.id);
@@ -2527,6 +2527,31 @@ app.delete('/api/schedules/:id', auth, (req, res) => {
   if (req.user.role === 'employee' && s.employee_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   const out = archiveRecords({ table: 'schedules', ids: [s.id], actorId: req.user.id, actorRole: req.user.role, reason: 'employee_cancel', companyId: req.user.company_id });
   res.json({ ok: out.ok, archived: out.changed > 0 });
+});
+
+// Employee (or admin/vendor within scope) edits an EXISTING schedule in place.
+// Never creates a new row — the same schedule id is updated.
+app.put('/api/schedules/:id', auth, (req, res) => {
+  const s = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Schedule not found' });
+  if (req.user.role === 'employee' && Number(s.employee_id) !== Number(req.user.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    const owns = db.prepare('SELECT id FROM users WHERE id=? AND role=\'employee\'').get(s.employee_id);
+    if (owns && !vendorOwnsUser(owns, ctx)) return res.status(403).json({ error: 'Access denied' });
+  }
+  const b = req.body || {};
+  const date = b.date !== undefined ? String(b.date).slice(0, 10) : s.date;
+  const login_time = b.login_time !== undefined ? b.login_time : s.login_time;
+  const logout_time = b.logout_time !== undefined ? b.logout_time : s.logout_time;
+  const pickup_time = b.pickup_time !== undefined ? b.pickup_time : s.pickup_time;
+  const drop_time = b.drop_time !== undefined ? b.drop_time : s.drop_time;
+  const direction = b.direction || s.direction;
+  db.prepare('UPDATE schedules SET date=?, login_time=?, logout_time=?, pickup_time=?, drop_time=?, direction=? WHERE id=?')
+    .run(date, login_time, logout_time, pickup_time, drop_time, direction, s.id);
+  res.json({ ok: true, id: s.id });
 });
 
 app.post('/api/admin/schedules', auth, role('admin', 'vendor'), h(async (req, res) => {
@@ -5219,7 +5244,7 @@ app.get('/api/trips/mine', auth, role('employee', 'admin'), (req, res) => {
     SELECT s.*, v.vehicle_name, v.plate, v.driver_name, v.driver_phone, v.lat AS v_lat, v.lng AS v_lng, v.live_status,
       r.name AS route_name, r.stops
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
-    WHERE s.employee_id = ? ORDER BY s.date DESC, s.id DESC LIMIT 30`).all(req.user.id);
+    WHERE s.employee_id = ? AND s.archived_at IS NULL ORDER BY s.date DESC, s.id DESC LIMIT 30`).all(req.user.id);
   res.json(rows.map((r) => {
     const ci = db.prepare("SELECT time FROM checkins WHERE schedule_id=? AND type='checkin'").get(r.id);
     const co = db.prepare("SELECT time FROM checkins WHERE schedule_id=? AND type='checkout'").get(r.id);

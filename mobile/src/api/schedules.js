@@ -18,6 +18,11 @@ export function cancelSchedule(id) {
   return client.delete(`/schedules/${id}`).then((r) => r.data);
 }
 
+// Edit an existing schedule in place (never creates a duplicate).
+export function updateSchedule(id, payload) {
+  return client.put(`/schedules/${id}`, payload).then((r) => r.data);
+}
+
 // Which cab got allotted to me (vehicle, driver, drop position)
 export function getMyAllotments() {
   return client.get("/schedules/allotments").then((r) => r.data);

@@ -5,6 +5,7 @@ import { getMyTrips, checkIn, checkOut } from "../../api/trips";
 import {
   getMyLiveAllotment,
   getMySchedules,
+  cancelSchedule,
   allotmentCheckIn,
   allotmentCheckOut,
   confirmReachedHome,
@@ -184,6 +185,20 @@ export default function EmployeeHomeScreen({ navigation }) {
     try { await allotmentCheckOut(allotment._id); load(); }
     catch (e) { Alert.alert("Check-out not allowed", e.response?.data?.message || e.message); load(); }
   }
+  function doCancelSchedule(s) {
+    Alert.alert("Cancel this schedule?", "This schedule will no longer be active.", [
+      { text: "Keep", style: "cancel" },
+      {
+        text: "Cancel Schedule",
+        style: "destructive",
+        onPress: async () => {
+          try { await cancelSchedule(s.id || s._id); await load(); Alert.alert("Schedule cancelled successfully."); }
+          catch (e) { Alert.alert("Couldn't cancel", e.response?.data?.message || e.message); }
+        }
+      }
+    ]);
+  }
+
   async function doSafeDrop() {
     if (!allotment) return;
     try { await confirmReachedHome(allotment.scheduleId); load(); }
@@ -289,11 +304,11 @@ export default function EmployeeHomeScreen({ navigation }) {
               <Text style={styles.routeText}>{nextSchedule.direction === "toHome" ? "Home" : "Office"}</Text>
             </View>
             <View style={styles.tripActions}>
-              <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={() => navigation.navigate("EmployeeSchedule")}>
-                <Text style={styles.smallBtnPrimaryText}>View details</Text>
+              <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={() => navigation.navigate("EmployeeSchedule", { editSchedule: nextSchedule })}>
+                <Text style={styles.smallBtnPrimaryText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.smallBtn} onPress={() => navigation.navigate("EmployeeSchedule")}>
-                <Text style={styles.smallBtnText}>Edit / Cancel</Text>
+              <TouchableOpacity style={styles.smallBtn} onPress={() => doCancelSchedule(nextSchedule)}>
+                <Text style={[styles.smallBtnText, { color: colors.coral }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
