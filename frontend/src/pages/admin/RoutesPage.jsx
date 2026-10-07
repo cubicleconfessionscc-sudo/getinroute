@@ -32,11 +32,58 @@ export default function RoutesPage() {
   const [autoRun, setAutoRun] = useState(null);
   const [genDate, setGenDate] = useState('');
   const [genBusy, setGenBusy] = useState(false);
+  // Explicit "Create Trip" (operational run) — separate from route creation.
+  const [vehicles, setVehicles] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [tripFor, setTripFor] = useState(null);
+  const [tripForm, setTripForm] = useState({ date: '', vehicle_id: '', driver_id: '', pickup_time: '08:00', drop_time: '18:00' });
+  const [tripBusy, setTripBusy] = useState(false);
 
+  const asArr = (r) => (Array.isArray(r) ? r : (r && Array.isArray(r.value) ? r.value : []));
   const load = () => {
-    api.get('/api/admin/routes').then((r) => setRoutes(Array.isArray(r) ? r : [])).catch(() => {});
-    api.get('/api/admin/users?role=employee').then((rows) => setEmployees(Array.isArray(rows) ? rows : [])).catch(() => {});
+    api.get('/api/admin/routes').then((r) => setRoutes(asArr(r))).catch(() => {});
+    api.get('/api/admin/users?role=employee').then((rows) => setEmployees(asArr(rows))).catch(() => {});
     api.get('/api/v3/routes/auto-run').then((s) => setAutoRun(s || null)).catch(() => setAutoRun(null));
+    api.get('/api/admin/vehicles').then((r) => setVehicles(asArr(r))).catch(() => {});
+    api.get('/api/admin/drivers/all').then((r) => setDrivers(asArr(r))).catch(() => {});
+  };
+
+  const openTrip = (r) => {
+    setTripFor(r);
+    setTripForm({ date: new Date().toISOString().slice(0, 10), vehicle_id: '', driver_id: '', pickup_time: '08:00', drop_time: '18:00' });
+  };
+
+  // Creates the operational trip/run for a route's employees on a date. This is
+  // the ONLY place a trip is created from a route — never during route creation.
+  const createTrip = async () => {
+    if (!tripFor) return;
+    if (!tripForm.date) return toast('Please select a date.', 'err');
+    const emps = (tripFor.employees || []).map((e) => Number(e.employee_id ?? e.id)).filter(Boolean);
+    if (!emps.length) return toast('This route has no employees yet — assign employees first.', 'err');
+    setTripBusy(true);
+    let created = 0;
+    try {
+      for (const eid of emps) {
+        try {
+          await api.post('/api/admin/schedules', {
+            employee_id: eid,
+            route_id: tripFor.id,
+            vehicle_id: tripForm.vehicle_id ? Number(tripForm.vehicle_id) : undefined,
+            driver_id: tripForm.driver_id ? Number(tripForm.driver_id) : undefined,
+            date: tripForm.date,
+            pickup_time: tripForm.pickup_time || undefined,
+            drop_time: tripForm.drop_time || undefined
+          });
+          created += 1;
+        } catch (e) {
+          toast(`${employees.find((x) => String(x.id) === String(eid))?.name || 'Employee'}: ${e.response?.data?.error || e.message}`, 'err');
+        }
+      }
+      toast(created
+        ? `✓ Trip created — ${created} stop${created === 1 ? '' : 's'} scheduled for ${tripForm.date}. It now appears in All Trips & Cab Runs.`
+        : 'No trips created.');
+      if (created) setTripFor(null);
+    } finally { setTripBusy(false); }
   };
   useEffect(() => { load(); }, []);
 
@@ -320,6 +367,7 @@ export default function RoutesPage() {
                     <div className="actions">
                       {!isVendor && <button className="btn btn-sm btn-outline" title="Auto-optimize pickup/drop sequence" onClick={() => optimizeRoute(r)}>{optId === r.id ? <Loader2 size={14} style={{ animation: 'spin .8s linear infinite' }} /> : <Wand2 size={14} />} Optimize</button>}
                       {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => openAssign(r)}><User size={14} /> Assign</button>}
+                      {!isVendor && <button className="btn btn-sm btn-primary" onClick={() => openTrip(r)} title="Create an operational trip/cab run from this route"><Play size={14} /> Create Trip</button>}
                       {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
                       {!isVendor && <button className="btn btn-sm btn-ghost" title="Delete route" onClick={() => delRoute(r)}><Trash2 size={14} color="#ef4444" /></button>}
                     </div>
@@ -500,6 +548,37 @@ export default function RoutesPage() {
           <button className="btn btn-ghost" onClick={() => setAssign(null)}>Cancel</button>
           <button className="btn btn-outline" disabled={assigning} onClick={saveAssign}><User size={15} /> Save roster</button>
           <button className="btn btn-primary" disabled={assigning || !pushDate} onClick={saveAssign}><RouteIcon size={15} /> Save & push schedules</button>
+        </div>
+      </Modal>
+
+      <Modal open={!!tripFor} onClose={() => setTripFor(null)} title={`Create Trip — ${tripFor?.name || ''}`} wide>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+          This is the operational step: it creates a trip/cab run for this route's employees on a chosen date.
+          The route itself is a reusable definition and is <b>not</b> changed — reuse it for other dates.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="field"><label>Date</label><input type="date" value={tripForm.date} onChange={(e) => setTripForm({ ...tripForm, date: e.target.value })} /></div>
+          <div className="field"><label>Vehicle</label>
+            <select value={tripForm.vehicle_id} onChange={(e) => setTripForm({ ...tripForm, vehicle_id: e.target.value })}>
+              <option value="">Auto-assign a free vehicle</option>
+              {vehicles.map((v) => (<option key={v.id} value={v.id}>{v.plate || v.vehicle_name || ('Vehicle ' + v.id)}{v.line ? ` · Line ${v.line}` : ''}</option>))}
+            </select>
+          </div>
+          <div className="field"><label>Driver (optional)</label>
+            <select value={tripForm.driver_id} onChange={(e) => setTripForm({ ...tripForm, driver_id: e.target.value })}>
+              <option value="">No specific driver</option>
+              {drivers.map((d) => (<option key={d.id} value={d.id}>{d.name}{d.emp_id ? ` · ${d.emp_id}` : ''}</option>))}
+            </select>
+          </div>
+          <div className="field"><label>Pickup time</label><input type="time" value={tripForm.pickup_time} onChange={(e) => setTripForm({ ...tripForm, pickup_time: e.target.value })} /></div>
+          <div className="field"><label>Drop time</label><input type="time" value={tripForm.drop_time} onChange={(e) => setTripForm({ ...tripForm, drop_time: e.target.value })} /></div>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 10 }}>
+          {(tripFor?.employees || []).length} employee(s) on this route will be scheduled. Trip appears in <b>All Trips &amp; Cab Runs</b> immediately.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={() => setTripFor(null)}>Cancel</button>
+          <button className="btn btn-primary" disabled={tripBusy || !tripForm.date} onClick={createTrip}><Play size={15} /> {tripBusy ? 'Creating…' : 'Create Trip'}</button>
         </div>
       </Modal>
     </div>
