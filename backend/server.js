@@ -5006,7 +5006,8 @@ function expTrips(scope, { date } = {}) {
       COUNT(*) AS "Employees"
     FROM schedules s LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id
     WHERE s.date = ? AND ${where}
-    GROUP BY s.vehicle_id, s.date, s.direction, s.status ORDER BY s.vehicle_id`).all(d);
+    GROUP BY s.date, v.vehicle_name, v.plate, v.driver_name, r.name, v.line, v.stand, s.direction, s.status
+    ORDER BY v.vehicle_name`).all(d);
   return { filename: `GetInRoute_Trips_${d}.xlsx`, sheets: { Trips: rows } };
 }
 function expRoutingReport(scope) {
