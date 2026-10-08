@@ -102,6 +102,22 @@ export function readCached(normalizedConfig) {
   return cacheGet(normalizedConfig);
 }
 
+// Remove ONLY the cached GET responses for specific URLs (e.g. trip history).
+// This never touches the auth token, the offline write queue, the user profile,
+// the approved address or any pending sync — only the local response cache.
+export async function clearCacheFor(urls) {
+  try {
+    const dirInfo = await FileSystem.getInfoAsync(CACHE_DIR);
+    if (!dirInfo.exists) return;
+    for (const u of (urls || [])) {
+      const key = String(u).replace(/[^A-Za-z0-9_-]/g, "_");
+      await FileSystem.deleteAsync(CACHE_DIR + key + ".json", { idempotent: true });
+    }
+  } catch (e) {
+    // Best-effort.
+  }
+}
+
 async function enqueue(req) {
   const q = await readQueue();
   q.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), method: req.method, url: req.url, data: req.data, ts: Date.now(), attempts: 0 });

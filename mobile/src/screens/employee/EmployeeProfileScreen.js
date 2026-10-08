@@ -1,8 +1,18 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Linking } from "react-native";
+import Constants from "expo-constants";
 import { useAuth } from "../../context/AuthContext";
 import { colors, spacing, radius, shadow } from "../../theme";
 import EmployeeBottomNav from "../../components/EmployeeBottomNav";
+
+// Real app version from the build (never a hardcoded/fake number).
+const APP_VERSION = (() => {
+  const cfg = Constants.expoConfig || {};
+  const ver = Constants.nativeAppVersion || cfg.version || "";
+  const build = Constants.nativeBuildVersion ||
+    (cfg.android && cfg.android.versionCode != null ? String(cfg.android.versionCode) : "");
+  return ver ? `GetInRoute · v${ver}${build ? ` (build ${build})` : ""}` : "GetInRoute";
+})();
 
 function Row({ icon, label, sub, onPress, danger }) {
   return (
@@ -55,13 +65,13 @@ export default function EmployeeProfileScreen({ navigation }) {
 
         <Text style={styles.groupTitle}>More</Text>
         <View style={styles.card}>
-          <Row icon="🔔" label="Notifications" onPress={() => navigation.navigate("Settings")} />
+          <Row icon="🔔" label="Notifications" onPress={() => navigation.navigate("Notifications")} />
           <Row icon="⚙️" label="Settings" onPress={() => navigation.navigate("Settings")} />
           <Row icon="📄" label="Terms of Usage" onPress={() => Linking.openURL("https://www.getinroute.in/terms").catch(() => {})} />
           <Row icon="🚪" label="Sign out" danger onPress={confirmLogout} />
         </View>
 
-        <Text style={styles.version}>GetInRoute · v1.0.0</Text>
+        <Text style={styles.version}>{APP_VERSION}</Text>
       </ScrollView>
 
       <EmployeeBottomNav navigation={navigation} active="profile" />

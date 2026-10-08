@@ -20,7 +20,7 @@ if (process.env.EAS_BUILD_PROFILE === 'production' && !KNOWN_VARIANTS.includes(V
 }
 const IS_SCHOOL = VARIANT === 'school';
 const IS_DRIVER = VARIANT === 'driver';
-const VERSION = '1.0.6';
+const VERSION = '1.1.7';
 
 // Google Maps is genuinely required on mobile: DriverHomeScreen and
 // EmployeeHomeScreen render react-native-maps, which uses the Google provider.
@@ -53,8 +53,8 @@ if (process.env.EAS_BUILD_PROFILE === 'production' && !GOOGLE_MAPS_API_KEY) {
 const identity = IS_SCHOOL
   ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 3, iosb: 1, bg: '#0F766E' }
   : IS_DRIVER
-    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 4, iosb: 1, bg: '#F4F6FA' }
-    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 26, iosb: 1, bg: '#F4F6FA' };
+    ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 15, iosb: 1, bg: '#F4F6FA' }
+    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 36, iosb: 1, bg: '#F4F6FA' };
 
 // Splash image support is opt-in: it activates only when an approved asset is
 // actually present, so nothing breaks today and no branding is invented. Drop a
