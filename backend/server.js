@@ -24,6 +24,11 @@ const HOST = process.env.HOST || '127.0.0.1';
 // random secret at boot so the public fallback constant can never be used to
 // forge tokens (this only logs everyone out until the variable is configured).
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+// Single-active-session for employees is OPT-IN. It is OFF by default so that a
+// demo or QA where the same account is used on more than one device is never
+// broken by a silent session takeover (which returned 401 SESSION_REPLACED).
+// Set EMPLOYEE_SINGLE_SESSION=1 to enforce one device per employee.
+const EMPLOYEE_SINGLE_SESSION = String(process.env.EMPLOYEE_SINGLE_SESSION || '0') === '1';
 const MAX_EMPLOYEES = 10000;
 const MAX_VEHICLES = 750;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -414,7 +419,7 @@ function auth(req, res, next) {
     // Single active session for employees: a login on another device rotates the
     // stored session id, so any older token is rejected here. Legacy tokens with
     // no `sid` still work while active_sid is unset (no forced logouts on upgrade).
-    if (user.role === 'employee' && user.active_sid && payload.sid !== user.active_sid) {
+    if (EMPLOYEE_SINGLE_SESSION && user.role === 'employee' && user.active_sid && payload.sid !== user.active_sid) {
       return res.status(401).json({ error: 'This account is already signed in on another device.', code: 'SESSION_REPLACED' });
     }
     req.user = user;
@@ -3340,7 +3345,7 @@ app.get('/api/chat/conversations', auth, (req, res) => {
         (SELECT message FROM chat_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id) ORDER BY id DESC LIMIT 1) AS last_message,
         (SELECT created_at FROM chat_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id) ORDER BY id DESC LIMIT 1) AS last_time,
         (SELECT COUNT(*) FROM chat_messages WHERE sender_id=u.id AND receiver_id=? AND read=0) AS unread
-      FROM users u WHERE u.role IN ('driver','employee') AND (u.role='employee' OR u.last_login IS NOT NULL) ORDER BY last_time IS NULL, last_time DESC`).all(me, me, me, me, me);
+      FROM users u WHERE u.role IN ('driver','employee') AND (u.role='employee' OR u.last_login IS NOT NULL) ORDER BY last_time DESC NULLS LAST`).all(me, me, me, me, me);
   } else {
     // Employee / driver: show the admin plus today's run counterpart(s) so
     // chat works both directions (driver <-> employee).
@@ -4088,7 +4093,7 @@ function markReconnecting(userId) {
     VALUES (?, 0, 1, datetime('now','localtime'), datetime('now','localtime'))
     ON CONFLICT(user_id) DO UPDATE SET
       connected = 0, reconnecting = 1,
-      reconnecting_since = COALESCE(reconnecting_since, datetime('now','localtime')),
+      reconnecting_since = COALESCE(driver_heartbeats.reconnecting_since, datetime('now','localtime')),
       disconnected_at = datetime('now','localtime'),
       updated_at = datetime('now','localtime')
   `).run(userId);
