@@ -5727,6 +5727,13 @@ app.post('/api/schedules/allotments/:id/checkin-otp', auth, role('driver'), (req
   verifyAllotmentAccess(req, res, (rows) => {
     const s = rows.find((r) => String(r.employee_id) === String(employeeId));
     if (!s) return res.status(404).json({ message: 'Employee not on this run' });
+    // Sequential boarding gate: a passenger whose pickup is still LOCKED (an
+    // earlier pending pickup has not been verified) cannot be checked in. This
+    // keeps boarding in order so the previous passenger's OTP is always the
+    // gate that unlocks the next one.
+    if (!canAccessPassengerLocation(req.user.id, s.id)) {
+      return res.status(403).json({ message: 'This passenger unlocks after the previous passenger is checked in.' });
+    }
     if (confirmedCheckinOf(s.id)) return res.status(400).json({ message: 'Already checked in' });
     const pending = pendingCheckinOf(s.id);
     if (!pending) return res.status(400).json({ message: 'No pending check-in. Ask the employee to swipe check-in first.' });
