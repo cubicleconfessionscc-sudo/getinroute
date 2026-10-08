@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Linking, TextInput, Modal, AppState } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
 import { getAssignedTrips } from "../../api/trips";
 import { getMyDriverAllotments, completeRun } from "../../api/schedules";
 import { requestCancelRun } from "../../api/driver";
 import { getStandingPoint, setStandingPoint } from "../../api/driver";
 import { connectSocket, joinTrip, leaveTrip, updateStopStatus, updateAllotmentStop } from "../../services/socket";
-import { startDriverTracking, stopDriverTracking } from "../../services/location";
+import { startDriverTracking, stopDriverTracking, getFreshPosition } from "../../services/location";
 import { useActiveScreenAwake } from "../../services/screenAwake";
 import { getSupportConfig } from "../../api/support";
 import { useAuth } from "../../context/AuthContext";
@@ -295,6 +294,36 @@ export default function DriverHomeScreen({ navigation }) {
     }
   }
 
+  // Driver marks the current passenger as a no-show. Captures the driver's fresh
+  // GPS for the audit and lets the run advance to the next passenger.
+  function confirmNoShow(stop) {
+    Alert.alert(
+      "Mark as no-show?",
+      `Mark ${stop.name || "this passenger"} as a no-show? The trip will move to the next passenger.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Confirm No-Show", style: "destructive", onPress: () => driverNoShow(stop) }
+      ]
+    );
+  }
+
+  async function driverNoShow(stop) {
+    if (!run) return;
+    try {
+      const pos = await getFreshPosition().catch(() => null);
+      await client.post(`/schedules/allotments/${run._id}/no-show`, {
+        employeeId: stop.employeeId,
+        lat: pos?.lat ?? null,
+        lng: pos?.lng ?? null
+      });
+      setOtpInputs((prev) => ({ ...prev, [stop.employeeId]: "" }));
+      await loadTrip();
+      Alert.alert("No-show recorded", "The trip has moved to the next passenger.");
+    } catch (err) {
+      Alert.alert("Could not record no-show", err.response?.data?.message || err.message);
+    }
+  }
+
   async function handleSOS() {
     if (!sosNote.trim()) {
       Alert.alert("Add a note", "Please describe the emergency briefly.");
@@ -472,12 +501,18 @@ export default function DriverHomeScreen({ navigation }) {
       return;
     }
     const p = stop.pickup && stop.pickup.lat != null ? stop.pickup : stop.drop || stop;
-    if (typeof p.lat !== "number" || typeof p.lng !== "number") {
-      Alert.alert("No coordinates", "This stop has no approved map coordinates yet.");
+    const lat = p.lat, lng = p.lng;
+    if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      Alert.alert("Location unavailable", "This passenger's pickup coordinates are not available yet.");
       return;
     }
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
-    Linking.openURL(url).catch(() => Alert.alert("Can't open maps", "No maps app is available."));
+    // Prefer the Google Maps app for turn-by-turn; fall back to the Google Maps
+    // web page in a browser. Never opens a blank embedded map.
+    const navUrl = `google.navigation:q=${lat},${lng}`;
+    const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    Linking.openURL(navUrl).catch(() =>
+      Linking.openURL(webUrl).catch(() => Alert.alert("Can't open maps", "No maps app or browser is available."))
+    );
   }
 
   function callNumber(phone) {
@@ -627,34 +662,6 @@ export default function DriverHomeScreen({ navigation }) {
         <Text style={styles.sosButtonText}>SOS / Emergency</Text>
       </TouchableOpacity>
 
-      {mapPoints.length > 0 && (
-        <View style={styles.mapWrap}>
-          <MapView style={styles.mapFill} initialRegion={initialRegion}>
-            {mapPoints.map((s, i) => {
-              const p = s.pickup && s.pickup.lat != null ? s.pickup : s;
-              return (
-                <Marker
-                  key={i}
-                  coordinate={{ latitude: p.lat, longitude: p.lng }}
-                  title={`${i + 1}. ${s.label || "Drop"}`}
-                  description={p.address || s.address}
-                  pinColor={s.status === "completed" ? colors.teal : s.status === "reached" ? colors.amber : colors.violet}
-                />
-              );
-            })}
-            <Polyline
-              coordinates={mapPoints.map((s) => {
-                const p = s.pickup && s.pickup.lat != null ? s.pickup : s;
-                return { latitude: p.lat, longitude: p.lng };
-              })}
-              strokeColor={colors.teal}
-              strokeWidth={2}
-              lineDashPattern={[6, 6]}
-            />
-          </MapView>
-        </View>
-      )}
-
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Passengers</Text>
         {stops.map((stop, i) => {
@@ -691,7 +698,7 @@ export default function DriverHomeScreen({ navigation }) {
                 <>
                   <View style={styles.stopActions}>
                     <TouchableOpacity style={styles.navButton} onPress={() => openMaps(stop)}>
-                      <Text style={styles.navButtonText}>Navigate</Text>
+                      <Text style={styles.navButtonText}>Open Google Maps</Text>
                     </TouchableOpacity>
                     {stop.phone ? (
                       <TouchableOpacity style={styles.callButton} onPress={() => callNumber(stop.phone)}>
@@ -704,6 +711,11 @@ export default function DriverHomeScreen({ navigation }) {
                         onPress={() => setArrived((p) => ({ ...p, [stop.employeeId]: !p[stop.employeeId] }))}
                       >
                         <Text style={styles.stopButtonText}>{isArrived ? "Arrived ✓" : "I've arrived"}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {run && !boarded && !dropped && !noShow && (
+                      <TouchableOpacity style={styles.noShowButton} onPress={() => confirmNoShow(stop)}>
+                        <Text style={styles.noShowButtonText}>No Show</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1007,6 +1019,8 @@ const styles = StyleSheet.create({
   callButtonText: { color: "#FFFFFF", fontSize: 11.5, fontWeight: "700" },
   stopButton: { backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, paddingVertical: 6, paddingHorizontal: 10 },
   stopButtonText: { color: colors.teal, fontSize: 11.5, fontWeight: "600" },
+  noShowButton: { backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.coral, borderRadius: radius.sm, paddingVertical: 6, paddingHorizontal: 10 },
+  noShowButtonText: { color: colors.coral, fontSize: 11.5, fontWeight: "700" },
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
   emptyTitle: { color: colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8 },
   emptyBody: { color: colors.textDim, fontSize: 14, textAlign: "center" },

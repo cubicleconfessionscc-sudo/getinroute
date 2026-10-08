@@ -1870,6 +1870,117 @@ app.get('/api/admin/checkin-logs', auth, role('admin', 'vendor'), (req, res) => 
   }));
 });
 
+/* ================= TRIP AUDIT (check-in / OTP / check-out / no-show) =================
+   Operational, tenant-scoped audit for Admin/Vendor, plus a real Excel export.
+   Company/Vendor authorization is enforced server-side on the same query that
+   feeds the export, so a caller can never export data outside their scope. */
+function buildTripAudit(req, q) {
+  q = q || {};
+  const from = q.from || q.date || dateOnly();
+  const to = q.to || q.date || from;
+  const params = [from, to];
+  let where = "s.archived_at IS NULL AND s.date >= ? AND s.date <= ?";
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    const peopleIds = vendorPeopleIds(ctx);
+    const pList = peopleIds.length ? peopleIds.map(Number).join(',') : '0';
+    where += ` AND (s.employee_id IN (${pList}) OR s.vehicle_id IN (SELECT id FROM vehicles WHERE vendor_id = ${Number(ctx.vid) || -1}))`;
+  } else {
+    const sc = companyAdminScope(req);
+    if (!sc.isOwner) {
+      const ids = sc.ids();
+      where += ` AND s.employee_id IN (${(ids && ids.length) ? ids.join(',') : '0'})`;
+    }
+  }
+  if (q.employeeId) { where += " AND s.employee_id = ?"; params.push(Number(q.employeeId)); }
+  if (q.vehicleId) { where += " AND s.vehicle_id = ?"; params.push(Number(q.vehicleId)); }
+  if (q.driverId) { where += " AND s.vehicle_id IN (SELECT vehicle_id FROM users WHERE id=? AND role='driver')"; params.push(Number(q.driverId)); }
+  if (q.direction) { where += " AND s.direction = ?"; params.push(q.direction); }
+  if (q.line != null && q.line !== '') { where += " AND v.line = ?"; params.push(Number(q.line)); }
+  if (q.stand) { where += " AND v.stand = ?"; params.push(String(q.stand)); }
+  const rows = db.prepare(`
+    SELECT s.*, u.name AS emp_name, u.emp_id AS emp_code, u.company_id AS emp_company,
+      v.vehicle_name, v.plate, v.type AS vehicle_type, v.line AS v_line, v.stand AS v_stand,
+      r.name AS route_name, r.stops,
+      d.id AS drv_id, d.name AS drv_name, d.phone AS drv_phone
+    FROM schedules s
+    JOIN users u ON u.id = s.employee_id
+    LEFT JOIN vehicles v ON v.id = s.vehicle_id
+    LEFT JOIN routes r ON r.id = s.route_id
+    LEFT JOIN users d ON d.role='driver' AND d.vehicle_id = s.vehicle_id
+    WHERE ${where}
+    ORDER BY s.date DESC, s.id DESC LIMIT 5000`).all(...params);
+
+  const ciQ = db.prepare("SELECT * FROM checkins WHERE schedule_id=? AND type='checkin' ORDER BY id DESC LIMIT 1");
+  const coQ = db.prepare("SELECT * FROM checkins WHERE schedule_id=? AND type='checkout' ORDER BY id DESC LIMIT 1");
+  const nsQ = db.prepare("SELECT * FROM employee_no_show_log WHERE schedule_id=? ORDER BY id DESC LIMIT 1");
+  return rows.map((r) => {
+    const c = ciQ.get(r.id);
+    const o = coQ.get(r.id);
+    const n = nsQ.get(r.id);
+    const stops = parseStops(r);
+    const meIdx = Math.max(0, (Number(r.sequence) || 1) - 1);
+    const st = stops[meIdx] || {};
+    const direction = r.direction || ((r.login_time || r.pickup_time) ? 'toOffice' : 'toHome');
+    const checkinConfirmed = c ? (c.confirmed || c.method === 'swipe' || c.method === null) : false;
+    return {
+      company_id: r.emp_company || null,
+      emp_id: r.emp_code, emp_name: r.emp_name,
+      trip_id: r.id, date: r.date, direction,
+      driver_id: r.drv_id || null, driver_name: r.drv_name || '', driver_phone: r.drv_phone || '',
+      vehicle_id: r.vehicle_id || null, vehicle_number: r.vehicle_name || r.plate || '', vehicle_type: r.vehicle_type || '',
+      line: r.v_line || null, stand: r.v_stand || null,
+      pickup: st.name || '', destination: r.route_name || (direction === 'toHome' ? 'Home' : 'Office'),
+      scheduled_pickup: r.login_time || r.pickup_time || r.logout_time || r.drop_time || '',
+      checkin_status: checkinConfirmed ? 'CHECKED_IN' : (c ? 'PENDING_OTP' : 'NOT_CHECKED_IN'),
+      checkin_time: c ? c.time : null,
+      checkin_lat: c && c.lat != null ? Number(c.lat) : null,
+      checkin_lng: c && c.lng != null ? Number(c.lng) : null,
+      otp_status: c ? (c.method === 'otp' ? (c.confirmed ? 'VERIFIED' : 'PENDING') : 'SWIPE') : 'NONE',
+      otp_time: c && c.confirmed ? c.time : null,
+      checkout_status: o ? 'CHECKED_OUT' : 'NOT_CHECKED_OUT',
+      checkout_time: o ? o.time : null,
+      checkout_lat: o && o.lat != null ? Number(o.lat) : null,
+      checkout_lng: o && o.lng != null ? Number(o.lng) : null,
+      no_show_status: (n || r.absent) ? 'NO_SHOW' : 'NO',
+      no_show_time: n ? n.created_at : null,
+      no_show_lat: n && n.lat != null ? Number(n.lat) : null,
+      no_show_lng: n && n.lng != null ? Number(n.lng) : null,
+      trip_status: r.state || r.status
+    };
+  });
+}
+
+app.get('/api/admin/trip-audit', auth, role('admin', 'vendor'), (req, res) => {
+  res.json(buildTripAudit(req, req.query || {}));
+});
+
+app.get('/api/admin/trip-audit.xlsx', auth, role('admin', 'vendor'), (req, res) => {
+  const XLSX = require('xlsx');
+  const rows = buildTripAudit(req, req.query || {});
+  const headers = ['Company', 'Employee ID', 'Employee Name', 'Trip ID', 'Trip Date', 'Trip Type',
+    'Driver ID', 'Driver Name', 'Driver Contact', 'Vehicle ID', 'Vehicle Number', 'Vehicle Type', 'Line', 'Stand',
+    'Pickup', 'Destination', 'Scheduled Pickup', 'Check-in Status', 'Check-in Time', 'Check-in Latitude', 'Check-in Longitude',
+    'OTP Status', 'OTP Time', 'Check-out Status', 'Check-out Time', 'Check-out Latitude', 'Check-out Longitude',
+    'No-show Status', 'No-show Time', 'No-show Latitude', 'No-show Longitude', 'Trip Status'];
+  const body = rows.map((r) => [r.company_id, r.emp_id, r.emp_name, r.trip_id, r.date,
+    r.direction === 'toHome' ? 'Logout' : 'Login', r.driver_id, r.driver_name, r.driver_phone, r.vehicle_id,
+    r.vehicle_number, r.vehicle_type, r.line, r.stand, r.pickup, r.destination, r.scheduled_pickup,
+    r.checkin_status, r.checkin_time, r.checkin_lat, r.checkin_lng, r.otp_status, r.otp_time,
+    r.checkout_status, r.checkout_time, r.checkout_lat, r.checkout_lng, r.no_show_status, r.no_show_time,
+    r.no_show_lat, r.no_show_lng, r.trip_status]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(body.length, 1), c: headers.length - 1 } }) };
+  ws['!cols'] = headers.map(() => ({ wch: 18 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Trip Audit');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const fname = `GetInRoute_Trip_Audit_${(req.query && req.query.from) || dateOnly()}.xlsx`;
+  res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(buf);
+});
+
 /* ---------------- NO-SHOWS ---------------- */
 
 app.get('/api/admin/no-shows', auth, role('admin', 'vendor'), (req, res) => {
@@ -1925,7 +2036,7 @@ function noShowCountFor(employeeId) {
     .get(employeeId, dateOffsetDays(-windowDays));
   return row ? Number(row.c) : 0;
 }
-function recordNoShow({ scheduleId, employeeId, actorId, actorRole, reason, ip, auto, autoDate }) {
+function recordNoShow({ scheduleId, employeeId, actorId, actorRole, reason, ip, auto, autoDate, driverId, lat, lng, pickupAddress }) {
   const s = scheduleId ? db.prepare('SELECT * FROM schedules WHERE id=?').get(scheduleId) : null;
   if (s && s.employee_id && !employeeId) employeeId = s.employee_id;
   if (!employeeId) return { ok: false, error: 'Employee required' };
@@ -1937,12 +2048,13 @@ function recordNoShow({ scheduleId, employeeId, actorId, actorRole, reason, ip, 
   const emp = db.prepare('SELECT * FROM users WHERE id=?').get(employeeId);
   if (!emp) return { ok: false, error: 'Employee not found' };
   const veh = s && s.vehicle_id ? db.prepare('SELECT vendor_id FROM vehicles WHERE id=?').get(s.vehicle_id) : null;
-  const info = db.prepare(`INSERT INTO employee_no_show_log (employee_id, schedule_id, date, time, vehicle_id, company_id, vendor_id, marked_by, marked_by_role, reason, ip)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+  const info = db.prepare(`INSERT INTO employee_no_show_log (employee_id, schedule_id, date, time, vehicle_id, company_id, vendor_id, marked_by, marked_by_role, reason, ip, driver_id, lat, lng, pickup_address)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(employeeId, scheduleId || null, date,
       (s && (s.pickup_time || s.login_time || s.drop_time || s.logout_time)) || null,
       (s && s.vehicle_id) || null, emp.company_id || 0, (veh && veh.vendor_id) || 0,
-      actorId || null, actorRole || 'system', reason || (auto ? 'No check-in on scheduled day' : 'Marked by admin'), ip || null);
+      actorId || null, actorRole || 'system', reason || (auto ? 'No check-in on scheduled day' : 'Marked by admin'), ip || null,
+      driverId || null, lat != null ? Number(lat) : null, lng != null ? Number(lng) : null, pickupAddress || null);
   const logId = Number(info.lastInsertRowid);
   authLog(auto ? 'no-show-auto-recorded' : 'no-show-marked', { noShowLog: logId, employee: employeeId, schedule: scheduleId || null, actor: actorId, reason });
 
@@ -5383,6 +5495,12 @@ try { db.exec(`ALTER TABLE notifications ADD COLUMN target_role TEXT;`); } catch
 try { db.exec(`ALTER TABLE notifications ADD COLUMN type TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE notifications ADD COLUMN created_by INTEGER;`); } catch (e) {}
 try { db.exec(`ALTER TABLE notifications ADD COLUMN batch TEXT;`); } catch (e) {}
+// Driver no-show audit: the driver, driver GPS and pickup address captured when a
+// driver marks a passenger as no-show during a live run.
+try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN driver_id INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN lat REAL;`); } catch (e) {}
+try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN lng REAL;`); } catch (e) {}
+try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN pickup_address TEXT;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};
@@ -5790,6 +5908,41 @@ app.post('/api/schedules/allotments/:id/checkout-otp', auth, role('driver'), (re
     const state = recomputeRunState(s.vehicle_id, s.date);
     emitToAdmins('allotment:statusBroadcast', {});
     res.json({ ok: true, message: 'Employee checked out via OTP', run: state });
+  });
+});
+
+/* Driver marks the CURRENT passenger as a no-show (operational progression).
+   The passenger must be the unlocked/current one; the driver's GPS is captured
+   for the audit; the run then advances to the next passenger automatically. */
+app.post('/api/schedules/allotments/:id/no-show', auth, role('driver'), (req, res) => {
+  const { employeeId, lat, lng, reason } = req.body || {};
+  verifyAllotmentAccess(req, res, (rows) => {
+    const s = rows.find((r) => String(r.employee_id) === String(employeeId));
+    if (!s) return res.status(404).json({ message: 'Employee not on this run' });
+    if (confirmedCheckinOf(s.id)) return res.status(400).json({ message: 'Passenger is already checked in' });
+    if (s.absent) return res.status(400).json({ message: 'No-show already recorded for this passenger' });
+    // Location security: only the current (unlocked) passenger may be actioned.
+    if (!canAccessPassengerLocation(req.user.id, s.id)) {
+      return res.status(403).json({ message: 'This passenger unlocks after the previous passenger is resolved.' });
+    }
+    const stops = parseStops(s);
+    const meIdx = Math.max(0, (Number(s.sequence) || 1) - 1);
+    const pickupAddress = (stops[meIdx] && stops[meIdx].name) || null;
+    const result = recordNoShow({
+      scheduleId: s.id, employeeId: s.employee_id, actorId: req.user.id, actorRole: 'driver',
+      reason: String(reason || '').trim() || 'Marked no-show by driver', ip: req.ip,
+      driverId: req.user.id, lat, lng, pickupAddress
+    });
+    if (!result.ok) return res.status(400).json({ message: result.error || 'Could not record no-show' });
+    db.prepare("UPDATE schedules SET absent=1, state='no_show' WHERE id=?").run(s.id);
+    addTripEvent(s.id, 'no_show', { by: 'driver', driver_id: req.user.id, lat: lat != null ? Number(lat) : null, lng: lng != null ? Number(lng) : null });
+    recomputeRunState(s.vehicle_id, s.date);
+    emitToAdmins('allotment:statusBroadcast', {});
+    emitToUser(req.user.id, 'allotment:statusBroadcast', {});
+    if (io) io.to(`trip:run-${s.vehicle_id}-${s.date}`).emit('allotment:statusBroadcast', {});
+    emitToUser(s.employee_id, 'allotment:statusBroadcast', {});
+    notify(s.employee_id, 'Missed pickup recorded', 'You were marked as a no-show for your scheduled pickup. Please contact your transport team.');
+    res.json({ ok: true, message: 'No-show recorded', suspended: !!result.suspended, id: result.id });
   });
 });
 

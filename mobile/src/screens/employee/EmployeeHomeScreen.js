@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, Linking, Modal, ActivityIndicator } from "react-native";
-import MapView, { Marker } from "react-native-maps";
 import { getMyTrips } from "../../api/trips";
 import {
   getMyLiveAllotment,
@@ -92,6 +91,15 @@ function confirmedBanner(allotment) {
   return { label: "BOOKING RECEIVED · AWAITING VEHICLE", tone: "warn" };
 }
 
+// Open a live position in the device's Google Maps app (geo:), falling back to
+// the Google Maps web page in a browser. Never opens a blank embedded map.
+function openInGoogleMaps(lat, lng, label) {
+  const q = `${Number(lat)},${Number(lng)}`;
+  const nativeUrl = `geo:${q}?q=${q}${label ? `(${encodeURIComponent(label)})` : ""}`;
+  const webUrl = `https://www.google.com/maps/search/?api=1&query=${q}`;
+  return Linking.openURL(nativeUrl).catch(() => Linking.openURL(webUrl));
+}
+
 export default function EmployeeHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [allotment, setAllotment] = useState(null);
@@ -102,17 +110,15 @@ export default function EmployeeHomeScreen({ navigation }) {
   const [locationProfile, setLocationProfile] = useState(null);
   const [helpline, setHelpline] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [mapOpen, setMapOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
   const [boardingOtp, setBoardingOtp] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
-  const mapRef = useRef(null);
   const isFirstLoadRef = useRef(true);
 
-  // Keep the screen awake whenever the employee has an active trip or the live
-  // tracking map open, and release it the moment the trip/tracking finishes.
-  useActiveScreenAwake(!!allotment || mapOpen);
+  // Keep the screen awake whenever the employee has an active trip, and release
+  // it the moment the trip finishes.
+  useActiveScreenAwake(!!allotment);
 
   const callHelpline = () => {
     if (helpline) Linking.openURL(`tel:${helpline.replace(/[^+\d]/g, "")}`).catch(() => {});
@@ -195,6 +201,20 @@ export default function EmployeeHomeScreen({ navigation }) {
     driverLocation && Number.isFinite(driverLocation.lat) && Number.isFinite(driverLocation.lng)
       ? { latitude: driverLocation.lat, longitude: driverLocation.lng }
       : null;
+
+  // Track Driver: open the REAL driver/vehicle live position in Google Maps.
+  // Uses the live socket position, falling back to the latest API position.
+  function trackDriver() {
+    const lat = driverLocation?.lat ?? allotment?.driverLocation?.lat;
+    const lng = driverLocation?.lng ?? allotment?.driverLocation?.lng;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      Alert.alert("Driver location unavailable", "Driver location is currently unavailable. Please try again.");
+      return;
+    }
+    openInGoogleMaps(lat, lng, "Your driver").catch(() =>
+      Alert.alert("Can't open maps", "No maps app or browser is available.")
+    );
+  }
 
   const firstName = (user?.name || "there").split(" ")[0];
   const empId = user?.emp_id || user?.id || "—";
@@ -378,8 +398,8 @@ export default function EmployeeHomeScreen({ navigation }) {
             <Text style={styles.schedLine}>Scheduled pickup · {fmtDate(allotment.date)} · {scheduledTime}</Text>
 
             <View style={styles.tripActions}>
-              <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={() => setMapOpen(true)}>
-                <Text style={styles.smallBtnPrimaryText}>Track vehicle</Text>
+              <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={trackDriver}>
+                <Text style={styles.smallBtnPrimaryText}>Track driver</Text>
               </TouchableOpacity>
               {d.phone ? (
                 <TouchableOpacity style={styles.smallBtn} onPress={() => callNumber(d.phone)}>
@@ -537,37 +557,6 @@ export default function EmployeeHomeScreen({ navigation }) {
       </ScrollView>
 
       <EmployeeBottomNav navigation={navigation} active="home" />
-
-      <Modal visible={mapOpen} animationType="slide" onRequestClose={() => setMapOpen(false)}>
-        <View style={styles.mapModal}>
-          <View style={styles.mapHead}>
-            <Text style={styles.mapTitle}>Live cab location</Text>
-            <TouchableOpacity onPress={() => setMapOpen(false)}><Text style={styles.mapClose}>Close</Text></TouchableOpacity>
-          </View>
-          {driverLoc || ms?.pickup ? (
-            <MapView
-              ref={mapRef}
-              style={styles.mapFill}
-              initialRegion={{
-                ...(driverLoc || { latitude: ms?.pickup?.lat || 12.97, longitude: ms?.pickup?.lng || 77.59 }),
-                latitudeDelta: 0.05,
-                longitudeDelta: 0.05
-              }}
-            >
-              {driverLoc && <Marker coordinate={driverLoc} title="Your cab" />}
-              {ms?.pickup?.lat ? <Marker coordinate={{ latitude: ms.pickup.lat, longitude: ms.pickup.lng }} title="Pickup" pinColor={colors.primary} /> : null}
-            </MapView>
-          ) : (
-            <View style={styles.mapEmpty}>
-              <Text style={styles.mapEmptyTitle}>Live location unavailable</Text>
-              <Text style={styles.mapEmptyBody}>Your driver hasn't started sharing their location yet.</Text>
-            </View>
-          )}
-          <View style={styles.mapBar}>
-            <Text style={styles.mapBarText}>{allotment?.sharingLive ? "Cab is moving — live location" : "Waiting for the driver to share live location"}</Text>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
