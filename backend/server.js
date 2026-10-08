@@ -5627,6 +5627,13 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
       const st = stops[meIdx] || {};
       const isPickup = !!rIn;
       const unlocked = access[r.id] !== false;
+      // The driver UI needs the REAL per-passenger state (WAITING -> CHECKED IN
+      // -> DROPPED), not the schedule status. Returning r.status here meant the
+      // card never changed after the OTP was verified — this is the root cause
+      // of the "OTP does nothing" bug.
+      const dropped = !!db.prepare("SELECT id FROM checkins WHERE schedule_id=? AND type='checkout'").get(r.id);
+      const boarded = !!confirmedCheckinOf(r.id);
+      const stopState = r.absent ? 'no_show' : dropped ? 'completed' : boarded ? 'picked_up' : 'pending';
       return redactStop({
         order: i,
         employeeId: String(r.employee_id),
@@ -5639,7 +5646,9 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
         label: r.emp_name || st.name || '',
         pickup: { address: isPickup ? (st.name || '') : '', lat: isPickup ? (st.lat ?? null) : null, lng: isPickup ? (st.lng ?? null) : null },
         drop: { address: isPickup ? '' : (st.name || r.emp_name || ''), lat: isPickup ? null : (st.lat ?? null), lng: isPickup ? null : (st.lng ?? null) },
-        status: r.status,
+        status: stopState,
+        boarded,
+        dropped,
         pickupTime: rIn || rOut || '',
         nextDay: !!rOut && !rIn,
         etaKm: null,
@@ -5659,7 +5668,7 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
         etaMinutes: null
       };
     }
-    const nextIdx = seq.findIndex((s) => s.status !== 'completed');
+    const nextIdx = seq.findIndex((s) => s.status !== 'completed' && s.status !== 'no_show');
     let nextStop = null;
     if (nextIdx >= 0) {
       const st = seq[nextIdx];
@@ -5755,6 +5764,14 @@ app.post('/api/schedules/allotments/:id/checkin-otp', auth, role('driver'), (req
     addTripEvent(s.id, 'boarded', { otp: true, vehicle_id: Number(s.vehicle_id), driver_id: req.user.id });
     recomputeRunState(s.vehicle_id, s.date);
     emitToAdmins('allotment:statusBroadcast', {});
+    // Refresh the DRIVER's own app immediately (it subscribes to
+    // allotment:statusBroadcast) so the passenger flips to CHECKED IN and the
+    // next passenger unlocks without a manual refresh.
+    emitToUser(req.user.id, 'allotment:statusBroadcast', {});
+    if (io) io.to(`trip:run-${s.vehicle_id}-${s.date}`).emit('allotment:statusBroadcast', {});
+    // Tell the EMPLOYEE their boarding is confirmed, in real time.
+    emitToUser(s.employee_id, 'checkin:confirmed', { schedule_id: s.id });
+    emitToUser(s.employee_id, 'allotment:statusBroadcast', {});
     res.json({ ok: true, message: 'Employee checked in via OTP' });
   });
 });

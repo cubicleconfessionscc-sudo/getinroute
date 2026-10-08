@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getMyDriverAllotments } from "../../api/schedules";
 import { saveDriverAssignment, setStandingPoint, getStandingPoint } from "../../api/driver";
+import { useAuth } from "../../context/AuthContext";
 import Dropdown from "../../components/Dropdown";
 import { colors, spacing, radius, shadow } from "../../theme";
 
@@ -15,6 +16,7 @@ const TRIP_OPTIONS = ["First Trip", "Second Trip"];
 const STANDS = Array.from({ length: 60 }, (_, i) => `L${i + 1}`);
 
 export default function DriverEndTripScreen({ navigation, route }) {
+  const { logout } = useAuth();
   const params = route?.params || {};
   const [loading, setLoading] = useState(true);
   const [trip, setTrip] = useState(params.direction === "toHome" ? "Second Trip" : "First Trip");
@@ -77,11 +79,11 @@ export default function DriverEndTripScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>{saved ? "Trip completed ✓" : "End-of-trip details"}</Text>
+        <Text style={styles.title}>{saved ? "Shift completed ✓" : "End shift"}</Text>
         <Text style={styles.sub}>
           {saved
-            ? "Your end-of-trip information has been recorded. Reset to load your next trip."
-            : "Record where your cab is parked to finish this trip. Admin and Vendor can see this."}
+            ? "Your end-of-shift information has been recorded. Reset for your next trip, or log out."
+            : "Return/park your cab and record the trip, line and standing point. Admin and Vendor can see this."}
         </Text>
 
         {loading ? (
@@ -119,16 +121,21 @@ export default function DriverEndTripScreen({ navigation, route }) {
 
       <View style={styles.footer}>
         {saved ? (
-          <TouchableOpacity style={styles.primary} onPress={onReset}>
-            <Text style={styles.primaryText}>RESET FOR NEXT TRIP</Text>
-          </TouchableOpacity>
+          <View style={{ gap: 10 }}>
+            <TouchableOpacity style={styles.primary} onPress={onReset}>
+              <Text style={styles.primaryText}>RESET FOR NEXT TRIP</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={logout}>
+              <Text style={styles.secondaryText}>LOG OUT</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <TouchableOpacity
             style={[styles.primary, !canConfirm && styles.primaryOff]}
             disabled={!canConfirm || busy || loading}
             onPress={onConfirm}
           >
-            <Text style={styles.primaryText}>{busy ? "Saving…" : "Confirm"}</Text>
+            <Text style={styles.primaryText}>{busy ? "Saving…" : "Confirm & log trip"}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -151,5 +158,7 @@ const styles = StyleSheet.create({
   footer: { position: "absolute", left: 0, right: 0, bottom: 0, padding: spacing.lg, backgroundColor: colors.panel, borderTopWidth: 1, borderTopColor: colors.line },
   primary: { backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 16, alignItems: "center" },
   primaryOff: { opacity: 0.5 },
-  primaryText: { color: "#fff", fontWeight: "800", fontSize: 15, letterSpacing: 0.4 }
+  primaryText: { color: "#fff", fontWeight: "800", fontSize: 15, letterSpacing: 0.4 },
+  secondary: { borderWidth: 1.5, borderColor: colors.coral, borderRadius: radius.md, paddingVertical: 14, alignItems: "center" },
+  secondaryText: { color: colors.coral, fontWeight: "800", fontSize: 15, letterSpacing: 0.4 }
 });

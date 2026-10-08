@@ -88,6 +88,9 @@ export default function DriverHomeScreen({ navigation }) {
   const [checkedItems, setCheckedItems] = useState({});
   const [standingPoint, setStandingPointState] = useState(null);
   const [standingModal, setStandingModal] = useState(false);
+  // Local-only "I've arrived at this pickup" markers for the driver (not persisted;
+  // the persisted per-passenger state comes from the backend boarding status).
+  const [arrived, setArrived] = useState({});
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const idleTimerRef = useRef(null);
@@ -289,22 +292,6 @@ export default function DriverHomeScreen({ navigation }) {
       Alert.alert("Checked in", "Employee checked in via OTP.");
     } catch (err) {
       Alert.alert("Check-in failed", err.response?.data?.message || "Invalid OTP or network error.");
-    }
-  }
-
-  async function driverOtpCheckOut(allotmentId, empId) {
-    const otp = otpInputs[empId];
-    if (!otp || otp.length < 4) {
-      Alert.alert("Enter OTP", "Please enter the employee's OTP code.");
-      return;
-    }
-    try {
-      await client.post(`/schedules/allotments/${allotmentId}/checkout-otp`, { employeeId: empId, otp });
-      setOtpInputs((prev) => ({ ...prev, [empId]: "" }));
-      loadTrip();
-      Alert.alert("Checked out", "Employee checked out via OTP.");
-    } catch (err) {
-      Alert.alert("Check-out failed", err.response?.data?.message || "Invalid OTP or network error.");
     }
   }
 
@@ -530,7 +517,7 @@ export default function DriverHomeScreen({ navigation }) {
           >
             {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
             <TouchableOpacity onPress={() => navigation.navigate("Settings")}><Text style={styles.link}>Settings</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => setStandingModal(true)}><Text style={styles.link}>Standing point</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate("DriverEndTrip", { runId: activeId, direction: run?.direction })}><Text style={styles.link}>End shift</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
             <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
           </ScrollView>
@@ -571,7 +558,7 @@ export default function DriverHomeScreen({ navigation }) {
           {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
           {activeId ? <TouchableOpacity onPress={() => navigation.navigate("Chat", { tripId: activeId })}><Text style={styles.link}>Chat</Text></TouchableOpacity> : null}
           <TouchableOpacity onPress={() => navigation.navigate("Settings")}><Text style={styles.link}>Settings</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => setStandingModal(true)}><Text style={styles.link}>Standing point</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate("DriverEndTrip", { runId: activeId, direction: run?.direction })}><Text style={styles.link}>End shift</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
           <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
         </ScrollView>
@@ -640,16 +627,6 @@ export default function DriverHomeScreen({ navigation }) {
         <Text style={styles.sosButtonText}>SOS / Emergency</Text>
       </TouchableOpacity>
 
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>Standing point</Text>
-        <TouchableOpacity style={styles.standRow} onPress={() => setStandingModal(true)}>
-          <Text style={styles.standRowText}>
-            {standingPoint ? `Parked at ${standingPoint}` : "Tap to set where your cab is parked (L1–L60)"}
-          </Text>
-          <Text style={styles.standRowAction}>{standingPoint ? "Change" : "Set"} ▸</Text>
-        </TouchableOpacity>
-      </View>
-
       {mapPoints.length > 0 && (
         <View style={styles.mapWrap}>
           <MapView style={styles.mapFill} initialRegion={initialRegion}>
@@ -679,11 +656,16 @@ export default function DriverHomeScreen({ navigation }) {
       )}
 
       <View style={styles.card}>
-        <Text style={styles.cardLabel}>Passengers picked</Text>
+        <Text style={styles.cardLabel}>Passengers</Text>
         {stops.map((stop, i) => {
-          const picked = stop.status === "picked_up" || stop.status === "reached" || stop.status === "completed";
+          const isLocked = !!stop.locked;
+          const boarded = stop.status === "picked_up" || !!stop.boarded;
+          const dropped = stop.status === "completed" || !!stop.dropped;
+          const noShow = stop.status === "no_show";
+          const isArrived = !!arrived[stop.employeeId];
+          const statusLabel = noShow ? "NO-SHOW" : dropped ? "DROPPED" : boarded ? "CHECKED IN" : isArrived ? "ARRIVED AT PICKUP" : "WAITING FOR PICKUP";
           return (
-            <View key={i} style={[styles.stopCard, stop.locked && styles.stopCardLocked]}>
+            <View key={i} style={[styles.stopCard, isLocked && styles.stopCardLocked]}>
               <View style={styles.stopHeader}>
                 <View style={styles.stopIndexWrap}>
                   <Text style={styles.stopIndex}>{i + 1}</Text>
@@ -695,29 +677,17 @@ export default function DriverHomeScreen({ navigation }) {
                       {fmtTime12(stop.pickupTime)}{stop.nextDay ? " · next day" : ""}
                     </Text>
                   ) : null}
-                  {stop.locked ? (
-                    <Text style={styles.stopLocked}>🔒 Locked until the previous passenger checks in</Text>
-                  ) : (
-                    <>
-                      {stop.etaMinutes != null || stop.etaKm != null ? (
-                        <Text style={styles.stopEta}>ETA {fmtEta(stop.etaMinutes, stop.etaKm)}</Text>
-                      ) : null}
-                      {stop.phone ? <Text style={styles.stopMeta}>{stop.phone}</Text> : null}
-                    </>
-                  )}
+                  <Text style={[styles.stopStatus, (boarded && !dropped) || dropped ? styles.stopStatusOk : isLocked ? styles.stopStatusMuted : styles.stopStatusWarn]}>
+                    {isLocked ? "🔒 " : (boarded || dropped) ? "✓ " : ""}{statusLabel}
+                  </Text>
                 </View>
-                {picked && (
-                  <View style={styles.pickedBadge}>
-                    <Text style={styles.pickedBadgeText}>PICKED</Text>
-                  </View>
-                )}
-                {stop.locked && (
+                {isLocked && (
                   <View style={styles.lockedBadge}>
                     <Text style={styles.lockedBadgeText}>LOCKED</Text>
                   </View>
                 )}
               </View>
-              {!stop.locked && (
+              {!isLocked && (
                 <>
                   <View style={styles.stopActions}>
                     <TouchableOpacity style={styles.navButton} onPress={() => openMaps(stop)}>
@@ -728,20 +698,20 @@ export default function DriverHomeScreen({ navigation }) {
                         <Text style={styles.callButtonText}>Call</Text>
                       </TouchableOpacity>
                     ) : null}
-                    {stop.status !== "completed" && (
+                    {!boarded && !dropped && !noShow && (
                       <TouchableOpacity
-                        style={[styles.stopButton, stop.status === "reached" && { borderColor: colors.amber }]}
-                        onPress={() => (run ? markRunStop(stop, stop.status === "reached" ? "completed" : "reached") : markTripStop(stop, "reached"))}
+                        style={[styles.stopButton, isArrived && { borderColor: colors.amber }]}
+                        onPress={() => setArrived((p) => ({ ...p, [stop.employeeId]: !p[stop.employeeId] }))}
                       >
-                        <Text style={styles.stopButtonText}>{stop.status === "reached" ? "Completed" : "Reached"}</Text>
+                        <Text style={styles.stopButtonText}>{isArrived ? "Arrived ✓" : "I've arrived"}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
-                  {run && stop.status !== "completed" && (
+                  {run && !boarded && !dropped && !noShow && (
                     <View style={styles.otpRow}>
                       <TextInput
                         style={styles.otpInput}
-                        placeholder="OTP"
+                        placeholder="Enter OTP"
                         placeholderTextColor={colors.textDim}
                         keyboardType="number-pad"
                         maxLength={6}
@@ -749,13 +719,16 @@ export default function DriverHomeScreen({ navigation }) {
                         onChangeText={(t) => setOtpInputs((prev) => ({ ...prev, [stop.employeeId]: t }))}
                       />
                       <TouchableOpacity style={styles.otpCheckInBtn} onPress={() => driverOtpCheckIn(run._id, stop.employeeId)}>
-                        <Text style={styles.otpCheckInBtnText}>Check-in</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.otpCheckOutBtn} onPress={() => driverOtpCheckOut(run._id, stop.employeeId)}>
-                        <Text style={styles.otpCheckOutBtnText}>Check-out</Text>
+                        <Text style={styles.otpCheckInBtnText}>Verify OTP</Text>
                       </TouchableOpacity>
                     </View>
                   )}
+                  {boarded && !dropped ? (
+                    <View style={styles.verifiedRow}>
+                      <Text style={styles.verifiedTick}>✓</Text>
+                      <Text style={styles.verifiedText}>PASSENGER CHECKED IN</Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.stopAddress}>
                     Pickup: {stop.pickup?.address || stop.address || "Pickup point"}
                   </Text>
@@ -990,6 +963,13 @@ const styles = StyleSheet.create({
   },
   stopCardLocked: { opacity: 0.85, borderStyle: "dashed" },
   stopLocked: { color: colors.textDim, fontSize: 12.5, fontWeight: "700", marginTop: 2 },
+  stopStatus: { fontSize: 12.5, fontWeight: "800", marginTop: 3, letterSpacing: 0.3 },
+  stopStatusOk: { color: colors.teal },
+  stopStatusWarn: { color: colors.amber },
+  stopStatusMuted: { color: colors.textDim },
+  verifiedRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  verifiedTick: { color: colors.teal, fontSize: 18, fontWeight: "900" },
+  verifiedText: { color: colors.text, fontSize: 13, fontWeight: "800" },
   lockedBadge: { backgroundColor: "rgba(15,30,61,0.08)", borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, paddingVertical: 4, paddingHorizontal: 8 },
   lockedBadgeText: { color: colors.textDim, fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   stopHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 4 },

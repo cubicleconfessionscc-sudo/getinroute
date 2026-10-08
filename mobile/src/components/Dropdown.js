@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, TextInput } from "react-native";
 import { colors, spacing, radius } from "../theme";
 
 /**
@@ -7,8 +7,16 @@ import { colors, spacing, radius } from "../theme";
  * plain strings or { value, label } objects. The chosen value is highlighted with
  * a tick, and the closed field shows the current selection or a placeholder.
  */
-export default function Dropdown({ label, placeholder = "Select…", value, options = [], onChange, disabled = false }) {
+export default function Dropdown({ label, placeholder = "Select…", value, options = [], onChange, disabled = false, searchable }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const labelOf = (opt) => (typeof opt === "string" ? opt : opt.label);
+  const valueOf = (opt) => (typeof opt === "string" ? opt : opt.value);
+  // Long lists (e.g. L1–L60 stands) get a search box so the driver can type to filter.
+  const showSearch = searchable != null ? searchable : options.length > 12;
+  const filtered = query
+    ? options.filter((o) => String(labelOf(o)).toLowerCase().includes(query.toLowerCase()))
+    : options;
   return (
     <View style={styles.wrap}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
@@ -16,7 +24,7 @@ export default function Dropdown({ label, placeholder = "Select…", value, opti
         style={[styles.field, disabled && styles.fieldDisabled]}
         disabled={disabled}
         activeOpacity={0.85}
-        onPress={() => setOpen(true)}
+        onPress={() => { setQuery(""); setOpen(true); }}
       >
         <Text style={[styles.value, !value && styles.placeholder]} numberOfLines={1}>
           {value || placeholder}
@@ -28,10 +36,20 @@ export default function Dropdown({ label, placeholder = "Select…", value, opti
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setOpen(false)}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{label || "Select"}</Text>
+            {showSearch ? (
+              <TextInput
+                style={styles.search}
+                placeholder="Search…"
+                placeholderTextColor={colors.textDim}
+                value={query}
+                onChangeText={setQuery}
+                autoCorrect={false}
+              />
+            ) : null}
             <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-              {options.map((opt) => {
-                const val = typeof opt === "string" ? opt : opt.value;
-                const text = typeof opt === "string" ? opt : opt.label;
+              {filtered.map((opt) => {
+                const val = valueOf(opt);
+                const text = labelOf(opt);
                 const on = String(value) === String(val);
                 return (
                   <TouchableOpacity
@@ -44,6 +62,7 @@ export default function Dropdown({ label, placeholder = "Select…", value, opti
                   </TouchableOpacity>
                 );
               })}
+              {filtered.length === 0 ? <Text style={styles.noMatch}>No matches</Text> : null}
             </ScrollView>
             <TouchableOpacity style={styles.cancel} onPress={() => setOpen(false)}>
               <Text style={styles.cancelText}>Cancel</Text>
@@ -76,6 +95,8 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", padding: spacing.lg },
   sheet: { backgroundColor: colors.panel, borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.line },
   sheetTitle: { color: colors.text, fontSize: 17, fontWeight: "800", marginBottom: 10 },
+  search: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 12, color: colors.text, fontSize: 15, marginBottom: 8 },
+  noMatch: { color: colors.textDim, fontSize: 14, textAlign: "center", paddingVertical: 16 },
   list: { maxHeight: 340 },
   opt: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.line },
   optOn: {},
