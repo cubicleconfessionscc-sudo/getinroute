@@ -1987,12 +1987,17 @@ app.get('/api/admin/no-shows', auth, role('admin', 'vendor'), (req, res) => {
   const { date } = req.query;
   const targetDate = date || dateOnly();
   const venJoin = isVendorReq(req) ? 'AND v.vendor_id = ' + (Number(req.user.vendor_id) || -1) : '';
+  // Company scoping for a non-owner company admin (tenant isolation).
+  const sc = companyAdminScope(req);
+  const companyJoin = (!isVendorReq(req) && !sc.isOwner)
+    ? `AND s.employee_id IN (${(sc.ids() && sc.ids().length) ? sc.ids().join(',') : '0'})`
+    : '';
   const scheduled = db.prepare(`
     SELECT s.*, u.name AS emp_name, v.vehicle_name, v.plate, v.line, v.trip
     FROM schedules s
     JOIN users u ON u.id = s.employee_id
     LEFT JOIN vehicles v ON v.id = s.vehicle_id
-    WHERE s.date = ? AND s.status IN ('confirmed','in_progress') ${venJoin}
+    WHERE s.date = ? AND s.status IN ('confirmed','in_progress') ${venJoin} ${companyJoin}
   `).all(targetDate);
   const noShows = [];
   for (const s of scheduled) {
@@ -2111,16 +2116,37 @@ app.post('/api/admin/no-shows/mark', auth, role('admin'), (req, res) => {
 });
 app.get('/api/admin/no-shows/log', auth, role('admin', 'vendor'), (req, res) => {
   const empId = Number(req.query.employee_id || 0);
+  const params = [];
+  let where = '1=1';
+  // Tenant scoping: a company admin sees only their company's no-shows; a vendor
+  // only their authorized people/vehicles; the owner sees everything.
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    const peopleIds = vendorPeopleIds(ctx);
+    const pList = peopleIds.length ? peopleIds.map(Number).join(',') : '0';
+    where += ` AND (l.employee_id IN (${pList}) OR l.vendor_id = ${Number(ctx.vid) || -1})`;
+  } else {
+    const sc = companyAdminScope(req);
+    if (!sc.isOwner) {
+      const ids = sc.ids();
+      where += ` AND l.employee_id IN (${(ids && ids.length) ? ids.join(',') : '0'})`;
+    }
+  }
+  if (empId) { where += ' AND l.employee_id = ?'; params.push(empId); }
+  if (req.query.from) { where += ' AND l.date >= ?'; params.push(req.query.from); }
+  if (req.query.to) { where += ' AND l.date <= ?'; params.push(req.query.to); }
   const rows = db.prepare(`
     SELECT l.*, u.name AS emp_name, u.emp_id AS emp_emp_id, u.department,
-      v.vehicle_name, v.plate, m.name AS marked_by_name, m.role AS marked_by_actual_role
+      v.vehicle_name, v.plate, m.name AS marked_by_name, m.role AS marked_by_actual_role,
+      d.name AS driver_name, d.phone AS driver_phone
     FROM employee_no_show_log l
     LEFT JOIN users u ON u.id = l.employee_id
     LEFT JOIN vehicles v ON v.id = l.vehicle_id
     LEFT JOIN users m ON m.id = l.marked_by
-    WHERE (? = 0 OR l.employee_id = ?)
+    LEFT JOIN users d ON d.id = l.driver_id
+    WHERE ${where}
     ORDER BY l.id DESC LIMIT 500
-  `).all(empId, empId);
+  `).all(...params);
   res.json(rows);
 });
 app.get('/api/admin/suspensions', auth, role('admin', 'vendor'), (req, res) => {

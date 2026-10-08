@@ -114,6 +114,9 @@ export default function NoShowsPage() {
                 <th>Emp ID</th>
                 <th>Department</th>
                 <th>Vehicle</th>
+                <th>Driver</th>
+                <th>Pickup</th>
+                <th>No-Show GPS</th>
                 <th>Reason</th>
                 <th>Marked By</th>
                 <th>Role</th>
@@ -128,6 +131,15 @@ export default function NoShowsPage() {
                   <td>{r.emp_emp_id || '—'}</td>
                   <td>{r.department || '—'}</td>
                   <td>{r.vehicle_name || r.plate || '—'}</td>
+                  <td>{r.driver_name || '—'}</td>
+                  <td>{r.pickup_address || '—'}</td>
+                  <td>
+                    {r.lat != null && r.lng != null ? (
+                      <a href={`https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}`} target="_blank" rel="noreferrer">
+                        {Number(r.lat).toFixed(5)}, {Number(r.lng).toFixed(5)}
+                      </a>
+                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
                   <td>{r.reason || '—'}</td>
                   <td>{r.marked_by_name || 'system'}</td>
                   <td>{r.marked_by_actual_role || r.marked_by_role || '—'}</td>

@@ -985,7 +985,7 @@ const styles = StyleSheet.create({
   lockedBadge: { backgroundColor: "rgba(15,30,61,0.08)", borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, paddingVertical: 4, paddingHorizontal: 8 },
   lockedBadgeText: { color: colors.textDim, fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   stopHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 4 },
-  stopActions: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6, marginBottom: 4 },
+  stopActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 6, marginBottom: 4 },
   stopIndexWrap: { width: 22, height: 22, borderRadius: 6, backgroundColor: "rgba(139,124,246,0.2)", alignItems: "center", justifyContent: "center", marginTop: 2 },
   stopIndex: { color: colors.violet, fontSize: 11, fontWeight: "700" },
   stopName: { color: colors.text, fontSize: 14, fontWeight: "700" },
