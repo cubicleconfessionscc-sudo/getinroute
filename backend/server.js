@@ -5951,7 +5951,8 @@ app.post('/api/schedules/allotments/:id/no-show', auth, role('driver'), (req, re
     if (!canAccessPassengerLocation(req.user.id, s.id)) {
       return res.status(403).json({ message: 'This passenger unlocks after the previous passenger is resolved.' });
     }
-    const stops = parseStops(s);
+    const routeRow = s.route_id ? db.prepare('SELECT stops FROM routes WHERE id=?').get(s.route_id) : null;
+    const stops = parseStops({ stops: routeRow ? routeRow.stops : null });
     const meIdx = Math.max(0, (Number(s.sequence) || 1) - 1);
     const pickupAddress = (stops[meIdx] && stops[meIdx].name) || null;
     const result = recordNoShow({
