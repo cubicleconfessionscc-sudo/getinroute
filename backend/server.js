@@ -1400,9 +1400,12 @@ app.post('/api/admin/drivers', auth, role('admin', 'vendor'), h(async (req, res)
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   const existing = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?) OR lower(emp_id) = lower(?)').get(email, emp_id);
   if (existing) return res.status(400).json({ error: 'Email or Driver ID already registered' });
+  // Match the employee-create behaviour: a non-vendor admin's new driver belongs
+  // to that admin's own company, so it is immediately visible under company scope
+  // (previously it defaulted to NULL and was invisible to the admin/vendor).
   let companyId = null;
   if (isVendorReq(req)) companyId = req.user.vendor_id || null;
-  else if (b.companyId) companyId = Number(b.companyId) || null;
+  else companyId = (b.companyId ? Number(b.companyId) : req.user.id) || null;
   let vehicleId = null;
   if (b.vehicleId && /^\d+$/.test(String(b.vehicleId))) vehicleId = Number(b.vehicleId);
   if (vehicleId) {

@@ -15,10 +15,18 @@ import {
 import { subscribeSync, pendingList } from "../../services/offlineQueue";
 import { colors, spacing, radius } from "../../theme";
 
-const buildDisplay =
-  Constants.expoConfig != null
-    ? `v${Constants.expoConfig.version} (build ${Constants.nativeBuildVersion || "?"})`
-    : "";
+// Real version info from the build: prefer the NATIVE app version / build
+// number (expo-constants), and fall back to the embedded app config's version
+// and android.versionCode. Never a hardcoded/fake number.
+const buildDisplay = (() => {
+  const cfg = Constants.expoConfig || {};
+  const ver = Constants.nativeAppVersion || cfg.version || "?";
+  const build =
+    Constants.nativeBuildVersion ||
+    (cfg.android && cfg.android.versionCode != null ? String(cfg.android.versionCode) : null) ||
+    "?";
+  return `v${ver} (build ${build})`;
+})();
 
 export default function SettingsScreen({ navigation }) {
   const { user } = useAuth() || {};
