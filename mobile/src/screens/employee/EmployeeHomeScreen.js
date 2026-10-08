@@ -13,6 +13,7 @@ import {
 } from "../../api/schedules";
 import { getLocationProfile } from "../../api/locations";
 import { getSupportConfig } from "../../api/support";
+import { getNotifications } from "../../api/notifications";
 import { connectSocket, joinTrip, leaveTrip, getSocket } from "../../services/socket";
 import { useAuth } from "../../context/AuthContext";
 import SwipeButton from "../../components/SwipeButton";
@@ -80,6 +81,7 @@ export default function EmployeeHomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [unread, setUnread] = useState(0);
   const mapRef = useRef(null);
   const isFirstLoadRef = useRef(true);
 
@@ -126,6 +128,14 @@ export default function EmployeeHomeScreen({ navigation }) {
 
   useEffect(() => {
     getSupportConfig().then((c) => setHelpline(c?.helplinePhone || "")).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const fetchUnread = () => getNotifications().then((r) => setUnread(Number(r?.unread) || 0)).catch(() => {});
+    fetchUnread();
+    let sock;
+    (async () => { sock = await connectSocket(); sock.on("notification", () => setUnread((u) => u + 1)); })();
+    return () => { sock?.off("notification"); };
   }, []);
 
   const activeRoom = allotment ? allotment._id : trip ? trip._id : null;
@@ -234,8 +244,9 @@ export default function EmployeeHomeScreen({ navigation }) {
             <Text style={styles.heroGreet}>{greeting()}, {firstName} 👋</Text>
             <Text style={styles.heroId}>Employee ID {empId}</Text>
           </View>
-          <TouchableOpacity style={styles.bell} onPress={() => navigation.navigate("EmployeeHistory")}>
+          <TouchableOpacity style={styles.bell} onPress={() => navigation.navigate("Notifications")}>
             <Text style={styles.bellIcon}>🔔</Text>
+            {unread > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{unread > 9 ? "9+" : unread}</Text></View>}
           </TouchableOpacity>
         </View>
 
@@ -449,6 +460,8 @@ const styles = StyleSheet.create({
   heroId: { color: colors.textDim, fontSize: 13, marginTop: 2 },
   bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.panel, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line },
   bellIcon: { fontSize: 20 },
+  badge: { position: "absolute", top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.coral, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
+  badgeText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   sectionHead: { paddingHorizontal: spacing.lg, marginTop: spacing.lg, marginBottom: spacing.sm },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "800" },
   card: { backgroundColor: colors.panel, borderRadius: radius.lg, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.line, ...shadow.card },

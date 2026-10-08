@@ -527,10 +527,11 @@ function emitToAdmins(event, payload) {
 function adminId() {
   return db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get()?.id;
 }
-function notify(userId, title, message) {
+function notify(userId, title, message, opts = {}) {
   if (userId == null) return;
-  db.prepare('INSERT INTO notifications (user_id, title, message) VALUES (?,?,?)').run(userId, title, message);
-  emitToUser(userId, 'notification', { title, message, created_at: ts() });
+  const info = db.prepare('INSERT INTO notifications (user_id, title, message, company_id, type, created_by) VALUES (?,?,?,?,?,?)')
+    .run(userId, title, message, opts.company_id != null ? opts.company_id : null, opts.type || 'system', opts.created_by != null ? opts.created_by : null);
+  emitToUser(userId, 'notification', { id: Number(info.lastInsertRowid), title, message, type: opts.type || 'system', created_at: ts() });
 }
 
 /* ---------------- SCHOOL VERTICAL GUARDS ---------------- */
@@ -2830,6 +2831,65 @@ app.delete('/api/admin/notifications/:id', auth, role('admin', 'vendor'), (req, 
 app.delete('/api/admin/notifications', auth, role('admin', 'vendor'), (req, res) => {
   db.prepare('DELETE FROM notifications WHERE user_id=?').run(req.user.id);
   res.json({ ok: true });
+});
+
+/* ---------------- NOTIFICATIONS (all roles) ---------------- */
+app.get('/api/notifications', auth, (req, res) => {
+  const rows = db.prepare('SELECT id, title, message, type, read, created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 100').all(req.user.id);
+  const unread = db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id=? AND read=0').get(req.user.id).c;
+  res.json({ notifications: rows, unread });
+});
+app.post('/api/notifications/read', auth, (req, res) => {
+  const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+  if (ids.length) {
+    db.prepare(`UPDATE notifications SET read=1 WHERE user_id=? AND id IN (${ids.map(() => '?').join(',')})`).run(req.user.id, ...ids);
+  } else {
+    db.prepare('UPDATE notifications SET read=1 WHERE user_id=? AND read=0').run(req.user.id);
+  }
+  res.json({ ok: true });
+});
+
+/* ---------------- ANNOUNCEMENTS (Admin/Vendor compose) ---------------- */
+app.post('/api/admin/notifications/send', auth, role('admin', 'vendor'), (req, res) => {
+  const { title, body, target, routeId, userId, type } = req.body || {};
+  if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title required' });
+  const msg = String(body || '').trim() || String(title).trim();
+  const sc = companyAdminScope(req);
+  const ven = isVendorReq(req);
+  let recipients = [];
+  if (target === 'user' && userId) {
+    const u = db.prepare('SELECT id FROM users WHERE id=?').get(Number(userId));
+    if (u) recipients = [Number(u.id)];
+  } else if (target === 'route' && routeId) {
+    recipients = db.prepare('SELECT DISTINCT employee_id AS id FROM schedules WHERE route_id=?').all(Number(routeId)).map((r) => Number(r.id));
+  } else if (target === 'drivers') {
+    let where = "role='driver'";
+    if (ven) where += ` AND vendor_id=${Number(req.user.vendor_id) || -1}`;
+    else if (!sc.isOwner) where += ` AND company_id=${Number(sc.cid)}`;
+    recipients = db.prepare(`SELECT id FROM users WHERE ${where}`).all().map((r) => Number(r.id));
+  } else if (target === 'employees') {
+    let where = "role='employee'";
+    if (!ven && !sc.isOwner) where += ` AND company_id=${Number(sc.cid)}`;
+    recipients = db.prepare(`SELECT id FROM users WHERE ${where}`).all().map((r) => Number(r.id));
+  } else {
+    let where = "role IN ('employee','driver')";
+    if (ven) where = `role='driver' AND vendor_id=${Number(req.user.vendor_id) || -1}`;
+    else if (!sc.isOwner) where += ` AND company_id=${Number(sc.cid)}`;
+    recipients = db.prepare(`SELECT id FROM users WHERE ${where}`).all().map((r) => Number(r.id));
+  }
+  recipients = [...new Set(recipients)];
+  const companyId = ven ? null : (sc.isOwner ? null : sc.cid);
+  const batch = require('crypto').randomBytes(8).toString('hex');
+  const ins = db.prepare('INSERT INTO notifications (user_id, title, message, company_id, type, created_by, batch) VALUES (?,?,?,?,?,?,?)');
+  for (const uid of recipients) ins.run(uid, String(title).trim(), msg, companyId, type || 'announcement', req.user.id, batch);
+  for (const uid of recipients) emitToUser(uid, 'notification', { title: String(title).trim(), message: msg, type: type || 'announcement', created_at: ts() });
+  res.json({ ok: true, sent: recipients.length, batch });
+});
+app.get('/api/admin/notifications/sent', auth, role('admin', 'vendor'), (req, res) => {
+  const rows = db.prepare(`SELECT batch, MIN(title) AS title, MIN(message) AS message, MIN(created_at) AS created_at,
+      COUNT(*) AS total, SUM(CASE WHEN read=1 THEN 1 ELSE 0 END) AS read_count
+    FROM notifications WHERE batch IS NOT NULL AND created_by=? GROUP BY batch ORDER BY MIN(id) DESC LIMIT 50`).all(req.user.id);
+  res.json(rows);
 });
 
 app.get('/api/admin/sms-log', auth, role('admin', 'vendor'), (req, res) => {
@@ -5183,6 +5243,12 @@ try { db.exec(`ALTER TABLE users ADD COLUMN assign_trip TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN assign_line TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN assign_stand TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN assign_at TEXT;`); } catch (e) {}
+// Notifications: company scoping, targeting, type and a per-send batch id.
+try { db.exec(`ALTER TABLE notifications ADD COLUMN company_id INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE notifications ADD COLUMN target_role TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE notifications ADD COLUMN type TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE notifications ADD COLUMN created_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE notifications ADD COLUMN batch TEXT;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};

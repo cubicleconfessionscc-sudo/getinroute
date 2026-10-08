@@ -30,6 +30,7 @@ import FeedbackScreen from "../screens/shared/FeedbackScreen";
 import HelpScreen from "../screens/shared/HelpScreen";
 import SettingsScreen from "../screens/shared/SettingsScreen";
 import PendingSyncScreen from "../screens/shared/PendingSyncScreen";
+import NotificationsScreen from "../screens/shared/NotificationsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -101,6 +102,7 @@ function EmployeeStack() {
       <Stack.Screen name="EmployeeHistory" component={withScreenHeader(EmployeeHistoryScreen, "Trip history")} />
       <Stack.Screen name="EmployeeLocations" component={withScreenHeader(EmployeeLocationsScreen, "My Address")} />
       <Stack.Screen name="EmployeeProfile" component={withScreenHeader(EmployeeProfileScreen, "Profile")} />
+      <Stack.Screen name="Notifications" component={withScreenHeader(NotificationsScreen, "Notifications")} />
       <Stack.Screen name="Chat" component={withScreenHeader(ChatScreen, "Chat")} />
       <Stack.Screen name="Feedback" component={withScreenHeader(FeedbackScreen, "Feedback")} />
       <Stack.Screen name="Help" component={withScreenHeader(HelpScreen, "Help")} />
@@ -115,6 +117,7 @@ function DriverStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="DriverAssignment">
       <Stack.Screen name="DriverAssignment" component={DriverAssignmentScreen} />
       <Stack.Screen name="DriverHome" component={withScreenHeader(DriverHomeScreen, null, { back: false })} />
+      <Stack.Screen name="Notifications" component={withScreenHeader(NotificationsScreen, "Notifications")} />
       <Stack.Screen name="Chat" component={withScreenHeader(ChatScreen, "Chat")} />
       <Stack.Screen name="Feedback" component={withScreenHeader(FeedbackScreen, "Feedback")} />
       <Stack.Screen name="Help" component={withScreenHeader(HelpScreen, "Help")} />
