@@ -385,6 +385,14 @@ export default function EmployeeHomeScreen({ navigation }) {
               </View>
             </View>
 
+            {(allotment.tripType || v.line || allotment.stand) ? (
+              <View style={styles.assignRow}>
+                {allotment.tripType ? <Text style={styles.assignChip}>Trip: {allotment.tripType}</Text> : null}
+                {v.line ? <Text style={styles.assignChip}>Line {v.line}</Text> : null}
+                {allotment.stand ? <Text style={styles.assignChip}>Stand {allotment.stand}</Text> : null}
+              </View>
+            ) : null}
+
             <View style={styles.routeRow}>
               <View style={[styles.routeDot, { backgroundColor: colors.primary }]} />
               <Text style={styles.routeText}>{ms.pickup?.address || locationProfile?.pickupLocation?.address || "Pickup point"}</Text>
@@ -610,6 +618,8 @@ const styles = StyleSheet.create({
   etaDetail: { color: colors.textDim, fontSize: 13, marginTop: 3, fontWeight: "600" },
   etaUpdating: { color: colors.textDim, fontSize: 13, fontStyle: "italic" },
   infoGrid: { flexDirection: "row", marginTop: 14, gap: 12 },
+  assignRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  assignChip: { backgroundColor: colors.navy, color: "#FFFFFF", borderRadius: radius.pill, paddingVertical: 5, paddingHorizontal: 12, fontSize: 12, fontWeight: "800", overflow: "hidden" },
   infoItem: { flex: 1, backgroundColor: colors.panel2, borderRadius: radius.md, padding: 12, borderWidth: 1, borderColor: colors.line },
   infoLabel: { color: colors.textDim, fontSize: 10, fontWeight: "800", letterSpacing: 0.6 },
   infoValue: { color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 4 },

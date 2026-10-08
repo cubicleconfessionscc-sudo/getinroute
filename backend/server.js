@@ -2370,9 +2370,11 @@ app.get('/api/schedules/config', auth, (req, res) => {
 
 app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), h(async (req, res) => {
   const rows = db.prepare(`
-    SELECT s.*, v.vehicle_name, v.plate, v.type, v.capacity, v.line, v.driver_name, v.driver_phone, v.lat, v.lng, v.speed, v.live_status, v.current_stop,
-      r.name AS route_name, r.stops, r.speed_limit
+    SELECT s.*, v.vehicle_name, v.plate, v.type, v.capacity, v.line, v.stand AS v_stand, v.driver_name, v.driver_phone, v.lat, v.lng, v.speed, v.live_status, v.current_stop,
+      r.name AS route_name, r.stops, r.speed_limit,
+      drv.assign_trip AS drv_assign_trip, drv.assign_line AS drv_assign_line, drv.assign_stand AS drv_assign_stand
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
+    LEFT JOIN users drv ON drv.role = 'driver' AND drv.vehicle_id = s.vehicle_id
     WHERE s.employee_id = ? AND s.date >= ? AND s.status IN ('confirmed','in_progress') AND s.archived_at IS NULL
     ORDER BY s.date ASC, s.id DESC LIMIT 5`).all(req.user.id, dateOnly());
   res.json(await Promise.all(rows.map(async (row) => {
@@ -2409,6 +2411,11 @@ app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), h(asy
       status: row.status === 'in_progress' ? 'started' : 'assigned',
       state: row.state || null,
       sharingLive: anyLocation,
+      // Operational assignment the employee can see: the parked stand and the
+      // driver's selected trip (First/Second) / line.
+      stand: row.v_stand || row.drv_assign_stand || null,
+      tripType: row.drv_assign_trip || null,
+      assignLine: row.drv_assign_line || null,
       etaMinutes: eta ? eta.minutes : null,
       etaKm: eta ? eta.km : null,
       driverLocation: anyLocation ? { lat: row.lat, lng: row.lng } : null,
