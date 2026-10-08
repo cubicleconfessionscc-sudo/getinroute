@@ -5885,7 +5885,11 @@ app.post('/api/schedules/allotments/:id/checkin-otp', auth, role('driver'), (req
   const input = String(otp || '').trim();
   if (!/^\d{6}$/.test(input)) return res.status(400).json({ message: 'Valid 6-digit OTP required' });
   verifyAllotmentAccess(req, res, (rows) => {
-    const s = rows.find((r) => String(r.employee_id) === String(employeeId));
+    const cands = rows.filter((r) => String(r.employee_id) === String(employeeId));
+    // Prefer the schedule with a pending (unconfirmed) OTP check-in so the
+    // driver's entry matches the employee's swipe — an employee can have more
+    // than one schedule on a run and the older ones are already completed.
+    const s = cands.find((r) => pendingCheckinOf(r.id)) || cands.find((r) => r.status !== 'completed' && !r.absent) || cands[0];
     if (!s) return res.status(404).json({ message: 'Employee not on this run' });
     // Sequential boarding gate: a passenger whose pickup is still LOCKED (an
     // earlier pending pickup has not been verified) cannot be checked in. This
