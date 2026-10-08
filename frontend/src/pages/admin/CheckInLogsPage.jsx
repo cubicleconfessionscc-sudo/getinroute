@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, todayStr, downloadCsv } from '../../api';
+import { api, todayStr, downloadFile } from '../../api';
 import { Badge } from '../../components/ui';
 import { Download, FileSpreadsheet } from 'lucide-react';
 
@@ -26,7 +26,18 @@ export default function CheckInLogsPage() {
   const exportFile = (fmt) => {
     const q = new URLSearchParams({ date });
     if (filter.eventType) q.set('eventType', filter.eventType);
-    window.open(`/api/admin/export/checkin-logs?${q.toString()}`, '_blank');
+    // Attach the JWT (window.open cannot send the Authorization header).
+    const ext = fmt === 'excel' ? '.xlsx' : '';
+    downloadFile(`/api/admin/export/checkin-logs${ext}?${q.toString()}`, `getinroute-checkin-logs-${date}${ext}`)
+      .catch(() => alert('Export failed. Please try again.'));
+  };
+
+  // Full operational Trip Audit (check-in / OTP / check-out / no-show + GPS) as a
+  // real Excel workbook. Tenant-scoped on the server.
+  const exportTripAudit = () => {
+    const q = new URLSearchParams({ from: date, to: date });
+    downloadFile(`/api/admin/trip-audit.xlsx?${q.toString()}`, `GetInRoute_Trip_Audit_${date}.xlsx`)
+      .catch(() => alert('Export failed. Please try again.'));
   };
 
   return (
@@ -42,6 +53,7 @@ export default function CheckInLogsPage() {
         </select>
         <button className="btn btn-outline btn-sm" onClick={() => exportFile('csv')}><Download size={14} /> CSV</button>
         <button className="btn btn-green btn-sm" onClick={() => exportFile('excel')}><FileSpreadsheet size={14} /> Excel</button>
+        <button className="btn btn-green btn-sm" onClick={exportTripAudit}><FileSpreadsheet size={14} /> Export Trip Audit (Excel)</button>
       </div>
 
       {loading ? <div className="empty">Loading…</div> : logs.length === 0 ? (
