@@ -134,7 +134,14 @@ export default function DriverHomeScreen({ navigation }) {
   const loadTrip = useCallback(async () => {
     const [trips, al] = await Promise.all([getAssignedTrips(), getMyDriverAllotments()]);
     const active = trips.find((t) => t.status !== "completed" && t.status !== "cancelled");
-    const activeRun = al.find((a) => a.status === "assigned" || a.status === "started");
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const runnable = (a) => a.status === "assigned" || a.status === "started";
+    // Prefer today's run so the driver operates the correct trip when several
+    // days are allotted; fall back to the most recent runnable one.
+    const activeRun =
+      al.find((a) => runnable(a) && String(a.date || "").slice(0, 10) === todayStr) ||
+      al.find(runnable);
     setTrip(active || null);
     setRun(activeRun || null);
     setAllotted(al);
