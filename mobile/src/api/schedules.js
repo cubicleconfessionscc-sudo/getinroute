@@ -38,12 +38,22 @@ export function getMyLiveAllotment() {
   return client.get("/schedules/allotments/live").then((r) => r.data);
 }
 
-// Employee: swipe check-in / check-out / SafeDrop on an allotted run
-export function allotmentCheckIn(id) {
-  return client.post(`/schedules/allotments/${id}/checkin`).then((r) => r.data);
+// Employee: swipe check-in / check-out / SafeDrop on an allotted run.
+// A fresh device GPS fix (lat/lng) is captured at the moment of the action and
+// sent with the request so every check-in/check-out is geotagged for audit.
+export function allotmentCheckIn(id, { lat = null, lng = null } = {}) {
+  return client.post(`/schedules/allotments/${id}/checkin`, { lat, lng }).then((r) => r.data);
 }
-export function allotmentCheckOut(id) {
-  return client.post(`/schedules/allotments/${id}/checkout`).then((r) => r.data);
+export function allotmentCheckOut(id, { lat = null, lng = null } = {}) {
+  return client.post(`/schedules/allotments/${id}/checkout`, { lat, lng }).then((r) => r.data);
+}
+
+// Driver: verify a passenger's boarding/check-out OTP for an allotted run.
+export function driverCheckinOtp(allotmentId, employeeId, otp) {
+  return client.post(`/schedules/allotments/${allotmentId}/checkin-otp`, { employeeId, otp }).then((r) => r.data);
+}
+export function driverCheckoutOtp(allotmentId, employeeId, otp) {
+  return client.post(`/schedules/allotments/${allotmentId}/checkout-otp`, { employeeId, otp }).then((r) => r.data);
 }
 
 // Employee: Night Safety Drop — confirm reached home / raise help request.

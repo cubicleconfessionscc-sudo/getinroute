@@ -24,7 +24,7 @@ import EmployeeScheduleScreen from "../screens/employee/EmployeeScheduleScreen";
 import EmployeeLocationsScreen from "../screens/employee/EmployeeLocationsScreen";
 import EmployeeProfileScreen from "../screens/employee/EmployeeProfileScreen";
 import DriverHomeScreen from "../screens/driver/DriverHomeScreen";
-import DriverAssignmentScreen from "../screens/driver/DriverAssignmentScreen";
+import DriverEndTripScreen from "../screens/driver/DriverEndTripScreen";
 import ChatScreen from "../screens/shared/ChatScreen";
 import FeedbackScreen from "../screens/shared/FeedbackScreen";
 import HelpScreen from "../screens/shared/HelpScreen";
@@ -112,11 +112,14 @@ function EmployeeStack() {
   );
 }
 
+// Driver login lands straight on the home/trip screen. Trip/Line/Stand
+// selection is NOT part of authentication and is only collected in the
+// end-of-trip (logout) procedure via the DriverEndTrip screen.
 function DriverStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="DriverAssignment">
-      <Stack.Screen name="DriverAssignment" component={DriverAssignmentScreen} />
+    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="DriverHome">
       <Stack.Screen name="DriverHome" component={withScreenHeader(DriverHomeScreen, null, { back: false })} />
+      <Stack.Screen name="DriverEndTrip" component={withScreenHeader(DriverEndTripScreen, "End of trip")} />
       <Stack.Screen name="Notifications" component={withScreenHeader(NotificationsScreen, "Notifications")} />
       <Stack.Screen name="Chat" component={withScreenHeader(ChatScreen, "Chat")} />
       <Stack.Screen name="Feedback" component={withScreenHeader(FeedbackScreen, "Feedback")} />

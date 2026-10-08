@@ -534,6 +534,31 @@ function notify(userId, title, message, opts = {}) {
   emitToUser(userId, 'notification', { id: Number(info.lastInsertRowid), title, message, type: opts.type || 'system', created_at: ts() });
 }
 
+/* Notify the rider that their ride is confirmed with the ACTUAL assigned
+   vehicle + driver details (number, name, contact, pickup time). Used whenever
+   an admin/vendor assigns or re-assigns a vehicle/driver. */
+function notifyRideConfirmed(scheduleRow) {
+  if (!scheduleRow || !scheduleRow.employee_id) return;
+  const v = scheduleRow.vehicle_id
+    ? db.prepare('SELECT vehicle_name, plate, type FROM vehicles WHERE id=?').get(scheduleRow.vehicle_id)
+    : null;
+  const drv = scheduleRow.vehicle_id
+    ? db.prepare("SELECT name, phone FROM users WHERE role='driver' AND vehicle_id=?").get(scheduleRow.vehicle_id)
+    : null;
+  const vehNo = v ? (v.vehicle_name || v.plate || '') : '';
+  const when = scheduleRow.login_time || scheduleRow.pickup_time || scheduleRow.logout_time || scheduleRow.drop_time || '';
+  const bits = [];
+  if (vehNo) bits.push(`Vehicle ${vehNo}`);
+  if (drv && drv.name) bits.push(`Driver ${drv.name}`);
+  if (drv && drv.phone) bits.push(`Contact ${drv.phone}`);
+  if (when) bits.push(`Pickup ${when}`);
+  const msg = bits.length
+    ? `Your ride is confirmed. ${bits.join(' · ')}. Track your cab in the app.`
+    : 'Your ride is confirmed. Track your cab in the app.';
+  notify(scheduleRow.employee_id, 'Your ride is confirmed ✅', msg);
+  emitToUser(scheduleRow.employee_id, 'allotment:updated', { scheduleId: scheduleRow.id, status: 'confirmed' });
+}
+
 /* ---------------- SCHOOL VERTICAL GUARDS ---------------- */
 // School admins must never reach the shared /api/admin (company/global) routes.
 // Their portal lives entirely under /api/school/*.
@@ -2134,6 +2159,28 @@ function allotmentShape(r, extra = {}) {
   return { ...base, ...extra };
 }
 
+/* Live ETA between two GPS points using the existing geo routing provider
+   (Google → OSRM → geometric fallback), cached. Returns null when either point
+   is missing so callers can show "Updating location…" instead of a wrong ETA. */
+async function etaBetween(from, to) {
+  if (!from || !to) return null;
+  const ok = (p) => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
+  if (!ok(from) || !ok(to)) return null;
+  try {
+    const r = await calculateRoute([
+      { lat: Number(from.lat), lng: Number(from.lng) },
+      { lat: Number(to.lat), lng: Number(to.lng) }
+    ]);
+    if (!r || !Number.isFinite(Number(r.durationSeconds))) return null;
+    return {
+      minutes: Math.max(1, Math.round(Number(r.durationSeconds) / 60)),
+      km: Math.round((Number(r.distanceMeters) || 0) / 100) / 10
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 app.get('/api/schedules/mine', auth, role('employee', 'admin'), (req, res) => {
   const rows = db.prepare(`
     SELECT s.*, v.vehicle_name, v.plate, v.type, v.driver_name, v.driver_phone, v.lat, v.lng, v.speed, v.live_status,
@@ -2172,14 +2219,14 @@ app.get('/api/schedules/config', auth, (req, res) => {
 
 /* ---------------- ALLOTMENTS (schedules-as-allotments for employee web) ---------------- */
 
-app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), (req, res) => {
+app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), h(async (req, res) => {
   const rows = db.prepare(`
     SELECT s.*, v.vehicle_name, v.plate, v.type, v.capacity, v.line, v.driver_name, v.driver_phone, v.lat, v.lng, v.speed, v.live_status, v.current_stop,
       r.name AS route_name, r.stops, r.speed_limit
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id LEFT JOIN routes r ON r.id = s.route_id
     WHERE s.employee_id = ? AND s.date >= ? AND s.status IN ('confirmed','in_progress') AND s.archived_at IS NULL
     ORDER BY s.date ASC, s.id DESC LIMIT 5`).all(req.user.id, dateOnly());
-  res.json(rows.map((row) => {
+  res.json(await Promise.all(rows.map(async (row) => {
     const base = allotmentShape(row, {
       status: row.status === 'in_progress' ? 'started' : 'assigned'
     });
@@ -2195,6 +2242,17 @@ app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), (req,
     const safetyAlert = row.vehicle_id ? db.prepare("SELECT * FROM safety_alerts WHERE schedule_id=? ORDER BY id DESC LIMIT 1").get(row.id) : null;
     const numVid = row.vehicle_id ? Number(row.vehicle_id) : null;
     const nextRun = numVid ? runNextStopState(numVid, row.date) : null;
+    // Pickup point for ETA: prefer the route stop coordinates; if the route has
+    // no geocoded stop, fall back to the employee's registered pickup (home)
+    // coordinates so a real ETA is still produced from the driver's live GPS.
+    let pickupPt = (st.lat != null && st.lng != null) ? { lat: st.lat, lng: st.lng } : null;
+    if (!pickupPt) {
+      const u = db.prepare('SELECT home_lat, home_lng, lat, lng FROM users WHERE id=?').get(row.employee_id);
+      if (u && u.home_lat != null && u.home_lng != null) pickupPt = { lat: u.home_lat, lng: u.home_lng };
+      else if (u && u.lat != null && u.lng != null) pickupPt = { lat: u.lat, lng: u.lng };
+    }
+    const drvPt = anyLocation ? { lat: row.lat, lng: row.lng } : null;
+    const eta = await etaBetween(drvPt, pickupPt);
     return {
       ...base,
       _id: `run-${row.vehicle_id}-${row.date}`,
@@ -2202,6 +2260,8 @@ app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), (req,
       status: row.status === 'in_progress' ? 'started' : 'assigned',
       state: row.state || null,
       sharingLive: anyLocation,
+      etaMinutes: eta ? eta.minutes : null,
+      etaKm: eta ? eta.km : null,
       driverLocation: anyLocation ? { lat: row.lat, lng: row.lng } : null,
       checkinPending: !!pending,
       pendingOtp: pending ? pending.otp : null,
@@ -2225,8 +2285,8 @@ app.get('/api/schedules/allotments/live', auth, role('employee', 'admin'), (req,
       },
       sequence: base.sequence.map((e) => e.isMe ? { ...e, status: myStopStatus } : e)
     };
-  }));
-});
+  })));
+}));
 
 app.get('/api/schedules/allotments', auth, role('employee', 'admin'), (req, res) => {
   const rows = db.prepare(`
@@ -2640,6 +2700,12 @@ app.put('/api/admin/schedules/:id', auth, role('admin', 'vendor'), (req, res) =>
     const ven = isVendorReq(req) ? req.user.vendor_id : (db.prepare('SELECT vendor_id FROM vehicles WHERE id=?').get(vid) || {}).vendor_id || null;
     linkDriver(vid, b.driver_id, ven);
   }
+  // Whenever a vehicle or driver is assigned/changed, confirm the ride to the
+  // employee with the real vehicle + driver details.
+  if (b.vehicle_id || b.driver_id) {
+    const updated = db.prepare('SELECT * FROM schedules WHERE id=?').get(s.id);
+    notifyRideConfirmed(updated);
+  }
   res.json({ ok: true });
 });
 app.delete('/api/admin/schedules/:id', auth, role('admin'), (req, res) => {
@@ -2692,10 +2758,10 @@ app.post('/api/admin/schedules/:id/approve', auth, role('admin', 'vendor'), h(as
     }
   }
   const emp = db.prepare('SELECT * FROM users WHERE id=?').get(s.employee_id);
+  const confirmedRow = db.prepare('SELECT * FROM schedules WHERE id=?').get(s.id);
+  notifyRideConfirmed(confirmedRow);
   const msg = `Your cab request for ${s.date} was approved${b.pickup_time ? ` at ${b.pickup_time}` : ''}. Track your cab in the app.`;
-  notify(s.employee_id, 'Cab Request Approved ✅', msg);
   if (emp && emp.phone) await sendSms({ to: emp.phone, body: `[GetinRoute] ${msg}` });
-  emitToUser(s.employee_id, 'allotment:updated', { scheduleId: s.id, status: 'confirmed' });
   res.json({ ok: true, id: s.id });
 }));
 

@@ -7,6 +7,7 @@ import { requestCancelRun } from "../../api/driver";
 import { getStandingPoint, setStandingPoint } from "../../api/driver";
 import { connectSocket, joinTrip, leaveTrip, updateStopStatus, updateAllotmentStop } from "../../services/socket";
 import { startDriverTracking, stopDriverTracking } from "../../services/location";
+import { useActiveScreenAwake } from "../../services/screenAwake";
 import { getSupportConfig } from "../../api/support";
 import { useAuth } from "../../context/AuthContext";
 import SubscriptionStatusBar from "../../components/SubscriptionStatusBar";
@@ -96,6 +97,11 @@ export default function DriverHomeScreen({ navigation }) {
   // Skips announcing on the very first load so an already-existing run isn't
   // spoken the moment the app opens.
   const isFirstLoadRef = useRef(true);
+
+  // Keep the screen awake during an active trip, live tracking and any
+  // boarding/OTP/SOS/checklist modal; release it when the trip ends or the app
+  // is backgrounded.
+  useActiveScreenAwake(!!run || !!trip || sosModal || checklistModal || standingModal || cancelModal);
 
   useEffect(() => {
     getSupportConfig()
@@ -346,6 +352,12 @@ export default function DriverHomeScreen({ navigation }) {
               await stopDriverTracking();
               setTracking(false);
               await loadTrip();
+              // Hand off to the end-of-trip procedure (Trip/Line/Stand + Reset).
+              navigation.navigate("DriverEndTrip", {
+                runId: run._id,
+                runName: run.slotLabel || "",
+                direction: run.direction
+              });
             } catch (err) {
               Alert.alert("Couldn't end trip", err.response?.data?.message || err.message);
             }
@@ -507,7 +519,7 @@ export default function DriverHomeScreen({ navigation }) {
           >
             {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
             <TouchableOpacity onPress={() => navigation.navigate("Settings")}><Text style={styles.link}>Settings</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate("DriverAssignment")}><Text style={styles.link}>Change Assignment</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setStandingModal(true)}><Text style={styles.link}>Standing point</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
             <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
           </ScrollView>
@@ -548,7 +560,7 @@ export default function DriverHomeScreen({ navigation }) {
           {helpline ? <TouchableOpacity onPress={callHelpline}><Text style={styles.link}>✆ Call</Text></TouchableOpacity> : null}
           {activeId ? <TouchableOpacity onPress={() => navigation.navigate("Chat", { tripId: activeId })}><Text style={styles.link}>Chat</Text></TouchableOpacity> : null}
           <TouchableOpacity onPress={() => navigation.navigate("Settings")}><Text style={styles.link}>Settings</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate("DriverAssignment")}><Text style={styles.link}>Change Assignment</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setStandingModal(true)}><Text style={styles.link}>Standing point</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate("Help")}><Text style={styles.link}>Help</Text></TouchableOpacity>
           <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
         </ScrollView>

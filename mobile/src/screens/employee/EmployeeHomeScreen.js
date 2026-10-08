@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, Linking, Modal, ActivityIndicator } from "react-native";
 import MapView, { Marker } from "react-native-maps";
-import { getMyTrips, checkIn, checkOut } from "../../api/trips";
+import { getMyTrips } from "../../api/trips";
 import {
   getMyLiveAllotment,
   getMySchedules,
@@ -14,6 +14,8 @@ import {
 import { getLocationProfile } from "../../api/locations";
 import { getSupportConfig } from "../../api/support";
 import { getNotifications } from "../../api/notifications";
+import { getFreshPosition } from "../../services/location";
+import { useActiveScreenAwake } from "../../services/screenAwake";
 import { connectSocket, joinTrip, leaveTrip, getSocket } from "../../services/socket";
 import { useAuth } from "../../context/AuthContext";
 import SwipeButton from "../../components/SwipeButton";
@@ -69,6 +71,27 @@ function fmtTime(t) {
   return `${String(hh).padStart(2, "0")}:${String(m || 0).padStart(2, "0")} ${ampm}`;
 }
 
+// Expected arrival clock time from an ETA in minutes.
+function etaArrival(minutes) {
+  if (minutes == null || !Number.isFinite(Number(minutes))) return null;
+  const t = new Date(Date.now() + Number(minutes) * 60000);
+  const ampm = t.getHours() >= 12 ? "PM" : "AM";
+  const hh = t.getHours() % 12 === 0 ? 12 : t.getHours() % 12;
+  return `${String(hh).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ${ampm}`;
+}
+
+// Confirmed-state banner: only claim "confirmed" once a vehicle AND driver are
+// actually assigned. Never show "driver assigned soon" once assigned.
+function confirmedBanner(allotment) {
+  const v = allotment?.vehicle || {};
+  const d = allotment?.driver || {};
+  const hasVehicle = !!(v.vehicleNumber && v.vehicleNumber !== "Vehicle TBD");
+  const hasDriver = !!(d.name);
+  if (hasVehicle && hasDriver) return { label: "BOOKING CONFIRMED · DRIVER ASSIGNED", tone: "ok" };
+  if (hasVehicle) return { label: "VEHICLE ASSIGNED · AWAITING DRIVER", tone: "ok" };
+  return { label: "BOOKING RECEIVED · AWAITING VEHICLE", tone: "warn" };
+}
+
 export default function EmployeeHomeScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [allotment, setAllotment] = useState(null);
@@ -82,8 +105,14 @@ export default function EmployeeHomeScreen({ navigation }) {
   const [mapOpen, setMapOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
+  const [boardingOtp, setBoardingOtp] = useState(null);
+  const [actionBusy, setActionBusy] = useState(false);
   const mapRef = useRef(null);
   const isFirstLoadRef = useRef(true);
+
+  // Keep the screen awake whenever the employee has an active trip or the live
+  // tracking map open, and release it the moment the trip/tracking finishes.
+  useActiveScreenAwake(!!allotment || mapOpen);
 
   const callHelpline = () => {
     if (helpline) Linking.openURL(`tel:${helpline.replace(/[^+\d]/g, "")}`).catch(() => {});
@@ -184,16 +213,56 @@ export default function EmployeeHomeScreen({ navigation }) {
 
   const nextSchedule = upcoming[0] || null;
   const hasLiveTrip = !!allotment;
+  const conf = hasLiveTrip ? confirmedBanner(allotment) : null;
+  const etaMins = Number(allotment?.etaMinutes);
+  const eta = hasLiveTrip && allotment?.sharingLive && Number.isFinite(etaMins)
+    ? {
+        headline: etaMins <= 1 ? "Driver is arriving now" : `Driver is ${etaMins} min away`,
+        detail: `ETA: ${etaMins} min${allotment?.etaAt || etaArrival(etaMins) ? ` · Expected arrival: ${allotment?.etaAt || etaArrival(etaMins)}` : ""}`
+      }
+    : null;
+  const scheduledTime = fmtTime(
+    allotment?.slotLabel && String(allotment.slotLabel).includes(":")
+      ? allotment.slotLabel
+      : allotment?.pickupTime || allotment?.startTime
+  );
 
+  // Check-in: capture a fresh device GPS fix at the exact moment of the action
+  // (stored against the trip for audit), then show the boarding OTP the driver
+  // must enter to complete the boarding gate.
   async function doCheckIn() {
-    if (!allotment) return;
-    try { await allotmentCheckIn(allotment._id); load(); }
-    catch (e) { Alert.alert("Check-in not allowed", e.response?.data?.message || e.message); load(); }
+    if (!allotment || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const pos = await getFreshPosition();
+      const res = await allotmentCheckIn(allotment._id, { lat: pos?.lat ?? null, lng: pos?.lng ?? null });
+      if (res?.otp) setBoardingOtp(res.otp);
+      if (!pos) {
+        Alert.alert("Location unavailable", "We couldn't get a GPS fix just now, so the check-in location could not be attached. Retry when you have signal.");
+      }
+      load();
+    } catch (e) {
+      Alert.alert("Check-in not allowed", e.response?.data?.error || e.response?.data?.message || e.message);
+      load();
+    } finally { setActionBusy(false); }
   }
+  // Check-out: capture a fresh GPS fix at the drop moment and record it.
   async function doCheckOut() {
-    if (!allotment) return;
-    try { await allotmentCheckOut(allotment._id); load(); }
-    catch (e) { Alert.alert("Check-out not allowed", e.response?.data?.message || e.message); load(); }
+    if (!allotment || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const pos = await getFreshPosition();
+      const res = await allotmentCheckOut(allotment._id, { lat: pos?.lat ?? null, lng: pos?.lng ?? null });
+      if (!pos) {
+        Alert.alert("Location unavailable", "We couldn't get a GPS fix for this check-out. Please retry when you have signal so your drop location is recorded.");
+      } else if (res?.safety?.required) {
+        Alert.alert("Check-out recorded", res.safety.message || "Please confirm you reached home safely.");
+      }
+      load();
+    } catch (e) {
+      Alert.alert("Check-out not allowed", e.response?.data?.error || e.response?.data?.message || e.message);
+      load();
+    } finally { setActionBusy(false); }
   }
   function doCancelSchedule(s) {
     Alert.alert("Cancel this schedule?", "This schedule will no longer be active.", [
@@ -263,13 +332,39 @@ export default function EmployeeHomeScreen({ navigation }) {
           <View style={[styles.card, styles.tripCard]}>
             <View style={styles.tripTopRow}>
               <View style={styles.typePill}><Text style={styles.typePillText}>{dirLabel(allotment.direction)}</Text></View>
-              <Text style={styles.tripTime}>{fmtTime(allotment.slotLabel && allotment.slotLabel.includes(":") ? allotment.slotLabel : (allotment.pickupTime || allotment.startTime))}</Text>
+              <Text style={styles.tripTime}>{scheduledTime}</Text>
             </View>
-            <View style={styles.statusRow}>
-              <View style={[styles.statusDot, { backgroundColor: statusMeta(allotment.status).tone === "ok" ? colors.green : colors.amber }]} />
-              <Text style={styles.statusText}>{statusMeta(allotment.status).label}</Text>
+
+            <View style={[styles.confirmBanner, { backgroundColor: conf.tone === "ok" ? colors.primarySoft : "#FFF6E5" }]}>
+              <Text style={[styles.confirmBannerText, { color: conf.tone === "ok" ? colors.primary : colors.amber }]}>{conf.label}</Text>
             </View>
-            <Text style={styles.tripVehicle}>🚗 {v.vehicleNumber || "Vehicle TBD"} {v.vehicleType ? `· ${v.vehicleType}` : ""}</Text>
+
+            {eta ? (
+              <View style={styles.etaRow}>
+                <Text style={styles.etaHeadline}>🚕 {eta.headline}</Text>
+                <Text style={styles.etaDetail}>{eta.detail}</Text>
+              </View>
+            ) : (
+              <View style={styles.etaRow}>
+                <Text style={styles.etaUpdating}>
+                  {allotment.sharingLive ? "Updating location…" : "Live tracking starts when your driver sets off."}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.infoGrid}>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>VEHICLE</Text>
+                <Text style={styles.infoValue}>{v.vehicleNumber || "Not assigned"}</Text>
+                {v.vehicleType ? <Text style={styles.infoSub}>{v.vehicleType}{v.line ? ` · Line ${v.line}` : ""}</Text> : null}
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>DRIVER</Text>
+                <Text style={styles.infoValue}>{d.name || "Not assigned"}</Text>
+                {d.phone ? <Text style={styles.infoSub}>{d.phone}</Text> : null}
+              </View>
+            </View>
+
             <View style={styles.routeRow}>
               <View style={[styles.routeDot, { backgroundColor: colors.primary }]} />
               <Text style={styles.routeText}>{ms.pickup?.address || locationProfile?.pickupLocation?.address || "Pickup point"}</Text>
@@ -277,9 +372,11 @@ export default function EmployeeHomeScreen({ navigation }) {
             <View style={styles.routeLine} />
             <View style={styles.routeRow}>
               <View style={[styles.routeDot, { backgroundColor: colors.violet }]} />
-              <Text style={styles.routeText}>{ms.drop?.address || "Destination"}</Text>
+              <Text style={styles.routeText}>{ms.drop?.address || (allotment.direction === "toHome" ? "Home" : "Office")}</Text>
             </View>
-            <Text style={styles.driverText}>{d.name ? `Driver: ${d.name}${d.phone ? ` · ${d.phone}` : ""}` : "Driver assigned soon"}</Text>
+
+            <Text style={styles.schedLine}>Scheduled pickup · {fmtDate(allotment.date)} · {scheduledTime}</Text>
+
             <View style={styles.tripActions}>
               <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={() => setMapOpen(true)}>
                 <Text style={styles.smallBtnPrimaryText}>Track vehicle</Text>
@@ -360,12 +457,32 @@ export default function EmployeeHomeScreen({ navigation }) {
           <Action icon="📜" label="History" onPress={() => navigation.navigate("EmployeeHistory")} />
         </View>
 
-        {/* Live trip actions */}
+        {/* Boarding — only shown when the employee actually has an eligible action */}
         {hasLiveTrip && (canCheckIn || canCheckOut || ms?.safeDropEnabled) && (
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Boarding</Text>
-            {canCheckIn && <SwipeButton label="Swipe right to check in" direction="right" color={colors.primary} onConfirm={doCheckIn} />}
-            {!canCheckIn && canCheckOut && <SwipeButton label="Swipe out to check out" direction="left" color={colors.amber} onConfirm={doCheckOut} />}
+            {canCheckIn && (
+              <>
+                <Text style={styles.boardHint}>Swipe to check in at your pickup point. Your GPS location is recorded for the trip record.</Text>
+                <SwipeButton label={actionBusy ? "Checking in…" : "Swipe right to check in"} direction="right" color={colors.primary} onConfirm={doCheckIn} />
+              </>
+            )}
+            {boardingOtp ? (
+              <View style={styles.otpPanel}>
+                <Text style={styles.otpPanelTitle}>CHECK-IN SUCCESSFUL</Text>
+                <Text style={styles.otpPanelCode}>{boardingOtp}</Text>
+                <Text style={styles.otpPanelHint}>Tell this OTP to your driver to confirm boarding.</Text>
+                <TouchableOpacity style={styles.otpDismiss} onPress={() => setBoardingOtp(null)}>
+                  <Text style={styles.otpDismissText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {!canCheckIn && canCheckOut && (
+              <>
+                <Text style={styles.boardHint}>Swipe to check out when you leave the cab. Your drop location is recorded.</Text>
+                <SwipeButton label={actionBusy ? "Checking out…" : "Swipe out to check out"} direction="left" color={colors.amber} onConfirm={doCheckOut} />
+              </>
+            )}
             {ms?.safeDropEnabled && !ms?.safeDropConfirmedAt && (
               <View style={{ marginTop: 12 }}>
                 <SwipeButton label="Swipe to confirm safe arrival" direction="right" color={colors.violet} onConfirm={doSafeDrop} />
@@ -485,6 +602,25 @@ const styles = StyleSheet.create({
   smallBtnText: { color: colors.text, fontSize: 13, fontWeight: "700" },
   smallBtnPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
   smallBtnPrimaryText: { color: "#fff", fontSize: 13, fontWeight: "800" },
+  confirmBanner: { borderRadius: radius.sm, paddingVertical: 8, paddingHorizontal: 12, marginTop: 12 },
+  confirmBannerText: { fontSize: 12, fontWeight: "800", letterSpacing: 0.6 },
+  etaRow: { marginTop: 12 },
+  etaHeadline: { color: colors.text, fontSize: 17, fontWeight: "800" },
+  etaDetail: { color: colors.textDim, fontSize: 13, marginTop: 3, fontWeight: "600" },
+  etaUpdating: { color: colors.textDim, fontSize: 13, fontStyle: "italic" },
+  infoGrid: { flexDirection: "row", marginTop: 14, gap: 12 },
+  infoItem: { flex: 1, backgroundColor: colors.panel2, borderRadius: radius.md, padding: 12, borderWidth: 1, borderColor: colors.line },
+  infoLabel: { color: colors.textDim, fontSize: 10, fontWeight: "800", letterSpacing: 0.6 },
+  infoValue: { color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 4 },
+  infoSub: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  schedLine: { color: colors.textDim, fontSize: 12.5, marginTop: 12, fontWeight: "600" },
+  boardHint: { color: colors.textDim, fontSize: 12.5, marginBottom: 10, lineHeight: 18 },
+  otpPanel: { marginTop: 14, backgroundColor: colors.primarySoft, borderRadius: radius.md, padding: 16, alignItems: "center", borderWidth: 1, borderColor: colors.primary },
+  otpPanelTitle: { color: colors.primary, fontSize: 12, fontWeight: "800", letterSpacing: 1 },
+  otpPanelCode: { color: colors.navy, fontSize: 40, fontWeight: "900", letterSpacing: 8, marginTop: 8 },
+  otpPanelHint: { color: colors.textDim, fontSize: 12.5, marginTop: 8, textAlign: "center" },
+  otpDismiss: { marginTop: 14, backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 28 },
+  otpDismissText: { color: "#fff", fontWeight: "800", fontSize: 14 },
   cardLabel: { color: colors.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, fontWeight: "700" },
   emptyCard: { alignItems: "center", paddingVertical: spacing.xl },
   emptyEmoji: { fontSize: 40 },

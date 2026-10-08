@@ -24,6 +24,40 @@ export function showLocationDisclosure() {
 }
 
 /**
+ * Returns a FRESH device GPS fix at the moment of a check-in / check-out so the
+ * action is geotagged with where the passenger actually was. Falls back to a
+ * very recent last-known position only if a live fix cannot be obtained within
+ * the timeout. Returns null (never a stale/wrong coordinate) when location is
+ * unavailable or permission is denied — callers must handle that explicitly.
+ */
+export async function getFreshPosition(timeoutMs = 9000) {
+  try {
+    const fg = await Location.getForegroundPermissionsAsync();
+    if (fg.status !== "granted") {
+      const req = await Location.requestForegroundPermissionsAsync();
+      if (req.status !== "granted") return null;
+    }
+    let timer = null;
+    const pos = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); })
+    ]).catch(() => null);
+    if (timer) clearTimeout(timer);
+    let p = pos;
+    if (!p) {
+      // Only accept a last-known fix if it is very recent (< 20s).
+      p = await Location.getLastKnownPositionAsync({ maxAge: 20000 }).catch(() => null);
+    }
+    if (!p || !p.coords) return null;
+    const { latitude, longitude, accuracy } = p.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return { lat: latitude, lng: longitude, accuracy: accuracy ?? null };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Starts watching the driver's GPS position and streams lat/lng + current
  * speed (converted from m/s to km/h) to the server every ~4 seconds or
  * every 20 meters, whichever comes first. This is what powers both the
