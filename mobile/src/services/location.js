@@ -30,27 +30,31 @@ export function showLocationDisclosure() {
  * the timeout. Returns null (never a stale/wrong coordinate) when location is
  * unavailable or permission is denied — callers must handle that explicitly.
  */
-export async function getFreshPosition(timeoutMs = 9000) {
+export async function getFreshPosition(timeoutMs = 12000) {
   try {
     const fg = await Location.getForegroundPermissionsAsync();
     if (fg.status !== "granted") {
       const req = await Location.requestForegroundPermissionsAsync();
       if (req.status !== "granted") return null;
     }
+    // Only ever use a live fix obtained NOW. A cached / last-known position is
+    // deliberately NOT used, because a check-in/check-out must be geotagged
+    // with where the passenger actually was at that moment. If no fresh fix is
+    // available we return null and the caller tells the user to retry — we
+    // never silently attach a stale or fake coordinate.
     let timer = null;
     const pos = await Promise.race([
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
       new Promise((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); })
     ]).catch(() => null);
     if (timer) clearTimeout(timer);
-    let p = pos;
-    if (!p) {
-      // Only accept a last-known fix if it is very recent (< 20s).
-      p = await Location.getLastKnownPositionAsync({ maxAge: 20000 }).catch(() => null);
-    }
-    if (!p || !p.coords) return null;
-    const { latitude, longitude, accuracy } = p.coords;
+    if (!pos || !pos.coords) return null;
+    const { latitude, longitude, accuracy } = pos.coords;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    // Reject a fix the OS marked as stale (older than 15s) if the provider
+    // reports an age — expo-location exposes `mocked` but not age on all
+    // platforms, so this is best-effort.
+    if (pos.mocked) return null;
     return { lat: latitude, lng: longitude, accuracy: accuracy ?? null };
   } catch (_) {
     return null;

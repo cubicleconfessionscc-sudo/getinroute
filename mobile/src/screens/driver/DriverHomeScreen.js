@@ -480,6 +480,10 @@ export default function DriverHomeScreen({ navigation }) {
   // Navigate to the approved pickup point (or drop as a fallback). Google Maps
   // handles the actual turn-by-turn; tapping opens it with the destination set.
   function openMaps(stop) {
+    if (stop.locked) {
+      Alert.alert("Location locked", "This passenger's exact pickup location unlocks after the previous passenger's OTP is verified.");
+      return;
+    }
     const p = stop.pickup && stop.pickup.lat != null ? stop.pickup : stop.drop || stop;
     if (typeof p.lat !== "number" || typeof p.lng !== "number") {
       Alert.alert("No coordinates", "This stop has no approved map coordinates yet.");
@@ -679,7 +683,7 @@ export default function DriverHomeScreen({ navigation }) {
         {stops.map((stop, i) => {
           const picked = stop.status === "picked_up" || stop.status === "reached" || stop.status === "completed";
           return (
-            <View key={i} style={styles.stopCard}>
+            <View key={i} style={[styles.stopCard, stop.locked && styles.stopCardLocked]}>
               <View style={styles.stopHeader}>
                 <View style={styles.stopIndexWrap}>
                   <Text style={styles.stopIndex}>{i + 1}</Text>
@@ -691,60 +695,75 @@ export default function DriverHomeScreen({ navigation }) {
                       {fmtTime12(stop.pickupTime)}{stop.nextDay ? " · next day" : ""}
                     </Text>
                   ) : null}
-                  {stop.etaMinutes != null || stop.etaKm != null ? (
-                    <Text style={styles.stopEta}>ETA {fmtEta(stop.etaMinutes, stop.etaKm)}</Text>
-                  ) : null}
-                  {stop.phone ? <Text style={styles.stopMeta}>{stop.phone}</Text> : null}
+                  {stop.locked ? (
+                    <Text style={styles.stopLocked}>🔒 Locked until the previous passenger checks in</Text>
+                  ) : (
+                    <>
+                      {stop.etaMinutes != null || stop.etaKm != null ? (
+                        <Text style={styles.stopEta}>ETA {fmtEta(stop.etaMinutes, stop.etaKm)}</Text>
+                      ) : null}
+                      {stop.phone ? <Text style={styles.stopMeta}>{stop.phone}</Text> : null}
+                    </>
+                  )}
                 </View>
                 {picked && (
                   <View style={styles.pickedBadge}>
                     <Text style={styles.pickedBadgeText}>PICKED</Text>
                   </View>
                 )}
-              </View>
-              <View style={styles.stopActions}>
-                <TouchableOpacity style={styles.navButton} onPress={() => openMaps(stop)}>
-                  <Text style={styles.navButtonText}>Navigate</Text>
-                </TouchableOpacity>
-                {stop.phone ? (
-                  <TouchableOpacity style={styles.callButton} onPress={() => callNumber(stop.phone)}>
-                    <Text style={styles.callButtonText}>Call</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {stop.status !== "completed" && (
-                  <TouchableOpacity
-                    style={[styles.stopButton, stop.status === "reached" && { borderColor: colors.amber }]}
-                    onPress={() => (run ? markRunStop(stop, stop.status === "reached" ? "completed" : "reached") : markTripStop(stop, "reached"))}
-                  >
-                    <Text style={styles.stopButtonText}>{stop.status === "reached" ? "Completed" : "Reached"}</Text>
-                  </TouchableOpacity>
+                {stop.locked && (
+                  <View style={styles.lockedBadge}>
+                    <Text style={styles.lockedBadgeText}>LOCKED</Text>
+                  </View>
                 )}
               </View>
-              {run && stop.status !== "completed" && (
-                <View style={styles.otpRow}>
-                  <TextInput
-                    style={styles.otpInput}
-                    placeholder="OTP"
-                    placeholderTextColor={colors.textDim}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={otpInputs[stop.employeeId] || ""}
-                    onChangeText={(t) => setOtpInputs((prev) => ({ ...prev, [stop.employeeId]: t }))}
-                  />
-                  <TouchableOpacity style={styles.otpCheckInBtn} onPress={() => driverOtpCheckIn(run._id, stop.employeeId)}>
-                    <Text style={styles.otpCheckInBtnText}>Check-in</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.otpCheckOutBtn} onPress={() => driverOtpCheckOut(run._id, stop.employeeId)}>
-                    <Text style={styles.otpCheckOutBtnText}>Check-out</Text>
-                  </TouchableOpacity>
-                </View>
+              {!stop.locked && (
+                <>
+                  <View style={styles.stopActions}>
+                    <TouchableOpacity style={styles.navButton} onPress={() => openMaps(stop)}>
+                      <Text style={styles.navButtonText}>Navigate</Text>
+                    </TouchableOpacity>
+                    {stop.phone ? (
+                      <TouchableOpacity style={styles.callButton} onPress={() => callNumber(stop.phone)}>
+                        <Text style={styles.callButtonText}>Call</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {stop.status !== "completed" && (
+                      <TouchableOpacity
+                        style={[styles.stopButton, stop.status === "reached" && { borderColor: colors.amber }]}
+                        onPress={() => (run ? markRunStop(stop, stop.status === "reached" ? "completed" : "reached") : markTripStop(stop, "reached"))}
+                      >
+                        <Text style={styles.stopButtonText}>{stop.status === "reached" ? "Completed" : "Reached"}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {run && stop.status !== "completed" && (
+                    <View style={styles.otpRow}>
+                      <TextInput
+                        style={styles.otpInput}
+                        placeholder="OTP"
+                        placeholderTextColor={colors.textDim}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                        value={otpInputs[stop.employeeId] || ""}
+                        onChangeText={(t) => setOtpInputs((prev) => ({ ...prev, [stop.employeeId]: t }))}
+                      />
+                      <TouchableOpacity style={styles.otpCheckInBtn} onPress={() => driverOtpCheckIn(run._id, stop.employeeId)}>
+                        <Text style={styles.otpCheckInBtnText}>Check-in</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.otpCheckOutBtn} onPress={() => driverOtpCheckOut(run._id, stop.employeeId)}>
+                        <Text style={styles.otpCheckOutBtnText}>Check-out</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <Text style={styles.stopAddress}>
+                    Pickup: {stop.pickup?.address || stop.address || "Pickup point"}
+                  </Text>
+                  <Text style={styles.stopAddressDim}>
+                    Drop: {stop.drop?.address || stop.address || "Drop stop"}
+                  </Text>
+                </>
               )}
-              <Text style={styles.stopAddress}>
-                Pickup: {stop.pickup?.address || stop.address || "Pickup point"}
-              </Text>
-              <Text style={styles.stopAddressDim}>
-                Drop: {stop.drop?.address || stop.address || "Drop stop"}
-              </Text>
             </View>
           );
         })}
@@ -969,6 +988,10 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     marginBottom: spacing.sm
   },
+  stopCardLocked: { opacity: 0.85, borderStyle: "dashed" },
+  stopLocked: { color: colors.textDim, fontSize: 12.5, fontWeight: "700", marginTop: 2 },
+  lockedBadge: { backgroundColor: "rgba(15,30,61,0.08)", borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, paddingVertical: 4, paddingHorizontal: 8 },
+  lockedBadgeText: { color: colors.textDim, fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
   stopHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 4 },
   stopActions: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6, marginBottom: 4 },
   stopIndexWrap: { width: 22, height: 22, borderRadius: 6, backgroundColor: "rgba(139,124,246,0.2)", alignItems: "center", justifyContent: "center", marginTop: 2 },

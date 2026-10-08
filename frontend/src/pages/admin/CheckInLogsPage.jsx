@@ -55,8 +55,10 @@ export default function CheckInLogsPage() {
                 <th>Employee</th>
                 <th>Driver</th>
                 <th>Vehicle</th>
+                <th>Line / Stand</th>
                 <th>Event</th>
-                <th>Method</th>
+                <th>OTP</th>
+                <th>Location (GPS)</th>
                 <th>Trip Date</th>
               </tr>
             </thead>
@@ -67,15 +69,28 @@ export default function CheckInLogsPage() {
                   <td>{l.employeeId?.name || '—'}</td>
                   <td>{l.driverId?.name || '—'}</td>
                   <td>{l.vehicleNumber || '—'}</td>
+                  <td>{l.line != null ? `Line ${l.line}` : '—'}{l.stand ? ` · ${l.stand}` : ''}</td>
                   <td><Badge color={EVENT_COLORS[l.eventType] || 'slate'}>{l.eventType}</Badge></td>
-                  <td><Badge color={METHOD_COLORS[l.method] || 'slate'}>{l.method === 'swipe' ? 'Swipe / App' : l.method === 'otp' ? 'OTP Verified' : l.method}</Badge></td>
+                  <td>
+                    {l.eventType === 'checkin'
+                      ? <Badge color={l.otpVerified ? 'green' : 'amber'}>{l.otpVerified ? 'Verified' : 'Pending'}</Badge>
+                      : '—'}
+                  </td>
+                  <td>
+                    {l.hasGps ? (
+                      <a href={`https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`} target="_blank" rel="noreferrer">
+                        {Number(l.lat).toFixed(5)}, {Number(l.lng).toFixed(5)}
+                      </a>
+                    ) : <span style={{ color: 'var(--muted)' }}>Not captured</span>}
+                  </td>
                   <td>{l.tripDate || '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
-            Employees who missed check-in/check-out for scheduled trips appear in the No-Show Report. OTP-verified entries are marked above.
+            Each check-in / check-out records the device GPS position at the moment of the action (open the link to view on a map).
+            Employees who missed check-in/check-out appear in the No-Show Report. OTP-verified boardings are marked above.
           </p>
         </div>
       )}

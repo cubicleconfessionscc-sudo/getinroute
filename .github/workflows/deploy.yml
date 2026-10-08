@@ -83,8 +83,14 @@ jobs:
         run: |
           # Polls Railway's own deployment status and fails unless it is SUCCESS.
           # A transient CLI error or a non-JSON reply is retried rather than
-          # aborting the poll, and ANSI colour is stripped before parsing.
-          node scripts/wait-for-railway-deploy.mjs --service getinroute-app
+          # aborting the poll, and ANSI colour is stripped before parsing. The
+          # project/environment are passed explicitly because the restored CI
+          # config is not guaranteed to be linked, which previously made the
+          # lookup return nothing and spin to the timeout even on success.
+          node scripts/wait-for-railway-deploy.mjs \
+            --service getinroute-app \
+            --project df871066-14b2-4fbc-b218-1782d72063be \
+            --environment production
 
       - name: Verify the new build is actually live
         run: |

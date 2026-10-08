@@ -238,7 +238,7 @@ export default function EmployeeHomeScreen({ navigation }) {
       const res = await allotmentCheckIn(allotment._id, { lat: pos?.lat ?? null, lng: pos?.lng ?? null });
       if (res?.otp) setBoardingOtp(res.otp);
       if (!pos) {
-        Alert.alert("Location unavailable", "We couldn't get a GPS fix just now, so the check-in location could not be attached. Retry when you have signal.");
+        Alert.alert("Unable to get your location", "Unable to get your current location. Please enable location and try again.");
       }
       load();
     } catch (e) {
@@ -254,7 +254,7 @@ export default function EmployeeHomeScreen({ navigation }) {
       const pos = await getFreshPosition();
       const res = await allotmentCheckOut(allotment._id, { lat: pos?.lat ?? null, lng: pos?.lng ?? null });
       if (!pos) {
-        Alert.alert("Location unavailable", "We couldn't get a GPS fix for this check-out. Please retry when you have signal so your drop location is recorded.");
+        Alert.alert("Unable to get your location", "Unable to get your current location. Please enable location and try again.");
       } else if (res?.safety?.required) {
         Alert.alert("Check-out recorded", res.safety.message || "Please confirm you reached home safely.");
       }
@@ -457,8 +457,8 @@ export default function EmployeeHomeScreen({ navigation }) {
           <Action icon="📜" label="History" onPress={() => navigation.navigate("EmployeeHistory")} />
         </View>
 
-        {/* Boarding — only shown when the employee actually has an eligible action */}
-        {hasLiveTrip && (canCheckIn || canCheckOut || ms?.safeDropEnabled) && (
+        {/* Boarding — shown while there is an eligible action or a just-completed state */}
+        {hasLiveTrip && (canCheckIn || canCheckOut || ms?.safeDropEnabled || ms?.status === "picked_up" || ms?.status === "completed") && (
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Boarding</Text>
             {canCheckIn && (
@@ -477,11 +477,23 @@ export default function EmployeeHomeScreen({ navigation }) {
                 </TouchableOpacity>
               </View>
             ) : null}
+            {ms?.status === "picked_up" && (
+              <View style={styles.verifiedRow}>
+                <Text style={styles.verifiedTick}>✓</Text>
+                <Text style={styles.verifiedText}>CHECK-IN VERIFIED — you are on board</Text>
+              </View>
+            )}
             {!canCheckIn && canCheckOut && (
               <>
                 <Text style={styles.boardHint}>Swipe to check out when you leave the cab. Your drop location is recorded.</Text>
                 <SwipeButton label={actionBusy ? "Checking out…" : "Swipe out to check out"} direction="left" color={colors.amber} onConfirm={doCheckOut} />
               </>
+            )}
+            {ms?.status === "completed" && (
+              <View style={styles.verifiedRow}>
+                <Text style={[styles.verifiedTick, { color: colors.green }]}>✓</Text>
+                <Text style={styles.verifiedText}>CHECK-OUT COMPLETED — thank you for riding</Text>
+              </View>
             )}
             {ms?.safeDropEnabled && !ms?.safeDropConfirmedAt && (
               <View style={{ marginTop: 12 }}>
@@ -621,6 +633,9 @@ const styles = StyleSheet.create({
   otpPanelHint: { color: colors.textDim, fontSize: 12.5, marginTop: 8, textAlign: "center" },
   otpDismiss: { marginTop: 14, backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 28 },
   otpDismissText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  verifiedRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
+  verifiedTick: { color: colors.primary, fontSize: 18, fontWeight: "900" },
+  verifiedText: { color: colors.text, fontSize: 13.5, fontWeight: "800" },
   cardLabel: { color: colors.textDim, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, fontWeight: "700" },
   emptyCard: { alignItems: "center", paddingVertical: spacing.xl },
   emptyEmoji: { fontSize: 40 },

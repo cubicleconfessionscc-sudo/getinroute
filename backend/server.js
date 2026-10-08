@@ -1849,14 +1849,25 @@ app.get('/api/admin/checkin-logs', auth, role('admin', 'vendor'), (req, res) => 
   query += " AND (c.type != 'checkin' OR c.method != 'otp' OR c.confirmed = 1)";
   query += ' ORDER BY c.id DESC LIMIT 200';
   const rows = db.prepare(query).all(...params);
-  res.json(rows.map((r) => ({
-    _id: r.id, createdAt: r.time,
-    employeeId: { _id: r.user_id, name: r.emp_name, employeeId: r.emp_emp_id },
-    driverId: r.driver_name ? { _id: r.driver_id || 0, name: r.driver_name } : null,
-    vehicleNumber: r.vehicle_name || r.plate || '—',
-    eventType: r.type, method: r.method || 'swipe',
-    tripDate: r.schedule_date || (r.time ? r.time.slice(0, 10) : '—')
-  })));
+  res.json(rows.map((r) => {
+    const veh = r.schedule_id ? db.prepare('SELECT line, stand FROM vehicles WHERE id=(SELECT vehicle_id FROM schedules WHERE id=?)').get(r.schedule_id) : null;
+    return {
+      _id: r.id, createdAt: r.time,
+      employeeId: { _id: r.user_id, name: r.emp_name, employeeId: r.emp_emp_id },
+      driverId: r.driver_name ? { _id: r.driver_id || 0, name: r.driver_name } : null,
+      vehicleNumber: r.vehicle_name || r.plate || '—',
+      line: veh && veh.line != null ? veh.line : null,
+      stand: veh && veh.stand ? veh.stand : null,
+      scheduleId: r.schedule_id || null,
+      eventType: r.type, method: r.method || 'swipe',
+      otpVerified: r.type === 'checkin' ? (r.method === 'otp' ? !!r.confirmed : true) : null,
+      // GPS audit: the device position captured at the exact moment of the action.
+      lat: r.lat != null ? Number(r.lat) : null,
+      lng: r.lng != null ? Number(r.lng) : null,
+      hasGps: r.lat != null && r.lng != null,
+      tripDate: r.schedule_date || (r.time ? r.time.slice(0, 10) : '—')
+    };
+  }));
 });
 
 /* ---------------- NO-SHOWS ---------------- */
@@ -3356,10 +3367,22 @@ app.get('/api/driver/today', auth, role('driver'), (req, res) => {
   }
   const runState = runNextStopState(veh.id, dateOnly());
   const rsEmp = runState.employeeId ? db.prepare('SELECT name FROM users WHERE id=?').get(runState.employeeId) : null;
+  // Passenger location protection: redact the coordinates of any locked pickup
+  // stop in the route before returning it to the driver.
+  const access = pickupAccessMap(schedules);
+  const routeStops = route ? JSON.parse(route.stops) : null;
+  if (Array.isArray(routeStops)) {
+    for (const s of schedules) {
+      if (access[s.id] === false) {
+        const idx = Math.max(0, (Number(s.sequence) || 1) - 1);
+        if (routeStops[idx]) routeStops[idx] = { ...routeStops[idx], lat: null, lng: null, name: '' };
+      }
+    }
+  }
   res.json({
     vehicle: veh,
-    route: route ? { ...route, stops: JSON.parse(route.stops) } : null,
-    schedules: schedules.map((s) => ({ ...s, checkins: checkinMap[s.id] || [], student_profile: studentMap[s.id] || null })),
+    route: route ? { ...route, stops: routeStops } : null,
+    schedules: schedules.map((s) => ({ ...s, checkins: checkinMap[s.id] || [], student_profile: studentMap[s.id] || null, locked: access[s.id] === false })),
     run: { ...runState, employee_name: rsEmp ? rsEmp.name : null },
     date: dateOnly()
   });
@@ -4812,6 +4835,51 @@ function recomputeRunState(vehicleId, date) {
   return state;
 }
 
+/* ================= PASSENGER LOCATION PROTECTION =================
+   A driver may only receive the EXACT pickup coordinates of a passenger once
+   every earlier pending pickup on the same run has been OTP/check-in verified
+   (or marked absent). The first pending pickup is always accessible (the driver
+   must be able to drive to it); every subsequent pickup stays LOCKED — with no
+   lat/lng and no pickup address anywhere in the response — until the previous
+   passenger is confirmed. This is enforced server-side and is independent of
+   the client, so a modified app or a direct API call cannot bypass it. */
+function pickupAccessMap(orderedRows) {
+  const map = {};
+  let prevAllDone = true;
+  for (const r of orderedRows) {
+    const isPickup = !!(r.login_time || r.pickup_time);
+    if (isPickup) {
+      map[r.id] = prevAllDone;
+      const done = !!r.absent || !!confirmedCheckinOf(r.id);
+      if (!done) prevAllDone = false;
+    } else {
+      map[r.id] = true; // drop legs: the passenger is already on board
+    }
+  }
+  return map;
+}
+
+// Authoritative gate: is this passenger's exact location allowed for THIS driver?
+// Verifies the authenticated driver owns the vehicle/run and that prior pickups
+// on the run have been verified.
+function canAccessPassengerLocation(driverUserId, scheduleId) {
+  const drv = db.prepare("SELECT vehicle_id FROM users WHERE id=? AND role='driver'").get(driverUserId);
+  if (!drv || !drv.vehicle_id) return false;
+  const s = db.prepare('SELECT * FROM schedules WHERE id=?').get(scheduleId);
+  if (!s || Number(s.vehicle_id) !== Number(drv.vehicle_id)) return false;
+  const rows = db.prepare('SELECT * FROM schedules WHERE vehicle_id=? AND date=? ORDER BY COALESCE(sequence,99999), id').all(s.vehicle_id, s.date);
+  return pickupAccessMap(rows)[s.id] !== false;
+}
+
+// Strip coordinates + pickup address from a stop object when it is locked.
+function redactStop(stop, unlocked) {
+  if (unlocked) return stop;
+  const redacted = { ...stop, locked: true, address: '', lat: null, lng: null };
+  if (stop.pickup) redacted.pickup = { address: '', lat: null, lng: null };
+  if (stop.drop) redacted.drop = { address: '', lat: null, lng: null };
+  return redacted;
+}
+
 /* ================= TRIP EVENTS / LOG ================= */
 // Append an auditable trip event (boarded/dropped/cancelled/office_arrival/…)
 // to the schedule's immutable event trail. trip_events is additive-only.
@@ -5492,12 +5560,31 @@ app.get('/api/trips/assigned', auth, role('driver'), (req, res) => {
     SELECT s.*, u.name AS emp_name, u.emp_id, u.phone AS emp_phone, r.stops, r.name AS route_name
     FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN routes r ON r.id=s.route_id
     WHERE s.vehicle_id=? ORDER BY s.date DESC, s.sequence LIMIT 50`).all(vid);
-  res.json(rows.map((r) => ({
-    _id: String(r.id), status: r.status === 'in_progress' ? 'started' : r.status === 'completed' ? 'completed' : 'assigned',
-    date: r.date, routeName: r.route_name, employeeName: r.emp_name, empId: r.emp_id,
-    pickupTime: r.pickup_time, dropTime: r.drop_time,
-    route: tripRouteFor(r, r.stops ? JSON.parse(r.stops) : [])
-  })));
+  // Passenger location protection (server-authoritative): redact the exact
+  // coordinates of any route stop whose passenger is still LOCKED (a later
+  // pickup that unlocks only after the previous passenger's OTP is verified).
+  const lockedSeqByDate = {};
+  const byDate = {};
+  for (const r of rows) { (byDate[r.date] = byDate[r.date] || []).push(r); }
+  for (const date of Object.keys(byDate)) {
+    const m = pickupAccessMap(byDate[date]);
+    lockedSeqByDate[date] = new Set(
+      byDate[date].filter((r) => m[r.id] === false).map((r) => Number(r.sequence) || 0)
+    );
+  }
+  res.json(rows.map((r) => {
+    const route = tripRouteFor(r, r.stops ? JSON.parse(r.stops) : []);
+    const lockedSeq = lockedSeqByDate[r.date] || new Set();
+    const safeRoute = route.map((st, i) =>
+      lockedSeq.has(Number(st.sequence) || (i + 1)) ? { ...st, lat: null, lng: null, name: '' } : st
+    );
+    return {
+      _id: String(r.id), status: r.status === 'in_progress' ? 'started' : r.status === 'completed' ? 'completed' : 'assigned',
+      date: r.date, routeName: r.route_name, employeeName: r.emp_name, empId: r.emp_id,
+      pickupTime: r.pickup_time, dropTime: r.drop_time,
+      route: safeRoute
+    };
+  }));
 });
 
 app.get('/api/trips/:id', auth, (req, res) => {
@@ -5506,7 +5593,12 @@ app.get('/api/trips/:id', auth, (req, res) => {
   if (!s) return res.status(404).json({ message: 'Not found' });
   const isOwner = (req.user.role === 'employee' && s.employee_id === req.user.id) || (req.user.role === 'driver' && s.vehicle_id === req.user.vehicle_id) || req.user.role === 'admin';
   if (!isOwner) return res.status(403).json({ message: 'Access denied' });
-  res.json({ _id: String(s.id), status: s.status, date: s.date, routeName: s.route_name, vehicleName: s.vehicle_name, plate: s.plate, driverName: s.driver_name, route: tripRouteFor(s, s.stops ? JSON.parse(s.stops) : []) });
+  let route = tripRouteFor(s, s.stops ? JSON.parse(s.stops) : []);
+  if (req.user.role === 'driver' && s.vehicle_id) {
+    const rows = db.prepare('SELECT * FROM schedules WHERE vehicle_id=? AND date=? ORDER BY COALESCE(sequence,99999), id').all(s.vehicle_id, s.date);
+    if (pickupAccessMap(rows)[s.id] === false) route = route.map((st) => ({ ...st, lat: null, lng: null, name: '' }));
+  }
+  res.json({ _id: String(s.id), status: s.status, date: s.date, routeName: s.route_name, vehicleName: s.vehicle_name, plate: s.plate, driverName: s.driver_name, route });
 });
 
 app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => {
@@ -5526,6 +5618,7 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
     const outTime = first.logout_time || first.drop_time;
     const direction = inTime ? 'toOffice' : 'toHome';
     const anyLocation = !!(vehicle && vehicle.lat && vehicle.lng);
+    const access = pickupAccessMap(rows);
     const seq = rows.map((r, i) => {
       const stops = parseStops(r);
       const rIn = r.login_time || r.pickup_time;
@@ -5533,11 +5626,13 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
       const meIdx = Math.max(0, (Number(r.sequence) || 1) - 1);
       const st = stops[meIdx] || {};
       const isPickup = !!rIn;
-      return {
+      const unlocked = access[r.id] !== false;
+      return redactStop({
         order: i,
         employeeId: String(r.employee_id),
         name: r.emp_name || st.name || `Employee ${i + 1}`,
-        phone: r.emp_phone || '',
+        phone: unlocked ? (r.emp_phone || '') : '',
+        locked: !unlocked,
         address: st.name || r.emp_name || '',
         lat: st.lat ?? null,
         lng: st.lng ?? null,
@@ -5549,7 +5644,7 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
         nextDay: !!rOut && !rIn,
         etaKm: null,
         etaMinutes: null
-      };
+      }, unlocked);
     });
     let officeDestination = null;
     if (direction === 'toOffice') {
@@ -5568,7 +5663,7 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
     let nextStop = null;
     if (nextIdx >= 0) {
       const st = seq[nextIdx];
-      nextStop = { order: st.order, name: st.name, address: st.address, lat: st.lat, lng: st.lng, etaKm: null, etaMinutes: null };
+      nextStop = { order: st.order, name: st.name, address: st.address, lat: st.lat, lng: st.lng, locked: !!st.locked, etaKm: null, etaMinutes: null };
     } else if (officeDestination) {
       nextStop = { order: officeDestination.order, name: 'Office', address: officeDestination.address, lat: officeDestination.lat, lng: officeDestination.lng, etaKm: null, etaMinutes: null };
     }

@@ -21,43 +21,63 @@ const argOf = (flag, fallback) => {
 };
 
 const SERVICE = argOf('--service', 'getinroute-app');
+const PROJECT = argOf('--project', 'df871066-14b2-4fbc-b218-1782d72063be');
+const ENVIRONMENT = argOf('--environment', 'production');
 const ATTEMPTS = Number(argOf('--attempts', '40'));
 const INTERVAL_MS = Number(argOf('--interval', '15000'));
 
-// Only ever pass a plain identifier to the CLI, never interpolated shell text.
-if (!/^[A-Za-z0-9._-]+$/.test(SERVICE)) {
-  console.log(`::error::invalid --service value`);
-  process.exit(1);
+// Only ever pass plain identifiers to the CLI, never interpolated shell text.
+for (const [name, value] of [['--service', SERVICE], ['--project', PROJECT], ['--environment', ENVIRONMENT]]) {
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    console.log(`::error::invalid ${name} value`);
+    process.exit(1);
+  }
 }
 
-// Only ever pass a plain identifier to the CLI. SERVICE is validated above, so
-// building a command string is safe: no caller-supplied text reaches the shell.
-// A string is required because npm installs `railway` as a .cmd shim on Windows,
-// which Node cannot spawn directly, and CI runs it as a POSIX shim.
-const RAILWAY_CMD = 'railway deployment list --limit 1 --json --service ' + SERVICE;
+// The project/environment are passed explicitly: in CI the restored Railway
+// config is not always linked to this project, so a bare `deployment list`
+// resolves nothing and the poll would spin to its timeout even though the
+// deployment itself succeeded. Passing --project/--environment (the same values
+// the `railway up` step used) makes the lookup deterministic.
+// A command string is required because npm installs `railway` as a .cmd shim on
+// Windows, which Node cannot spawn directly, and CI runs it as a POSIX shim.
+const RAILWAY_CMD = `railway deployment list --limit 1 --json --service ${SERVICE} --project ${PROJECT} --environment ${ENVIRONMENT}`;
 
 const ANSI = /\x1b\[[0-9;]*m/g;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let diagLogged = false;
 
 // Returns { id, status } for the newest deployment, or null if the CLI could not
 // be read. A transient CLI error must never abort the poll, so failures are
-// reported and retried rather than thrown.
+// reported and retried rather than thrown. The first failure prints the CLI's
+// stderr so a genuine auth/config problem is visible in the job log instead of
+// being silently retried for the whole timeout.
 function newestDeployment() {
   let out;
   try {
     out = execSync(RAILWAY_CMD, {
       encoding: 'utf8',
       timeout: 60000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
     });
-  } catch {
+  } catch (e) {
+    if (!diagLogged) {
+      diagLogged = true;
+      const err = (e && e.stderr ? String(e.stderr) : (e && e.message) || '').replace(ANSI, '').trim();
+      console.log(`  (railway CLI error, will retry): ${err.slice(0, 500)}`);
+    }
     return null;
   }
   try {
-    const first = JSON.parse(out.replace(ANSI, ''))[0];
+    const parsed = JSON.parse(out.replace(ANSI, ''));
+    const first = Array.isArray(parsed) ? parsed[0] : (parsed && parsed.deployments ? parsed.deployments[0] : null);
     return first ? { id: first.id, status: first.status } : null;
   } catch {
+    if (!diagLogged) {
+      diagLogged = true;
+      console.log(`  (unparseable railway output, will retry): ${out.replace(ANSI, '').trim().slice(0, 300)}`);
+    }
     return null;
   }
 }
