@@ -72,6 +72,8 @@ if (USE_PG) {
   try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_label TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_lat DOUBLE PRECISION;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_lng DOUBLE PRECISION;"); } catch (e) {}
+  // Operational location a user belongs to (nullable; additive).
+  try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));
@@ -349,6 +351,45 @@ CREATE TABLE IF NOT EXISTS nodal_points (
   radius_meters INTEGER DEFAULT 1000,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
+
+-- Multi-location hierarchy: Company -> State -> City -> Operational Location.
+-- company_id reuses the existing tenant key (the owning company admin's user id).
+CREATE TABLE IF NOT EXISTS company_states (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  code TEXT,
+  status TEXT DEFAULT 'active',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_company_states ON company_states(company_id, name);
+
+CREATE TABLE IF NOT EXISTS company_cities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL,
+  state_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT DEFAULT 'active',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_company_cities ON company_cities(company_id, state_id, name);
+CREATE INDEX IF NOT EXISTS idx_company_cities_state ON company_cities(state_id);
+
+CREATE TABLE IF NOT EXISTS company_locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL,
+  state_id INTEGER NOT NULL,
+  city_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  address TEXT,
+  lat REAL,
+  lng REAL,
+  status TEXT DEFAULT 'active',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_company_locations ON company_locations(company_id, city_id, name);
+CREATE INDEX IF NOT EXISTS idx_company_locations_city ON company_locations(city_id);
+CREATE INDEX IF NOT EXISTS idx_company_locations_state ON company_locations(state_id);
 `);
 
 const DEFAULT_SETTINGS = {
@@ -625,6 +666,10 @@ try { db.exec(`ALTER TABLE routes ADD COLUMN office_point_id INTEGER;`); } catch
 try { db.exec(`ALTER TABLE routes ADD COLUMN office_label TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE routes ADD COLUMN office_lat REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE routes ADD COLUMN office_lng REAL;`); } catch (e) {}
+// Operational location a user (employee/driver/admin) belongs to. Additive and
+// nullable so every existing user keeps working (unassigned = no location scope).
+try { db.exec(`ALTER TABLE users ADD COLUMN company_location_id INTEGER;`); } catch (e) {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_users_company_location ON users(company_location_id);`); } catch (e) {}
 // Employee home pickup radius (metres) set by admin on address approval; governs
 // whether pickup defaults to the home address vs a shared pickup point.
 try { db.exec(`ALTER TABLE users ADD COLUMN pickup_radius REAL;`); } catch (e) {}

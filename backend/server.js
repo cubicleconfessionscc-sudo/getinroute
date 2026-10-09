@@ -1945,6 +1945,105 @@ app.delete('/api/company/me/nodal-points/:id', auth, role('admin'), (req, res) =
   res.json({ ok: true });
 });
 
+/* ---------------- MULTI-LOCATION HIERARCHY (Company -> State -> City -> Location) ----------------
+   Additive foundation. company_id reuses the existing tenant key (the owning
+   admin's user id). Every write validates ownership so a company can never
+   attach a state/city/location belonging to another company. */
+function locCompanyId(req) {
+  const sc = companyAdminScope(req);
+  if (!sc.isOwner) return Number(sc.cid) || null;
+  const cid = Number((req.body && req.body.company_id) || (req.query && req.query.company_id) || 0);
+  return cid > 0 ? cid : null;
+}
+// company_location_id values a user is authorized for:
+//   owner (emp_id=ADMIN) -> null (all)
+//   company admin        -> every location of their company
+//   other user           -> their own assigned location (may be empty)
+function accessibleLocationIds(req) {
+  const u = req.user;
+  if (!u) return [];
+  if (u.emp_id === 'ADMIN') return null;
+  const sc = companyAdminScope(req);
+  if (u.role === 'admin') {
+    return db.prepare('SELECT id FROM company_locations WHERE company_id=?').all(Number(sc.cid)).map((r) => Number(r.id));
+  }
+  return u.company_location_id != null ? [Number(u.company_location_id)] : [];
+}
+
+app.get('/api/admin/locations', auth, role('admin', 'vendor'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.json({ states: [], cities: [], locations: [] });
+  res.json({
+    states: db.prepare('SELECT * FROM company_states WHERE company_id=? ORDER BY name').all(cid),
+    cities: db.prepare('SELECT * FROM company_cities WHERE company_id=? ORDER BY name').all(cid),
+    locations: db.prepare('SELECT * FROM company_locations WHERE company_id=? ORDER BY name').all(cid)
+  });
+});
+
+app.post('/api/admin/locations/states', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const name = String((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ error: 'State name required.' });
+  if (db.prepare('SELECT id FROM company_states WHERE company_id=? AND name=?').get(cid, name)) return res.status(409).json({ error: 'State already exists.' });
+  const info = db.prepare('INSERT INTO company_states (company_id, name, code) VALUES (?,?,?)').run(cid, name, String((req.body || {}).code || '').trim() || null);
+  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+
+app.post('/api/admin/locations/cities', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const stateId = Number((req.body || {}).state_id);
+  const name = String((req.body || {}).name || '').trim();
+  if (!stateId || !name) return res.status(400).json({ error: 'State and city name required.' });
+  if (!db.prepare('SELECT id FROM company_states WHERE id=? AND company_id=?').get(stateId, cid)) return res.status(403).json({ error: 'State does not belong to this company.' });
+  if (db.prepare('SELECT id FROM company_cities WHERE company_id=? AND state_id=? AND name=?').get(cid, stateId, name)) return res.status(409).json({ error: 'City already exists in this state.' });
+  const info = db.prepare('INSERT INTO company_cities (company_id, state_id, name) VALUES (?,?,?)').run(cid, stateId, name);
+  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+
+app.post('/api/admin/locations/locations', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const b = req.body || {};
+  const cityId = Number(b.city_id);
+  const name = String(b.name || '').trim();
+  if (!cityId || !name) return res.status(400).json({ error: 'City and location name required.' });
+  const city = db.prepare('SELECT id, state_id FROM company_cities WHERE id=? AND company_id=?').get(cityId, cid);
+  if (!city) return res.status(403).json({ error: 'City does not belong to this company.' });
+  if (!db.prepare('SELECT id FROM company_states WHERE id=? AND company_id=?').get(city.state_id, cid)) return res.status(403).json({ error: 'City state does not belong to this company.' });
+  if (db.prepare('SELECT id FROM company_locations WHERE company_id=? AND city_id=? AND name=?').get(cid, cityId, name)) return res.status(409).json({ error: 'Location already exists in this city.' });
+  const lat = b.lat == null || b.lat === '' ? null : Number(b.lat);
+  const lng = b.lng == null || b.lng === '' ? null : Number(b.lng);
+  const info = db.prepare('INSERT INTO company_locations (company_id, state_id, city_id, name, address, lat, lng) VALUES (?,?,?,?,?,?,?)')
+    .run(cid, city.state_id, cityId, name, String(b.address || '').trim() || null, lat, lng);
+  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+
+app.delete('/api/admin/locations/locations/:id', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  const row = db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'Location not found' });
+  // Preserve history: never hard-delete a location that users reference.
+  const used = db.prepare('SELECT COUNT(*) c FROM users WHERE company_location_id=?').get(row.id).c;
+  if (used) return res.status(409).json({ error: `Location is assigned to ${used} user(s). Reassign them first.` });
+  db.prepare('DELETE FROM company_locations WHERE id=?').run(row.id);
+  res.json({ ok: true });
+});
+
+// Assign a user to an operational location (validated within the company).
+app.put('/api/admin/users/:id/location', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  const target = db.prepare('SELECT id, role, company_id FROM users WHERE id=?').get(Number(req.params.id));
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (cid != null && target.role !== 'admin' && Number(target.company_id) !== cid) return res.status(403).json({ error: 'User is not in this company.' });
+  const raw = (req.body || {}).company_location_id;
+  const locId = raw == null || raw === '' ? null : Number(raw);
+  if (locId != null && !db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locId, cid)) return res.status(403).json({ error: 'Location does not belong to this company.' });
+  db.prepare('UPDATE users SET company_location_id=? WHERE id=?').run(locId, target.id);
+  res.json({ ok: true, company_location_id: locId });
+});
+
 /* ---------------- ADMIN USERS LIST (compatible format) ---------------- */
 
 app.get('/api/admin/users', auth, role('admin', 'vendor'), (req, res) => {
