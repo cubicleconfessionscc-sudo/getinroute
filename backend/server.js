@@ -3463,17 +3463,13 @@ app.get('/api/chat/trip/:tripId', auth, (req, res) => {
 
 app.get('/api/chat/conversations', auth, (req, res) => {
   const me = req.user.id;
+  const q = String(req.query.q || '').trim();
   let rows;
-  if (req.user.role === 'admin') {
-    rows = db.prepare(`
-      SELECT u.id, u.name, u.emp_id, u.role, u.phone,
-        (SELECT message FROM chat_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id) ORDER BY id DESC LIMIT 1) AS last_message,
-        (SELECT created_at FROM chat_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id) ORDER BY id DESC LIMIT 1) AS last_time,
-        (SELECT COUNT(*) FROM chat_messages WHERE sender_id=u.id AND receiver_id=? AND read=0) AS unread
-      FROM users u WHERE u.role IN ('driver','employee') AND (u.role='employee' OR u.last_login IS NOT NULL) ORDER BY last_time DESC NULLS LAST`).all(me, me, me, me, me);
-  } else {
+
+  if (req.user.role === 'employee' || req.user.role === 'driver') {
     // Employee / driver: show the admin plus today's run counterpart(s) so
-    // chat works both directions (driver <-> employee).
+    // chat works both directions (driver <-> employee). The admin is resolved
+    // from the employee's own company first (never another company's admin).
     const baseSpawn = (kind, other) => {
       if (!other) return null;
       const row = db.prepare(`
@@ -3484,7 +3480,9 @@ app.get('/api/chat/conversations', auth, (req, res) => {
         FROM users u WHERE u.id=?`).get(me, me, me, me, me, other);
       return row ? { ...row, kind } : null;
     };
-    const adminConv = baseSpawn('admin', db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get()?.id);
+    const adminId = (req.user.company_id && db.prepare("SELECT id FROM users WHERE role='admin' AND id=?").get(req.user.company_id)?.id)
+      || db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get()?.id;
+    const adminConv = baseSpawn('admin', adminId);
     rows = [adminConv].filter(Boolean);
     if (req.user.role === 'driver' && req.user.vehicle_id) {
       const empIds = db.prepare(`SELECT DISTINCT employee_id FROM schedules WHERE vehicle_id=? AND date=? AND status IN ('confirmed','in_progress')`).all(req.user.vehicle_id, dateOnly());
@@ -3495,7 +3493,51 @@ app.get('/api/chat/conversations', auth, (req, res) => {
       if (driver) rows.push(baseSpawn('driver', driver.id));
     }
     rows = rows.filter(Boolean);
+    return res.json(rows);
   }
+
+  // Admin / vendor / owner: list ONLY people this user is authorized to talk to,
+  // scoped to their own company (a company admin) or vendor. By default only
+  // actual conversations are returned; when a search query is supplied we also
+  // return matching authorized contacts so a new conversation can be started.
+  const role = String(req.query.role || '').trim();
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+  const conds = ["u.role IN ('driver','employee')"];
+  const params = [];
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    const people = vendorPeopleIds(ctx);
+    const pList = people.length ? people.map(Number).join(',') : '0';
+    conds.push(`(u.vendor_id = ${Number(ctx.vid) || -1} OR u.id IN (${pList}))`);
+  } else if (req.user.emp_id !== 'ADMIN') {
+    // Company admin: only their own company's employees/drivers (never trust a
+    // company id from the frontend).
+    conds.push('u.company_id = ?');
+    params.push(Number(req.user.id));
+  }
+  if (role === 'driver' || role === 'employee') { conds.push('u.role = ?'); params.push(role); }
+  if (q) {
+    const like = '%' + q.toLowerCase() + '%';
+    conds.push("(lower(u.name) LIKE ? OR lower(u.emp_id) LIKE ? OR lower(COALESCE(u.phone,'')) LIKE ?)");
+    params.push(like, like, like);
+  } else {
+    // Only show people with an actual conversation.
+    conds.push('EXISTS (SELECT 1 FROM chat_messages cm WHERE (cm.sender_id=u.id AND cm.receiver_id=?) OR (cm.sender_id=? AND cm.receiver_id=u.id))');
+    params.push(me, me);
+  }
+
+  rows = db.prepare(`
+    SELECT u.id, u.name, u.emp_id, u.role, u.phone,
+      (SELECT message FROM chat_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id) ORDER BY id DESC LIMIT 1) AS last_message,
+      (SELECT created_at FROM chat_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id) ORDER BY id DESC LIMIT 1) AS last_time,
+      (SELECT COUNT(*) FROM chat_messages WHERE sender_id=u.id AND receiver_id=? AND read=0) AS unread
+    FROM users u
+    WHERE ${conds.join(' AND ')}
+    ORDER BY last_time DESC NULLS LAST, u.name ASC
+    LIMIT ? OFFSET ?`).all(me, me, me, me, me, ...params, limit, offset);
+
   res.json(rows);
 });
 

@@ -3,7 +3,7 @@ import { api } from '../../api';
 import { useToast } from '../../components/ui';
 import { useSocket, useSocketEvent } from '../../socket';
 import { useAuth } from '../../auth';
-import { Send, MessageCircle } from 'lucide-react';
+import { Send, Search, X, Loader2 } from 'lucide-react';
 
 const ROLE_ICON = { driver: '🚌', employee: '👤' };
 
@@ -16,20 +16,47 @@ export default function AdminChat() {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [tab, setTab] = useState('all');
+  const [search, setSearch] = useState('');
+  const [loadingConvs, setLoadingConvs] = useState(false);
   const bottomRef = useRef(null);
+  const searchTimer = useRef(null);
+  const searchRef = useRef('');
+  const tabRef = useRef('all');
 
-  const loadConversations = () => api.get('/api/chat/conversations').then((rows) => {
-    setConversations((Array.isArray(rows) ? rows : []).filter((r) => tab === 'all' || r.role === tab));
-  }).catch(() => {});
+  useEffect(() => { searchRef.current = search; }, [search]);
+  useEffect(() => { tabRef.current = tab; }, [tab]);
 
-  useEffect(() => { loadConversations(); }, [tab]);
+  const loadConversations = (query) => {
+    const q = query !== undefined ? query : searchRef.current;
+    setLoadingConvs(true);
+    const params = {};
+    if (q && q.trim()) params.q = q.trim();
+    if (tabRef.current !== 'all') params.role = tabRef.current;
+    return api.get('/api/chat/conversations', params)
+      .then((rows) => setConversations(Array.isArray(rows) ? rows : []))
+      .catch(() => setConversations([]))
+      .finally(() => setLoadingConvs(false));
+  };
+
+  useEffect(() => { loadConversations(search); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!active) return setMessages([]);
     api.get(`/api/chat/with/${active.id}`).then(setMessages).catch(() => {});
-  }, [active?.id]);
+  }, [active?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  const onSearchChange = (v) => {
+    setSearch(v);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => loadConversations(v), 350);
+  };
+  const clearSearch = () => {
+    setSearch('');
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    loadConversations('');
+  };
 
   useSocketEvent('chat:message', (msg) => {
     if (active && (msg.sender_id === active.id || msg.receiver_id === active.id)) {
@@ -57,6 +84,9 @@ export default function AdminChat() {
     loadConversations();
   };
 
+  const searching = search.trim().length > 0;
+  const emptyText = searching ? 'No matching conversations found.' : 'No conversations yet.';
+
   return (
     <div className="page">
       <div className="page-head">
@@ -72,22 +102,44 @@ export default function AdminChat() {
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '320px 1fr', minHeight: 'calc(100vh - 220px)' }}>
-        <div className="card" style={{ padding: 0, overflowY: 'auto', maxHeight: 'calc(100vh - 220px)' }}>
-          {conversations.length === 0 && <div className="empty" style={{ padding: 20 }}>No conversations yet.</div>}
-          {conversations.map((c) => (
-            <button key={c.id} onClick={() => openConv(c)}
-              style={{ display: 'flex', gap: 10, width: '100%', textAlign: 'left', padding: '12px 14px', border: 'none', borderBottom: '1px solid #f1f5f9', background: active?.id === c.id ? 'var(--grad-soft)' : '#fff', cursor: 'pointer' }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--grad)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{ROLE_ICON[c.role] || '👤'}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <b style={{ fontSize: 13 }}>{c.name}</b>
-                  {c.unread > 0 && <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px', fontWeight: 700 }}>{c.unread}</span>}
+        <div className="card" style={{ padding: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 220px)' }}>
+          <div style={{ padding: 10, borderBottom: '1px solid var(--line)', position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 20, top: 21, color: 'var(--muted)' }} />
+            <input
+              className="input"
+              style={{ paddingLeft: 34, paddingRight: search ? 32 : 12 }}
+              placeholder="Search by name, employee ID, driver ID or phone number"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              aria-label="Search conversations"
+            />
+            {search ? (
+              <button type="button" onClick={clearSearch} title="Clear search"
+                style={{ position: 'absolute', right: 18, top: 18, border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)' }}>
+                <X size={16} />
+              </button>
+            ) : null}
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {loadingConvs && <div className="empty" style={{ padding: 16, display: 'flex', gap: 8, alignItems: 'center' }}><Loader2 size={14} className="spin" /> Searching…</div>}
+            {!loadingConvs && conversations.length === 0 && <div className="empty" style={{ padding: 20 }}>{emptyText}</div>}
+            {conversations.map((c) => (
+              <button key={c.id} onClick={() => openConv(c)}
+                style={{ display: 'flex', gap: 10, width: '100%', textAlign: 'left', padding: '12px 14px', border: 'none', borderBottom: '1px solid var(--line)', background: active?.id === c.id ? 'var(--grad-soft)' : 'transparent', cursor: 'pointer' }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--grad)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{ROLE_ICON[c.role] || '👤'}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <b style={{ fontSize: 13 }}>{c.name}</b>
+                    {c.unread > 0 && <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px', fontWeight: 700 }}>{c.unread}</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.emp_id} · {c.role}</div>
+                  {c.last_message
+                    ? <div style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.last_message}</div>
+                    : <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No messages yet — tap to start</div>}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.emp_id} · {c.role}</div>
-                {c.last_message && <div style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.last_message}</div>}
-              </div>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="card" style={{ padding: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 220px)' }}>
@@ -105,7 +157,7 @@ export default function AdminChat() {
                   const mine = m.sender_id === user?.id;
                   return (
                     <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ maxWidth: '75%', padding: '8px 12px', borderRadius: 14, fontSize: 13, background: mine ? 'var(--primary)' : '#f1f5f9', color: mine ? '#fff' : 'inherit', borderBottomRightRadius: mine ? 4 : 14, borderBottomLeftRadius: mine ? 14 : 4 }}>
+                      <div style={{ maxWidth: '75%', padding: '8px 12px', borderRadius: 14, fontSize: 13, background: mine ? 'var(--primary)' : 'var(--surface-2)', color: mine ? '#fff' : 'inherit', borderBottomRightRadius: mine ? 4 : 14, borderBottomLeftRadius: mine ? 14 : 4 }}>
                         {m.message}
                         <div style={{ fontSize: 10, opacity: .7, marginTop: 2 }}>{m.created_at?.slice(11, 16) || m.created_at?.slice(12, 17) || m.created_at}</div>
                       </div>

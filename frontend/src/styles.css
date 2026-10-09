@@ -748,6 +748,7 @@ a.pub-card:hover, .pub-card.pub-access:hover { transform: translateY(-3px); box-
 
 /* ---- A11y / motion ---- */
 @keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
 .pub-nav button:focus-visible, .pub-link:focus-visible, .portal-role:focus-visible,
 .pub-help-btn:focus-visible, .pub-burger:focus-visible, .request-demo:focus-visible {
   outline: 2px solid var(--primary); outline-offset: 2px; }
