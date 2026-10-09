@@ -12,7 +12,8 @@ import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinn
 // ordered list of employee stops. LOGIN => first employee → office;
 // LOGOUT => office → last employee. Legacy routes keep type CUSTOM (manual
 // start/end). stops[] = [{ sequence, employee_id, emp_id, employee_name, name, lat, lng }]
-const emptyRoute = { name: '', route_type: 'LOGIN', office_point_id: null, office_label: '', office_lat: null, office_lng: null, start_point: '', end_point: '', speed_limit: 40, stops: [], start_lat: null, start_lng: null, end_lat: null, end_lng: null };
+// Admin route form: name + Vendor + office only (type/employees are the Vendor's).
+const emptyRoute = { name: '', vendor_id: null, office_point_id: null, office_label: '', office_lat: null, office_lng: null, route_type: 'LOGIN', stops: [], start_point: '', end_point: '', speed_limit: 40, start_lat: null, start_lng: null, end_lat: null, end_lng: null };
 
 export default function RoutesPage() {
   const { user } = useAuth();
@@ -21,7 +22,9 @@ export default function RoutesPage() {
   const [routes, setRoutes] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [offices, setOffices] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [modal, setModal] = useState(false);
+  const [vendorConfig, setVendorConfig] = useState(null); // route being configured by the Vendor
   const [form, setForm] = useState(emptyRoute);
   const [editing, setEditing] = useState(null);
   const [mapFor, setMapFor] = useState(null); // null | 'start' | 'end' | stopIndex
@@ -54,6 +57,8 @@ export default function RoutesPage() {
     api.get('/api/admin/drivers/all').then((r) => setDrivers(asArr(r))).catch(() => {});
     // Office locations reuse the company's existing nodal points (type='office').
     api.get('/api/company/me/nodal-points').then((r) => setOffices((asArr(r)).filter((p) => !p.type || p.type === 'office'))).catch(() => setOffices([]));
+    // Vendors the Admin can assign a route to (reuses the existing vendors API).
+    api.get('/api/admin/vendors').then((r) => setVendors(asArr(r))).catch(() => setVendors([]));
   };
 
   const openTrip = (r) => {
@@ -134,30 +139,55 @@ export default function RoutesPage() {
     } catch (e) { toast(e.message || 'Generation failed', 'err'); } finally { setGenBusy(false); }
   };
 
+  // Admin saves the route: name + Vendor + office only. The Vendor configures
+  // the route type and the employees afterwards.
   const save = async () => {
     if (!form.name || !form.name.trim()) return toast('Please enter a route name.', 'err');
-    const stops = form.stops
-      .filter((s) => s && (s.name || s.employee_name || s.lat != null))
-      .map((s, i) => ({ ...s, sequence: i + 1 }));
-    const auto = form.route_type === 'LOGIN' || form.route_type === 'LOGOUT';
-    if (auto) {
-      if (!stops.length) return toast('Add at least one employee to create this route.', 'err');
-      if (!officeValid()) return toast('Office location is not configured. Please configure the office location before creating this route.', 'err');
-      const bad = stops.find((s) => !stopValid(s));
-      if (bad) return toast(`This employee does not have a valid saved address${bad.employee_name ? ` (${bad.employee_name})` : ''}. Please update the employee address before using this stop.`, 'err');
-      if (form.route_type === 'LOGIN' && !stopValid(stops[0])) return toast('The first employee needs a valid saved address to be the start point.', 'err');
-      if (form.route_type === 'LOGOUT' && !stopValid(stops[stops.length - 1])) return toast('The last employee needs a valid saved address to be the end point.', 'err');
-    } else {
-      if (!form.start_point) return toast('Please select a start point.', 'err');
-      if (!form.end_point) return toast('Please select an end point.', 'err');
-      if (!stops.length) return toast('Please select at least one employee.', 'err');
-    }
-    const payload = { ...form, stops };
+    if (!form.vendor_id) return toast('Please select the Vendor who will manage this route.', 'err');
+    const payload = {
+      name: form.name,
+      vendor_id: Number(form.vendor_id),
+      office_point_id: form.office_point_id ?? null,
+      office_label: form.office_label || null,
+      office_lat: form.office_lat ?? null,
+      office_lng: form.office_lng ?? null
+    };
     try {
       if (editing) await api.put(`/api/admin/routes/${editing}`, payload);
       else await api.post('/api/admin/routes', payload);
-      toast(`✓ ${editing ? 'Route updated' : 'Route created'} successfully — "${form.name}" (${stops.length} stop${stops.length === 1 ? '' : 's'}).`);
+      toast(`✓ ${editing ? 'Route updated' : 'Route created'} successfully — "${form.name}". The assigned Vendor will configure it.`);
       setModal(false); load();
+    } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+  };
+
+  // Vendor opens an assigned route to configure its type + employee sequence.
+  const openVendorConfig = (r) => {
+    setVendorConfig(r);
+    setForm({
+      ...emptyRoute,
+      route_type: (r.route_type === 'LOGIN' || r.route_type === 'LOGOUT') ? r.route_type : 'LOGIN',
+      office_label: r.office_label || '',
+      office_lat: r.office_lat ?? null,
+      office_lng: r.office_lng ?? null,
+      stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : []
+    });
+    setDir(null);
+  };
+
+  // Vendor saves the route configuration: type + ordered employee stops.
+  const saveVendorConfig = async () => {
+    if (!vendorConfig) return;
+    if (form.route_type !== 'LOGIN' && form.route_type !== 'LOGOUT') return toast('Select the route type (LOGIN or LOGOUT).', 'err');
+    const stops = form.stops
+      .filter((s) => s && (s.name || s.employee_name || s.lat != null))
+      .map((s, i) => ({ ...s, sequence: i + 1 }));
+    if (!stops.length) return toast('Assign at least one employee to this route.', 'err');
+    const bad = stops.find((s) => !stopValid(s));
+    if (bad) return toast(`This employee does not have a valid saved address${bad.employee_name ? ` (${bad.employee_name})` : ''}. Please update the employee address before saving.`, 'err');
+    try {
+      await api.put(`/api/admin/routes/${vendorConfig.id}`, { route_type: form.route_type, stops });
+      toast(`✓ Route "${vendorConfig.name}" configured — ${form.route_type}, ${stops.length} employee${stops.length === 1 ? '' : 's'}.`);
+      setVendorConfig(null); load();
     } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
   };
 
@@ -396,6 +426,144 @@ export default function RoutesPage() {
     });
   };
 
+  // ---- Full-page Create/Edit (NOT a modal). The Admin configures the route
+  //      only; employees are assigned by the Vendor. ----
+  // ---- Full-page Admin Create/Edit (NOT a modal). The Admin configures the
+  //      route name + Vendor + office only. ----
+  if (modal) {
+    return (
+      <div className="page">
+        <div className="page-head">
+          <div>
+            <div className="page-title">{editing ? 'Edit route' : 'New route'}</div>
+            <div className="page-sub">The Admin creates the route and assigns the Vendor. The Vendor configures LOGIN/LOGOUT and the employees.</div>
+          </div>
+          <button className="btn btn-outline" onClick={() => setModal(false)}>← Back</button>
+        </div>
+        <div className="card" style={{ maxWidth: 720 }}>
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label>Route name</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Kammana" autoFocus />
+          </div>
+
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label><User size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Vendor (manages this route)</label>
+            {vendors.length ? (
+              <select value={form.vendor_id ?? ''} onChange={(e) => setForm((f) => ({ ...f, vendor_id: e.target.value || null }))}>
+                <option value="">Select the Vendor…</option>
+                {vendors.map((v) => (<option key={v.id} value={v.id}>{v.name}{v.vendor_code ? ` · ${v.vendor_code}` : ''}</option>))}
+              </select>
+            ) : (
+              <div style={{ fontSize: 12, color: '#ef4444' }}>No vendors yet — create a Vendor under Vendor Management first.</div>
+            )}
+          </div>
+
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#0ea5e9" />Office / location</label>
+            {offices.length ? (
+              <select value={form.office_point_id ?? ''} onChange={(e) => {
+                const o = offices.find((x) => String(x._id) === String(e.target.value));
+                if (!o) return setForm((f) => ({ ...f, office_point_id: null, office_label: '', office_lat: null, office_lng: null }));
+                setForm((f) => ({ ...f, office_point_id: o._id, office_label: o.label, office_address: o.address || '', office_lat: o.lat, office_lng: o.lng }));
+              }}>
+                <option value="">Select the office location…</option>
+                {offices.map((o) => (<option key={o._id} value={o._id}>{o.label}{o.address ? ` — ${o.address}` : ''}</option>))}
+              </select>
+            ) : (
+              <div style={{ fontSize: 12, color: '#ef4444' }}>Office location is not configured. Please configure the office location first.</div>
+            )}
+            {form.office_label && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>🏢 {form.office_label}</div>}
+          </div>
+
+          <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--surface-2)', fontSize: 13, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Route configuration</div>
+            <div style={{ color: 'var(--muted)' }}>LOGIN / LOGOUT and the employees are configured by the assigned Vendor.</div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={() => setModal(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={save}><RouteIcon size={16} /> {editing ? 'Save changes' : 'Create route'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Full-page Vendor Route Configuration (NOT a modal). The Vendor selects
+  //      LOGIN/LOGOUT and assigns/orders the employees. ----
+  if (vendorConfig) {
+    return (
+      <div className="page">
+        <div className="page-head">
+          <div>
+            <div className="page-title">Configure route — {vendorConfig.name}</div>
+            <div className="page-sub">Select the route type and assign the employees. Their order sets the route.</div>
+          </div>
+          <button className="btn btn-outline" onClick={() => setVendorConfig(null)}>← Back</button>
+        </div>
+        <div className="card" style={{ maxWidth: 860 }}>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>Route type</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[['LOGIN', 'LOGIN · Employees → Office'], ['LOGOUT', 'LOGOUT · Office → Employees']].map(([t, lbl]) => (
+                <button key={t} type="button" className={`btn btn-sm ${form.route_type === t ? 'btn-primary' : 'btn-outline'}`} onClick={() => setForm((f) => ({ ...f, route_type: t }))}>{lbl}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ fontSize: 13, marginBottom: 14, color: 'var(--muted)' }}>
+            Office: <b style={{ color: 'var(--text)' }}>🏢 {vendorConfig.office_label || 'not set'}</b>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 8px', gap: 8, flexWrap: 'wrap' }}>
+            <b style={{ fontSize: 14 }}>Employees — order sets the route (drag or use ↑ ↓)</b>
+            <select value="" onChange={(e) => { if (e.target.value) addEmployeeStop(e.target.value); }} style={{ maxWidth: 260 }}>
+              <option value="">{employeesWithAddr.length ? '+ Add employee…' : 'No approved addresses yet — approve address requests under Approvals'}</option>
+              {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
+            </select>
+          </div>
+          {!form.stops.length && <div style={{ fontSize: 13, color: 'var(--muted)', padding: '8px 0' }}>Add at least one employee to configure this route.</div>}
+          {form.stops.map((s, i) => (
+            <div key={i} className="stop-row" draggable
+              onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragIdx(i); }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); reorderStops(dragIdx, i); setDragIdx(null); }}>
+              <GripVertical size={18} style={{ color: 'var(--muted)', cursor: 'grab' }} />
+              <select value={s.employee_id ? String(s.employee_id) : ''} onChange={(e) => setStopEmployee(i, e.target.value)} style={{ maxWidth: 190 }}>
+                <option value="">— Manual address —</option>
+                {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
+              </select>
+              <AddressPicker
+                value={(s.lat && s.lng) ? { address: s.name, lat: s.lat, lng: s.lng } : (s.name ? { address: s.name } : null)}
+                onChange={(item) => setStopAddress(i, item)}
+              />
+              <button type="button" title={`Pick stop ${i + 1} on map`} className="btn btn-outline" onClick={() => setMapFor(i)} style={{ padding: '7px 9px' }}>
+                <MapPinned size={15} color="#f59e0b" />
+              </button>
+              <div className="stop-coords">
+                <button className="btn btn-sm btn-ghost" disabled={i === 0} onClick={() => moveStop(i, -1)}>↑</button>
+                <button className="btn btn-sm btn-ghost" disabled={i === form.stops.length - 1} onClick={() => moveStop(i, 1)}>↓</button>
+                <button className="btn btn-sm btn-danger" onClick={() => removeStop(i)}><Trash2 size={13} /></button>
+              </div>
+            </div>
+          ))}
+
+          <div style={{ margin: '10px 0 4px', padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2)', fontSize: 13 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>{form.route_type} route summary</div>
+            <div>📍 <b>Start:</b> {effStart().name || '—'} {hasXY(effStart()) ? `(${Number(effStart().lat).toFixed(4)}, ${Number(effStart().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing</span>}</div>
+            <div style={{ color: 'var(--muted)', margin: '4px 0' }}>↓ {form.stops.map((s, i) => `${i + 1}. ${s.employee_name || s.name || '—'}`).join('  →  ') || '—'}</div>
+            <div>🏢 <b>End:</b> {effEnd().name || '—'} {hasXY(effEnd()) ? `(${Number(effEnd().lat).toFixed(4)}, ${Number(effEnd().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing</span>}</div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+            <button className="btn btn-ghost" onClick={() => setVendorConfig(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveVendorConfig}><RouteIcon size={16} /> Save route configuration</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <div className="page-head">
@@ -447,11 +615,13 @@ export default function RoutesPage() {
       <div className="card">
         <div className="table-wrap">
           <table className="tbl">
-            <thead><tr><th>Route</th><th>Start → End</th><th>Stops</th><th>Employees</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Route</th><th>Vendor</th><th>Type</th><th>Start → End</th><th>Stops</th><th>Employees</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {routes.map((r) => (
                 <tr key={r.id}>
                   <td><b>{r.name}</b></td>
+                  <td style={{ fontSize: 13 }}>{r.vendor_name || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                  <td>{(r.route_type === 'LOGIN' || r.route_type === 'LOGOUT') ? <Badge color="blue">{r.route_type}</Badge> : <Badge color="slate">Not configured</Badge>}</td>
                   <td style={{ fontSize: 13, color: 'var(--slate)' }}>{r.start_point || '—'} → {r.end_point || '—'}</td>
                   <td><Badge color="violet">{Array.isArray(r.stops) ? r.stops.length : 0} stops</Badge></td>
                   <td>
@@ -463,180 +633,20 @@ export default function RoutesPage() {
                   <td><Badge color={r.status === 'active' ? 'green' : 'slate'}>{r.status}</Badge></td>
                   <td>
                     <div className="actions">
-                      {!isVendor && <button className="btn btn-sm btn-outline" title="Auto-optimize pickup/drop sequence" onClick={() => optimizeRoute(r)}>{optId === r.id ? <Loader2 size={14} style={{ animation: 'spin .8s linear infinite' }} /> : <Wand2 size={14} />} Optimize</button>}
-                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => openAssign(r)}><User size={14} /> Assign</button>}
+                      {isVendor && <button className="btn btn-sm btn-primary" onClick={() => openVendorConfig(r)}><RouteIcon size={14} /> Configure route</button>}
                       {!isVendor && <button className="btn btn-sm btn-primary" onClick={() => openTrip(r)} title="Create an operational trip/cab run from this route"><Play size={14} /> Create Trip</button>}
-                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, route_type: (r.route_type === 'LOGIN' || r.route_type === 'LOGOUT') ? r.route_type : 'CUSTOM', office_point_id: r.office_point_id ?? null, office_label: r.office_label || '', office_address: '', office_lat: r.office_lat ?? null, office_lng: r.office_lng ?? null, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
+                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ ...emptyRoute, name: r.name, vendor_id: r.vendor_id ?? null, office_point_id: r.office_point_id ?? null, office_label: r.office_label || '', office_lat: r.office_lat ?? null, office_lng: r.office_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
                       {!isVendor && <button className="btn btn-sm btn-ghost" title="Delete route" onClick={() => delRoute(r)}><Trash2 size={14} color="#ef4444" /></button>}
                     </div>
                   </td>
                 </tr>
               ))}
-              {!routes.length && <tr><td colSpan={6} className="empty">No routes yet.</td></tr>}
+              {!routes.length && <tr><td colSpan={8} className="empty">No routes yet.</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit route' : 'New route'} wide>
-        <div className="field" style={{ marginBottom: 12 }}><label>Route name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Electronic City → Manyata Tech Park" /></div>
-
-        {/* Route type determines the direction automatically. */}
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label>Route type</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {[['LOGIN', 'LOGIN · Employees → Office'], ['LOGOUT', 'LOGOUT · Office → Employees']].map(([t, lbl]) => (
-              <button key={t} type="button" className={`btn btn-sm ${form.route_type === t ? 'btn-primary' : 'btn-outline'}`} onClick={() => setForm((f) => ({ ...f, route_type: t }))}>{lbl}</button>
-            ))}
-            {form.route_type === 'CUSTOM' && <button type="button" className="btn btn-sm btn-primary" disabled>CUSTOM (legacy)</button>}
-          </div>
-        </div>
-
-        {form.route_type === 'CUSTOM' ? (
-          <div className="startend-duo">
-            <div className="field">
-              <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#22c55e" />Start point (search & pick exact location)</label>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <AddressPicker
-                    value={form.start_point ? { address: form.start_point, lat: form.start_lat, lng: form.start_lng } : null}
-                    onChange={(item) => setForm((f) => ({ ...f, start_point: item.address || f.start_point, start_lat: item.lat ?? f.start_lat, start_lng: item.lng ?? f.start_lng }))}
-                  />
-                </div>
-                <button type="button" title="Pick start point on map" className="btn btn-outline" onClick={() => setMapFor('start')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
-                  <MapPinned size={15} color="#22c55e" />
-                </button>
-              </div>
-              {form.start_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
-            </div>
-            <div className="field">
-              <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#ef4444" />End point (search & pick exact location)</label>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <AddressPicker
-                    value={form.end_point ? { address: form.end_point, lat: form.end_lat, lng: form.end_lng } : null}
-                    onChange={(item) => setForm((f) => ({ ...f, end_point: item.address || f.end_point, end_lat: item.lat ?? f.end_lat, end_lng: item.lng ?? f.end_lng }))}
-                  />
-                </div>
-                <button type="button" title="Pick end point on map" className="btn btn-outline" onClick={() => setMapFor('end')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
-                  <MapPinned size={15} color="#ef4444" />
-                </button>
-              </div>
-              {form.end_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
-              <button type="button" className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => setForm((f) => ({ ...f, end_point: f.start_point, end_lat: f.start_lat, end_lng: f.start_lng }))}>Same as Start Point</button>
-            </div>
-          </div>
-        ) : (
-          <div className="field" style={{ marginBottom: 12 }}>
-            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#0ea5e9" />Office location ({form.route_type === 'LOGIN' ? 'route end' : 'route start'})</label>
-            {offices.length ? (
-              <select value={form.office_point_id ?? ''} onChange={(e) => {
-                const o = offices.find((x) => String(x._id) === String(e.target.value));
-                if (!o) return setForm((f) => ({ ...f, office_point_id: null, office_label: '', office_lat: null, office_lng: null }));
-                setForm((f) => ({ ...f, office_point_id: o._id, office_label: o.label, office_address: o.address || '', office_lat: o.lat, office_lng: o.lng }));
-              }}>
-                <option value="">Select the office location…</option>
-                {offices.map((o) => (<option key={o._id} value={o._id}>{o.label}{o.address ? ` — ${o.address}` : ''}</option>))}
-              </select>
-            ) : (
-              <div style={{ fontSize: 12, color: '#ef4444' }}>Office location is not configured. Please configure the office location before creating this route.</div>
-            )}
-            {form.office_label && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>🏢 {form.office_label}</div>}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0 8px', gap: 8, flexWrap: 'wrap' }}>
-          <b style={{ fontSize: 14 }}>Employee stops — order sets the route (drag or use ↑ ↓)</b>
-          <select value="" onChange={(e) => { if (e.target.value) addEmployeeStop(e.target.value); }} style={{ maxWidth: 260 }}>
-            <option value="">{employeesWithAddr.length ? '+ Add employee…' : 'No approved addresses yet — approve address requests under Approvals'}</option>
-            {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
-          </select>
-        </div>
-        {!form.stops.length && <div style={{ fontSize: 13, color: 'var(--muted)', padding: '8px 0' }}>Add at least one employee to create this route.</div>}
-        {form.stops.map((s, i) => (
-          <div key={i} className="stop-row" draggable
-            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragIdx(i); }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); reorderStops(dragIdx, i); setDragIdx(null); }}>
-            <GripVertical size={18} style={{ color: 'var(--muted)', cursor: 'grab' }} />
-            <select value={s.employee_id ? String(s.employee_id) : ''} onChange={(e) => setStopEmployee(i, e.target.value)} style={{ maxWidth: 190 }}>
-              <option value="">— Manual address —</option>
-              {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
-            </select>
-            <AddressPicker
-              value={(s.lat && s.lng) ? { address: s.name, lat: s.lat, lng: s.lng } : (s.name ? { address: s.name } : null)}
-              onChange={(item) => setStopAddress(i, item)}
-            />
-            <button type="button" title={`Pick stop ${i + 1} on map`} className="btn btn-outline" onClick={() => setMapFor(i)} style={{ padding: '7px 9px' }}>
-              <MapPinned size={15} color="#f59e0b" />
-            </button>
-            <div className="stop-coords">
-              <button className="btn btn-sm btn-ghost" disabled={i === 0} onClick={() => moveStop(i, -1)}>↑</button>
-              <button className="btn btn-sm btn-ghost" disabled={i === form.stops.length - 1} onClick={() => moveStop(i, 1)}>↓</button>
-              <button className="btn btn-sm btn-danger" onClick={() => removeStop(i)}><Trash2 size={13} /></button>
-            </div>
-          </div>
-        ))}
-
-        {form.route_type !== 'CUSTOM' && (
-          <div style={{ margin: '10px 0 4px', padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2)', fontSize: 13 }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>{form.route_type} route summary</div>
-            <div>📍 <b>Start:</b> {effStart().name || '—'} {hasXY(effStart()) ? `(${Number(effStart().lat).toFixed(4)}, ${Number(effStart().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing location</span>}</div>
-            <div style={{ color: 'var(--muted)', margin: '4px 0' }}>↓ stops in order: {form.stops.map((s, i) => `${i + 1}. ${s.employee_name || s.name || '—'}`).join('  →  ') || '—'}</div>
-            <div>🏢 <b>End:</b> {effEnd().name || '—'} {hasXY(effEnd()) ? `(${Number(effEnd().lat).toFixed(4)}, ${Number(effEnd().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing location</span>}</div>
-          </div>
-        )}
-
-        <div style={{ margin: '14px 0 8px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn-outline" disabled={dirLoading || !canCalculate} onClick={calcDirections}>
-            {dirLoading ? <Loader2 size={15} style={{ animation: 'spin .8s linear infinite' }} /> : <Navigation size={15} />} {dirLoading ? 'Calculating route… please wait.' : 'Calculate route'}
-          </button>
-          {dir && dir.status === 'OK' && (
-            <span className="badge badge-green">✓ Route calculated — {dir.distText} · {dir.timeText}</span>
-          )}
-          {!canCalculate && !dirLoading && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Select your start point, destination and employees to preview the route.</span>}
-          {dir && dir.status === 'ERROR' && (
-            <button className="btn btn-sm btn-outline" onClick={calcDirections}>Try Again</button>
-          )}
-        </div>
-
-        {dir && dir.status === 'ERROR' && (
-          <div style={{ padding: '10px 12px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, marginBottom: 10 }}>
-            <b>Could not calculate directions.</b> {dir.msg} <span style={{ color: '#7f1d1d' }}>Check the coordinates, then try again.</span>
-          </div>
-        )}
-        {dir && dir.status === 'not-configured' && (
-          <div style={{ padding: '10px 12px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: 13, marginBottom: 10 }}>
-            The map backend is not configured on the server, so live routing can't be calculated. Check that the routing service is reachable, then reload.
-          </div>
-        )}
-
-        {dir && dir.status === 'OK' && (
-          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1.5px solid var(--line)', borderRadius: 12, marginBottom: 12 }}>
-            {dir.legs.map((leg, i) => (
-              <div key={i} style={{ padding: '9px 12px', borderBottom: i < dir.legs.length - 1 ? '1px solid #f1f5f9' : 'none', fontSize: 13 }}>
-                <b>{i + 1}. {leg.from}</b> → {leg.to}
-                <span style={{ color: 'var(--muted)', marginLeft: 8 }}>{leg.dist} · {leg.dur}</span>
-                {leg.steps.length > 0 && <div style={{ fontSize: 12, color: 'var(--slate)', marginTop: 4 }}>{leg.steps.join(' · ')}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {previewMarkers().length > 0 && (
-          <GoogleRouteMap
-            markers={previewMarkers()}
-            lines={previewLines()}
-            height={300}
-            onMarkerDrag={dragStop}
-          />
-        )}
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-ghost" onClick={() => setModal(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={save}><RouteIcon size={16} /> {editing ? 'Save changes' : 'Create route'}</button>
-        </div>
-      </Modal>
 
       <Modal open={mapFor !== null} onClose={() => setMapFor(null)} title="Search & select location" wide>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Type the address and pick from the dropdown, tap anywhere on the map, drag the pin, or use your current location.</p>
@@ -654,36 +664,6 @@ export default function RoutesPage() {
         </div>
       </Modal>
 
-      <Modal open={!!assign} onClose={() => setAssign(null)} title={`Assign employees — ${assign?.name || ''}`} wide>
-        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Choose the employees this route covers. Their saved home/pickup address is shown to help you verify stops. Assign only saves the roster; a date turns the same roster into confirmed schedules (cab auto-assigned) for that day.</p>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ flex: 1 }}><label style={{ fontSize: 12, color: 'var(--muted)' }}>Push schedules for this date (optional)</label>
-            <input type="date" value={pushDate} onChange={(e) => setPushDate(e.target.value)} />
-          </div>
-          <Badge color="green">{selEmps.length} selected</Badge>
-        </div>
-        <div style={{ maxHeight: 320, overflowY: 'auto', border: '1.5px solid var(--line)', borderRadius: 12, padding: 8, marginBottom: 8 }}>
-          {employees.map((e) => {
-            const val = String(e.id || e._id);
-            const checked = selEmps.includes(val);
-            const addr = empAddress(e);
-            return (
-              <label key={val} style={Object.assign({ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 8px', borderRadius: 8, cursor: 'pointer' }, checked ? { background: 'rgba(79,70,229,.08)' } : {})}>
-                <input type="checkbox" checked={checked} onChange={() => setSelEmps(checked ? selEmps.filter((x) => x !== val) : [...selEmps, val])} />
-                <b style={{ fontSize: 13, minWidth: 170 }}>{e.name}</b>
-                <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', minWidth: 70 }}>{e.emp_id || e.employeeId || ''}</span>
-                <span style={{ fontSize: 12, color: addr ? 'var(--slate)' : '#ef4444', flex: 1 }}>{addr || 'No address on file'}</span>
-              </label>
-            );
-          })}
-          {!employees.length && <div className="empty">No approved employees yet.</div>}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <button className="btn btn-ghost" onClick={() => setAssign(null)}>Cancel</button>
-          <button className="btn btn-outline" disabled={assigning} onClick={saveAssign}><User size={15} /> Save roster</button>
-          <button className="btn btn-primary" disabled={assigning || !pushDate} onClick={saveAssign}><RouteIcon size={15} /> Save & push schedules</button>
-        </div>
-      </Modal>
 
       <Modal open={!!tripFor} onClose={() => setTripFor(null)} title={`Create Trip — ${tripFor?.name || ''}`} wide>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>

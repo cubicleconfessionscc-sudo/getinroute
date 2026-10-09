@@ -1206,7 +1206,8 @@ app.get('/api/admin/routes', auth, role('admin', 'vendor'), (req, res) => {
     const ctx = vendorCtx(req);
     if (!ctx.routeIds.length) return res.json([]);
     const routes = db.prepare(`SELECT * FROM routes WHERE id IN (${ctx.routeIds.map(() => '?').join(',')}) ORDER BY id DESC`).all(...ctx.routeIds);
-    return res.json(routes.map((r) => ({ ...r, stops: JSON.parse(r.stops || '[]') })));
+    const self = { vendor_id: req.user.vendor_id || null, vendor_name: (db.prepare('SELECT name FROM vendors WHERE id=?').get(req.user.vendor_id) || {}).name || null };
+    return res.json(routes.map((r) => ({ ...r, stops: JSON.parse(r.stops || '[]'), ...self })));
   }
   const sc = companyAdminScope(req);
   // A company admin must see routes they created even before any schedule
@@ -1221,34 +1222,69 @@ app.get('/api/admin/routes', auth, role('admin', 'vendor'), (req, res) => {
     WHERE u.role='employee' ORDER BY u.name`).all();
   const byRoute = {};
   for (const row of roster) (byRoute[row.route_id] = byRoute[row.route_id] || []).push(row);
-  res.json(routes.map((r) => ({ ...r, stops: JSON.parse(r.stops || '[]'), employees: byRoute[r.id] || [] })));
+  const vendorMap = routeVendorMap();
+  res.json(routes.map((r) => ({ ...r, stops: JSON.parse(r.stops || '[]'), employees: byRoute[r.id] || [], vendor_id: (vendorMap[r.id] || {}).vendor_id ?? null, vendor_name: (vendorMap[r.id] || {}).vendor_name ?? null })));
 });
-app.put('/api/admin/routes/:id/employees', auth, role('admin'), (req, res) => {
-  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
+// Assigning employees to a route is the VENDOR's responsibility (the Admin only
+// creates the route). Admin is still allowed for backwards compatibility.
+app.put('/api/admin/routes/:id/employees', auth, role('admin', 'vendor'), (req, res) => {
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    if (!ctx.routeIds.map(Number).includes(Number(req.params.id))) return res.status(403).json({ error: 'Route not assigned to you' });
+  } else if (!canAccessAdminObject(req, 'route', req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   const r = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
   if (!r) return res.status(404).json({ error: 'Route not found' });
   const rawIds = req.body?.employeeIds ?? req.body?.employee_ids;
-  const ids = Array.isArray(rawIds)
-    ? [...new Set(rawIds.map((x) => Number(x)).filter((n) => n > 0))]
-    : [];
+  const ordered = Array.isArray(rawIds) ? rawIds.map((x) => Number(x)).filter((n) => n > 0) : [];
+  const ids = [...new Set(ordered)];
+  let found = [];
   if (ids.length) {
-    const placeholders = ids.map(() => '?').join(',');
-    const sc = companyAdminScope(req);
-    const where = sc.isOwner ? `role='employee' AND id IN (${placeholders})` : `role='employee' AND company_id = ? AND id IN (${placeholders})`;
-    const found = sc.isOwner
-      ? db.prepare(`SELECT id FROM users WHERE ${where}`).all(...ids).map((u) => Number(u.id))
-      : db.prepare(`SELECT id FROM users WHERE ${where}`).all(sc.cid, ...ids).map((u) => Number(u.id));
+    if (isVendorReq(req)) {
+      const people = new Set(vendorPeopleIds(vendorCtx(req)));
+      found = ids.filter((id) => people.has(Number(id)));
+    } else {
+      const placeholders = ids.map(() => '?').join(',');
+      const sc = companyAdminScope(req);
+      const where = sc.isOwner ? `role='employee' AND id IN (${placeholders})` : `role='employee' AND company_id = ? AND id IN (${placeholders})`;
+      found = sc.isOwner
+        ? db.prepare(`SELECT id FROM users WHERE ${where}`).all(...ids).map((u) => Number(u.id))
+        : db.prepare(`SELECT id FROM users WHERE ${where}`).all(sc.cid, ...ids).map((u) => Number(u.id));
+    }
     if (!found.length) return res.status(400).json({ error: 'No valid employees selected' });
     db.prepare('DELETE FROM route_employees WHERE route_id=?').run(r.id);
     const ins = db.prepare('INSERT OR IGNORE INTO route_employees (route_id, employee_id) VALUES (?,?)');
     for (const id of found) ins.run(r.id, id);
-    res.json({ ok: true, employeeIds: found });
   } else {
     db.prepare('DELETE FROM route_employees WHERE route_id=?').run(r.id);
-    res.json({ ok: true, employeeIds: [] });
   }
+  // For LOGIN/LOGOUT routes the assigned employee SEQUENCE defines the route:
+  // rebuild the ordered stops from the assigned employees and recompute the
+  // start/end (LOGIN: first employee -> office; LOGOUT: office -> last employee).
+  const type = normalizeRouteType(r.route_type);
+  if (type === 'LOGIN' || type === 'LOGOUT') {
+    const orderedIds = ordered.filter((id) => found.includes(id));
+    const stops = [];
+    for (const id of orderedIds) {
+      const u = db.prepare('SELECT id, name, emp_id, home_address, home_lat, home_lng FROM users WHERE id=?').get(id);
+      if (!u) continue;
+      const addr = u.home_address || '';
+      stops.push({
+        sequence: stops.length + 1,
+        employee_id: u.id, emp_id: u.emp_id || '', employee_name: u.name,
+        name: addr ? addr.split(',').slice(0, 2).join(', ') : (u.name || ''),
+        lat: u.home_lat != null ? Number(u.home_lat) : null,
+        lng: u.home_lng != null ? Number(u.home_lng) : null
+      });
+    }
+    const ep = computeRouteEndpoints(type, stops, { label: r.office_label, lat: r.office_lat, lng: r.office_lng }, {});
+    db.prepare('UPDATE routes SET stops=?, start_point=?, start_lat=?, start_lng=?, end_point=?, end_lat=?, end_lng=? WHERE id=?')
+      .run(JSON.stringify(stops), ep.start_point, ep.start_lat, ep.start_lng, ep.end_point, ep.end_lat, ep.end_lng, r.id);
+  }
+  res.json({ ok: true, employeeIds: found });
 });
-app.delete('/api/admin/routes/:id/employees/:employeeId', auth, role('admin'), (req, res) => {
+app.delete('/api/admin/routes/:id/employees/:employeeId', auth, role('admin', 'vendor'), (req, res) => {
   if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
   db.prepare('DELETE FROM route_employees WHERE route_id=? AND employee_id=?').run(req.params.id, req.params.employeeId);
   res.json({ ok: true });
@@ -1289,45 +1325,88 @@ function computeRouteEndpoints(type, stops, office, manual = {}) {
   };
 }
 
+// Route -> Vendor link reuses the existing vendors.assigned_route_ids array (no
+// new table / no duplicate API). A route belongs to at most one vendor.
+function setRouteVendor(routeId, vendorId) {
+  const rid = Number(routeId);
+  for (const v of db.prepare('SELECT id, assigned_route_ids FROM vendors').all()) {
+    const ids = safeIdList(v.assigned_route_ids).map(Number);
+    const next = ids.filter((x) => x !== rid);
+    if (next.length !== ids.length) db.prepare('UPDATE vendors SET assigned_route_ids=? WHERE id=?').run(JSON.stringify(next), v.id);
+  }
+  const vid = Number(vendorId);
+  if (vid) {
+    const v = db.prepare('SELECT assigned_route_ids FROM vendors WHERE id=?').get(vid);
+    if (v) {
+      const ids = safeIdList(v.assigned_route_ids).map(Number);
+      if (!ids.includes(rid)) { ids.push(rid); db.prepare('UPDATE vendors SET assigned_route_ids=? WHERE id=?').run(JSON.stringify(ids), vid); }
+    }
+  }
+}
+function routeVendorMap() {
+  const map = {};
+  for (const v of db.prepare('SELECT id, name, assigned_route_ids FROM vendors').all()) {
+    for (const rid of safeIdList(v.assigned_route_ids)) map[Number(rid)] = { vendor_id: v.id, vendor_name: v.name };
+  }
+  return map;
+}
+
+// Admin creates the route ONLY: name + Vendor (who configures LOGIN/LOGOUT and
+// assigns/orders the employees) + office. Type and employees start empty.
 app.post('/api/admin/routes', auth, role('admin'), (req, res) => {
-  const { name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, route_type, office_point_id, office_label, office_lat, office_lng } = req.body || {};
-  // A route is a reusable definition: start + end + at least ONE employee/stop.
-  // One employee is a valid route (previously a "< 2 stops" rule wrongly blocked it).
-  const stopList = Array.isArray(stops) ? stops.filter((s) => s && (s.name || s.lat != null)) : [];
-  if (!name) return res.status(400).json({ error: 'Please enter a route name.' });
-  if (!stopList.length) return res.status(400).json({ error: 'Please select at least one employee or stop.' });
-  // Attach the owning company so a non-owner company admin can see it immediately.
+  const { name, vendor_id, office_point_id, office_label, office_lat, office_lng } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Please enter a route name.' });
+  const vid = Number(vendor_id) || null;
+  if (!vid) return res.status(400).json({ error: 'Please select the Vendor who will manage this route.' });
+  if (!db.prepare('SELECT id FROM vendors WHERE id=?').get(vid)) return res.status(400).json({ error: 'Vendor not found.' });
   const sc = companyAdminScope(req);
   const companyId = sc.isOwner ? null : sc.cid;
-  const type = normalizeRouteType(route_type);
   const office = { point_id: office_point_id ?? null, label: office_label ?? null, lat: routeNum(office_lat), lng: routeNum(office_lng) };
-  const ep = computeRouteEndpoints(type, stopList, office, { start_point, start_lat, start_lng, end_point, end_lat, end_lng });
   const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, company_id, route_type, office_point_id, office_label, office_lat, office_lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(name, ep.start_point, ep.end_point, Number(speed_limit) || 40, JSON.stringify(stopList),
-      ep.start_lat, ep.start_lng, ep.end_lat, ep.end_lng, companyId,
-      type, office.point_id, office.label, office.lat, office.lng);
-  res.json({ ok: true, id: Number(info.lastInsertRowid), route_type: type });
+    .run(String(name).trim(), null, null, 40, '[]', null, null, null, null, companyId,
+      null, office.point_id, office.label, office.lat, office.lng);
+  const id = Number(info.lastInsertRowid);
+  setRouteVendor(id, vid);
+  res.json({ ok: true, id, vendor_id: vid });
 });
-app.put('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
-  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
-  const { name, start_point, end_point, speed_limit, stops, status, start_lat, start_lng, end_lat, end_lng, route_type, office_point_id, office_label, office_lat, office_lng } = req.body || {};
+
+app.put('/api/admin/routes/:id', auth, role('admin', 'vendor'), (req, res) => {
   const r = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
   if (!r) return res.status(404).json({ error: 'Route not found' });
-  const stopList = Array.isArray(stops) ? stops.filter((s) => s && (s.name || s.lat != null)) : JSON.parse(r.stops || '[]');
-  if (!stopList.length) return res.status(400).json({ error: 'Please select at least one employee or stop.' });
-  const type = route_type === undefined ? normalizeRouteType(r.route_type) : normalizeRouteType(route_type);
-  const office = {
-    point_id: office_point_id === undefined ? r.office_point_id : office_point_id,
-    label: office_label === undefined ? r.office_label : office_label,
-    lat: office_lat === undefined ? routeNum(r.office_lat) : routeNum(office_lat),
-    lng: office_lng === undefined ? routeNum(r.office_lng) : routeNum(office_lng)
-  };
-  const ep = computeRouteEndpoints(type, stopList, office, { start_point, start_lat, start_lng, end_point, end_lat, end_lng });
-  db.prepare('UPDATE routes SET name=?, start_point=?, end_point=?, speed_limit=?, stops=?, status=?, start_lat=?, start_lng=?, end_lat=?, end_lng=?, route_type=?, office_point_id=?, office_label=?, office_lat=?, office_lng=? WHERE id=?')
-    .run(name ?? r.name, ep.start_point, ep.end_point, Number(speed_limit) || r.speed_limit, JSON.stringify(stopList), status ?? r.status,
-      ep.start_lat, ep.start_lng, ep.end_lat, ep.end_lng,
-      type, office.point_id, office.label, office.lat, office.lng, r.id);
-  res.json({ ok: true, route_type: type });
+
+  if (isVendorReq(req)) {
+    // Vendor configures the route TYPE + EMPLOYEES/ORDER only (never the name,
+    // vendor or office).
+    const ctx = vendorCtx(req);
+    if (!ctx.routeIds.map(Number).includes(Number(r.id))) return res.status(403).json({ error: 'Route not assigned to you' });
+    const type = normalizeRouteType(req.body?.route_type);
+    if (type !== 'LOGIN' && type !== 'LOGOUT') return res.status(400).json({ error: 'Select the route type (LOGIN or LOGOUT).' });
+    const rawStops = Array.isArray(req.body?.stops) ? req.body.stops : [];
+    const stops = rawStops.filter((s) => s && (s.name || s.lat != null)).map((s, i) => ({ ...s, sequence: i + 1 }));
+    if (!stops.length) return res.status(400).json({ error: 'Assign at least one employee to this route.' });
+    const office = { label: r.office_label, lat: r.office_lat, lng: r.office_lng };
+    const ep = computeRouteEndpoints(type, stops, office, {});
+    db.prepare('UPDATE routes SET route_type=?, stops=?, start_point=?, start_lat=?, start_lng=?, end_point=?, end_lat=?, end_lng=? WHERE id=?')
+      .run(type, JSON.stringify(stops), ep.start_point, ep.start_lat, ep.start_lng, ep.end_point, ep.end_lat, ep.end_lng, r.id);
+    const ids = [...new Set(stops.map((s) => Number(s.employee_id)).filter((n) => n > 0))];
+    db.prepare('DELETE FROM route_employees WHERE route_id=?').run(r.id);
+    const ins = db.prepare('INSERT OR IGNORE INTO route_employees (route_id, employee_id) VALUES (?,?)');
+    for (const id of ids) ins.run(r.id, id);
+    return res.json({ ok: true, route_type: type });
+  }
+
+  // Admin edits ONLY name / vendor / office. The route type, employees and stop
+  // order are the Vendor's configuration and are never touched here.
+  if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
+  const { name, vendor_id, office_point_id, office_label, office_lat, office_lng } = req.body || {};
+  db.prepare('UPDATE routes SET name=?, office_point_id=?, office_label=?, office_lat=?, office_lng=? WHERE id=?')
+    .run(name ?? r.name,
+      office_point_id === undefined ? r.office_point_id : office_point_id,
+      office_label === undefined ? r.office_label : office_label,
+      office_lat === undefined ? r.office_lat : routeNum(office_lat),
+      office_lng === undefined ? r.office_lng : routeNum(office_lng), r.id);
+  if (vendor_id !== undefined) setRouteVendor(r.id, vendor_id ? Number(vendor_id) : null);
+  res.json({ ok: true });
 });
 app.delete('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
   if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
