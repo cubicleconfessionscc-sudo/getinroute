@@ -66,6 +66,12 @@ if (USE_PG) {
   // Authoritative no-show log soft-delete columns (admin delete/clear is archive-only).
   try { pgdb.exec("ALTER TABLE employee_no_show_log ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE employee_no_show_log ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  // Route type (LOGIN/LOGOUT/CUSTOM) + selected office for LOGIN/LOGOUT routes.
+  try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS route_type TEXT DEFAULT 'CUSTOM';"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_point_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_label TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_lat DOUBLE PRECISION;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_lng DOUBLE PRECISION;"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));
@@ -611,6 +617,14 @@ try { db.exec(`ALTER TABLE routes ADD COLUMN start_lat REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE routes ADD COLUMN start_lng REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE routes ADD COLUMN end_lat REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE routes ADD COLUMN end_lng REAL;`); } catch (e) {}
+// Route type (LOGIN = Employees->Office, LOGOUT = Office->Employees) plus the
+// selected office (a company nodal point). Existing routes keep the legacy
+// CUSTOM type so their manually-set start/end are never altered.
+try { db.exec(`ALTER TABLE routes ADD COLUMN route_type TEXT DEFAULT 'CUSTOM';`); } catch (e) {}
+try { db.exec(`ALTER TABLE routes ADD COLUMN office_point_id INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE routes ADD COLUMN office_label TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE routes ADD COLUMN office_lat REAL;`); } catch (e) {}
+try { db.exec(`ALTER TABLE routes ADD COLUMN office_lng REAL;`); } catch (e) {}
 // Employee home pickup radius (metres) set by admin on address approval; governs
 // whether pickup defaults to the home address vs a shared pickup point.
 try { db.exec(`ALTER TABLE users ADD COLUMN pickup_radius REAL;`); } catch (e) {}

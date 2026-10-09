@@ -1253,8 +1253,44 @@ app.delete('/api/admin/routes/:id/employees/:employeeId', auth, role('admin'), (
   db.prepare('DELETE FROM route_employees WHERE route_id=? AND employee_id=?').run(req.params.id, req.params.employeeId);
   res.json({ ok: true });
 });
+// Route type: LOGIN (Employees -> Office) or LOGOUT (Office -> Employees).
+// Anything else (incl. legacy routes with no type) is CUSTOM and keeps the
+// admin's manually configured start/end untouched.
+function normalizeRouteType(t) {
+  const v = String(t || '').trim().toUpperCase();
+  return v === 'LOGIN' || v === 'LOGOUT' ? v : 'CUSTOM';
+}
+const routeNum = (v) => (v == null || v === '' || Number.isNaN(Number(v))) ? null : Number(v);
+// Derive the route's start/end from the (editable) employee stop order + the
+// selected office. LOGIN: first employee -> office. LOGOUT: office -> last
+// employee. CUSTOM uses the admin's manual start/end (legacy behavior).
+function computeRouteEndpoints(type, stops, office, manual = {}) {
+  const first = stops[0] || {};
+  const last = stops[stops.length - 1] || {};
+  if (type === 'LOGIN') {
+    return {
+      start_point: first.name || manual.start_point || null, start_lat: routeNum(first.lat), start_lng: routeNum(first.lng),
+      end_point: office.label || manual.end_point || null, end_lat: routeNum(office.lat), end_lng: routeNum(office.lng)
+    };
+  }
+  if (type === 'LOGOUT') {
+    return {
+      start_point: office.label || manual.start_point || null, start_lat: routeNum(office.lat), start_lng: routeNum(office.lng),
+      end_point: last.name || manual.end_point || null, end_lat: routeNum(last.lat), end_lng: routeNum(last.lng)
+    };
+  }
+  return {
+    start_point: manual.start_point || first.name || null,
+    start_lat: manual.start_lat == null ? routeNum(first.lat) : routeNum(manual.start_lat),
+    start_lng: manual.start_lng == null ? routeNum(first.lng) : routeNum(manual.start_lng),
+    end_point: manual.end_point || last.name || null,
+    end_lat: manual.end_lat == null ? routeNum(last.lat) : routeNum(manual.end_lat),
+    end_lng: manual.end_lng == null ? routeNum(last.lng) : routeNum(manual.end_lng)
+  };
+}
+
 app.post('/api/admin/routes', auth, role('admin'), (req, res) => {
-  const { name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng } = req.body || {};
+  const { name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, route_type, office_point_id, office_label, office_lat, office_lng } = req.body || {};
   // A route is a reusable definition: start + end + at least ONE employee/stop.
   // One employee is a valid route (previously a "< 2 stops" rule wrongly blocked it).
   const stopList = Array.isArray(stops) ? stops.filter((s) => s && (s.name || s.lat != null)) : [];
@@ -1263,26 +1299,35 @@ app.post('/api/admin/routes', auth, role('admin'), (req, res) => {
   // Attach the owning company so a non-owner company admin can see it immediately.
   const sc = companyAdminScope(req);
   const companyId = sc.isOwner ? null : sc.cid;
-  const first = stopList[0] || {};
-  const last = stopList[stopList.length - 1] || {};
-  const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, company_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(name, start_point || first.name || null, end_point || last.name || null, Number(speed_limit) || 40, JSON.stringify(stopList),
-      start_lat == null ? first.lat ?? null : Number(start_lat), start_lng == null ? first.lng ?? null : Number(start_lng),
-      end_lat == null ? last.lat ?? null : Number(end_lat), end_lng == null ? last.lng ?? null : Number(end_lng), companyId);
-  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+  const type = normalizeRouteType(route_type);
+  const office = { point_id: office_point_id ?? null, label: office_label ?? null, lat: routeNum(office_lat), lng: routeNum(office_lng) };
+  const ep = computeRouteEndpoints(type, stopList, office, { start_point, start_lat, start_lng, end_point, end_lat, end_lng });
+  const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, company_id, route_type, office_point_id, office_label, office_lat, office_lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(name, ep.start_point, ep.end_point, Number(speed_limit) || 40, JSON.stringify(stopList),
+      ep.start_lat, ep.start_lng, ep.end_lat, ep.end_lng, companyId,
+      type, office.point_id, office.label, office.lat, office.lng);
+  res.json({ ok: true, id: Number(info.lastInsertRowid), route_type: type });
 });
 app.put('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
   if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
-  const { name, start_point, end_point, speed_limit, stops, status, start_lat, start_lng, end_lat, end_lng } = req.body || {};
+  const { name, start_point, end_point, speed_limit, stops, status, start_lat, start_lng, end_lat, end_lng, route_type, office_point_id, office_label, office_lat, office_lng } = req.body || {};
   const r = db.prepare('SELECT * FROM routes WHERE id = ?').get(req.params.id);
   if (!r) return res.status(404).json({ error: 'Route not found' });
-  db.prepare('UPDATE routes SET name=?, start_point=?, end_point=?, speed_limit=?, stops=?, status=?, start_lat=?, start_lng=?, end_lat=?, end_lng=? WHERE id=?')
-    .run(name ?? r.name, start_point ?? r.start_point, end_point ?? r.end_point, Number(speed_limit) ?? r.speed_limit, JSON.stringify(stops) ?? r.stops, status ?? r.status,
-      start_lat === undefined ? r.start_lat : (start_lat == null ? null : Number(start_lat)),
-      start_lng === undefined ? r.start_lng : (start_lng == null ? null : Number(start_lng)),
-      end_lat === undefined ? r.end_lat : (end_lat == null ? null : Number(end_lat)),
-      end_lng === undefined ? r.end_lng : (end_lng == null ? null : Number(end_lng)), r.id);
-  res.json({ ok: true });
+  const stopList = Array.isArray(stops) ? stops.filter((s) => s && (s.name || s.lat != null)) : JSON.parse(r.stops || '[]');
+  if (!stopList.length) return res.status(400).json({ error: 'Please select at least one employee or stop.' });
+  const type = route_type === undefined ? normalizeRouteType(r.route_type) : normalizeRouteType(route_type);
+  const office = {
+    point_id: office_point_id === undefined ? r.office_point_id : office_point_id,
+    label: office_label === undefined ? r.office_label : office_label,
+    lat: office_lat === undefined ? routeNum(r.office_lat) : routeNum(office_lat),
+    lng: office_lng === undefined ? routeNum(r.office_lng) : routeNum(office_lng)
+  };
+  const ep = computeRouteEndpoints(type, stopList, office, { start_point, start_lat, start_lng, end_point, end_lat, end_lng });
+  db.prepare('UPDATE routes SET name=?, start_point=?, end_point=?, speed_limit=?, stops=?, status=?, start_lat=?, start_lng=?, end_lat=?, end_lng=?, route_type=?, office_point_id=?, office_label=?, office_lat=?, office_lng=? WHERE id=?')
+    .run(name ?? r.name, ep.start_point, ep.end_point, Number(speed_limit) || r.speed_limit, JSON.stringify(stopList), status ?? r.status,
+      ep.start_lat, ep.start_lng, ep.end_lat, ep.end_lng,
+      type, office.point_id, office.label, office.lat, office.lng, r.id);
+  res.json({ ok: true, route_type: type });
 });
 app.delete('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
   if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });

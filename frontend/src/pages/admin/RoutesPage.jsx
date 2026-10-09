@@ -8,7 +8,11 @@ import GoogleRouteMap from '../../components/GoogleRouteMap';
 import { calculateRoute } from '../../lib/geo';
 import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2, Wand2, Play, CalendarClock } from 'lucide-react';
 
-const emptyRoute = { name: '', start_point: '', end_point: '', speed_limit: 40, stops: [{ sequence: 1, name: '', lat: 12.97, lng: 77.59 }], start_lat: null, start_lng: null, end_lat: null, end_lng: null };
+// A route is built from a Route Type (LOGIN / LOGOUT) + an office + an editable
+// ordered list of employee stops. LOGIN => first employee → office;
+// LOGOUT => office → last employee. Legacy routes keep type CUSTOM (manual
+// start/end). stops[] = [{ sequence, employee_id, emp_id, employee_name, name, lat, lng }]
+const emptyRoute = { name: '', route_type: 'LOGIN', office_point_id: null, office_label: '', office_lat: null, office_lng: null, start_point: '', end_point: '', speed_limit: 40, stops: [], start_lat: null, start_lng: null, end_lat: null, end_lng: null };
 
 export default function RoutesPage() {
   const { user } = useAuth();
@@ -16,10 +20,12 @@ export default function RoutesPage() {
   const toast = useToast();
   const [routes, setRoutes] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [offices, setOffices] = useState([]);
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(emptyRoute);
   const [editing, setEditing] = useState(null);
   const [mapFor, setMapFor] = useState(null); // null | 'start' | 'end' | stopIndex
+  const [dragIdx, setDragIdx] = useState(null);
   const [empPick, setEmpPick] = useState('');
   const [assign, setAssign] = useState(null);
   const [selEmps, setSelEmps] = useState([]);
@@ -46,6 +52,8 @@ export default function RoutesPage() {
     api.get('/api/v3/routes/auto-run').then((s) => setAutoRun(s || null)).catch(() => setAutoRun(null));
     api.get('/api/admin/vehicles').then((r) => setVehicles(asArr(r))).catch(() => {});
     api.get('/api/admin/drivers/all').then((r) => setDrivers(asArr(r))).catch(() => {});
+    // Office locations reuse the company's existing nodal points (type='office').
+    api.get('/api/company/me/nodal-points').then((r) => setOffices((asArr(r)).filter((p) => !p.type || p.type === 'office'))).catch(() => setOffices([]));
   };
 
   const openTrip = (r) => {
@@ -128,19 +136,29 @@ export default function RoutesPage() {
 
   const save = async () => {
     if (!form.name || !form.name.trim()) return toast('Please enter a route name.', 'err');
-    if (!form.start_point) return toast('Please select a start point.', 'err');
-    if (!form.end_point) return toast('Please select an end point.', 'err');
     const stops = form.stops
-      .filter((s) => s && (s.name || s.lat != null))
+      .filter((s) => s && (s.name || s.employee_name || s.lat != null))
       .map((s, i) => ({ ...s, sequence: i + 1 }));
-    if (!stops.length) return toast('Please select at least one employee.', 'err');
+    const auto = form.route_type === 'LOGIN' || form.route_type === 'LOGOUT';
+    if (auto) {
+      if (!stops.length) return toast('Add at least one employee to create this route.', 'err');
+      if (!officeValid()) return toast('Office location is not configured. Please configure the office location before creating this route.', 'err');
+      const bad = stops.find((s) => !stopValid(s));
+      if (bad) return toast(`This employee does not have a valid saved address${bad.employee_name ? ` (${bad.employee_name})` : ''}. Please update the employee address before using this stop.`, 'err');
+      if (form.route_type === 'LOGIN' && !stopValid(stops[0])) return toast('The first employee needs a valid saved address to be the start point.', 'err');
+      if (form.route_type === 'LOGOUT' && !stopValid(stops[stops.length - 1])) return toast('The last employee needs a valid saved address to be the end point.', 'err');
+    } else {
+      if (!form.start_point) return toast('Please select a start point.', 'err');
+      if (!form.end_point) return toast('Please select an end point.', 'err');
+      if (!stops.length) return toast('Please select at least one employee.', 'err');
+    }
     const payload = { ...form, stops };
     try {
       if (editing) await api.put(`/api/admin/routes/${editing}`, payload);
       else await api.post('/api/admin/routes', payload);
       toast(`✓ ${editing ? 'Route updated' : 'Route created'} successfully — "${form.name}" (${stops.length} stop${stops.length === 1 ? '' : 's'}).`);
       setModal(false); load();
-    } catch (e) { toast(e.message, 'err'); }
+    } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
   };
 
   const delRoute = async (r) => {
@@ -180,6 +198,69 @@ export default function RoutesPage() {
 
   const empAddress = (e) => (e && (e.home_address || e.address || e.pickup_address)) || null;
   const employeesWithAddr = employees.filter((e) => e && empAddress(e));
+
+  // ---- Route Type driven endpoints (LOGIN: first employee → office;
+  //      LOGOUT: office → last employee; CUSTOM keeps manual start/end) ----
+  const officePoint = () => ({ name: form.office_label || '', lat: form.office_lat, lng: form.office_lng });
+  const stopPoint = (s) => ({ name: (s && (s.name || s.employee_name)) || '', lat: s && s.lat, lng: s && s.lng });
+  const effStart = () => form.route_type === 'CUSTOM'
+    ? { name: form.start_point, lat: form.start_lat, lng: form.start_lng }
+    : (form.route_type === 'LOGIN' ? stopPoint(form.stops[0]) : officePoint());
+  const effEnd = () => form.route_type === 'CUSTOM'
+    ? { name: form.end_point, lat: form.end_lat, lng: form.end_lng }
+    : (form.route_type === 'LOGIN' ? officePoint() : stopPoint(form.stops[form.stops.length - 1]));
+  const hasXY = (o) => o && o.lat != null && o.lng != null && !Number.isNaN(Number(o.lat)) && !Number.isNaN(Number(o.lng));
+  const stopValid = (s) => !!(s && (s.name || s.employee_name) && hasXY(s));
+  const officeValid = () => hasXY(form);
+
+  const setStops = (stops) => setForm((f) => ({ ...f, stops: stops.map((s, i) => ({ ...s, sequence: i + 1 })) }));
+  const addEmployeeStop = (empId) => {
+    const emp = employees.find((e) => empIdOf(e) === String(empId));
+    if (!emp) return;
+    const addr = empAddress(emp);
+    if (!addr) return toast(`${emp.name} has no address on file`, 'err');
+    const stop = {
+      employee_id: Number(emp.id ?? emp._id),
+      emp_id: emp.emp_id || emp.employeeId || '',
+      employee_name: emp.name,
+      name: addr.split(',').slice(0, 2).join(', '),
+      lat: Number(emp.home_lat) || null,
+      lng: Number(emp.home_lng) || null
+    };
+    setStops([...form.stops, stop]);
+    toast(`Added ${emp.name} as stop ${form.stops.length + 1}`);
+  };
+  const setStopEmployee = (i, empId) => {
+    const stops = [...form.stops];
+    if (!empId) { stops[i] = { ...stops[i], employee_id: null, emp_id: '', employee_name: '' }; return setStops(stops); }
+    const emp = employees.find((e) => empIdOf(e) === String(empId));
+    if (!emp) return;
+    const addr = empAddress(emp);
+    if (!addr) return toast(`${emp.name} has no address on file`, 'err');
+    stops[i] = { ...stops[i], employee_id: Number(emp.id ?? emp._id), emp_id: emp.emp_id || emp.employeeId || '', employee_name: emp.name, name: addr.split(',').slice(0, 2).join(', '), lat: Number(emp.home_lat) || stops[i].lat, lng: Number(emp.home_lng) || stops[i].lng };
+    setStops(stops);
+  };
+  const setStopAddress = (i, item) => {
+    if (!item) return;
+    const stops = [...form.stops];
+    stops[i] = { ...stops[i], name: item.address || stops[i].name, lat: item.lat ?? stops[i].lat, lng: item.lng ?? stops[i].lng };
+    setStops(stops);
+  };
+  const removeStop = (i) => setStops(form.stops.filter((_, j) => j !== i));
+  const moveStop = (i, d) => {
+    const j = i + d; const stops = [...form.stops];
+    if (j < 0 || j >= stops.length) return;
+    [stops[i], stops[j]] = [stops[j], stops[i]];
+    setStops(stops);
+  };
+  const reorderStops = (from, to) => {
+    if (from === to || from < 0 || to < 0) return;
+    const stops = [...form.stops];
+    const [it] = stops.splice(from, 1);
+    stops.splice(to, 0, it);
+    setStops(stops);
+  };
+  const empIdOf = (e) => String(e.id ?? e._id);
 
   const move = (i, dir) => {
     const stops = [...form.stops];
@@ -229,24 +310,29 @@ export default function RoutesPage() {
   };
 
   const coords = form.stops.filter((s) => s && s.lat != null && s.lng != null && !isNaN(Number(s.lat)));
+  // Ordered coordinates for the current route: start + employee stops + end,
+  // where start/end are derived from the route type (CUSTOM uses manual start/end).
+  const routePoints = () => {
+    const pts = [];
+    const st = effStart();
+    if (hasXY(st)) pts.push({ lat: Number(st.lat), lng: Number(st.lng) });
+    form.stops.forEach((s) => { if (s && s.lat != null && s.lng != null && !isNaN(Number(s.lat))) pts.push({ lat: Number(s.lat), lng: Number(s.lng) }); });
+    const en = effEnd();
+    if (hasXY(en) && !(pts.length && Math.abs(pts[pts.length - 1].lat - Number(en.lat)) < 1e-6 && Math.abs(pts[pts.length - 1].lng - Number(en.lng)) < 1e-6)) {
+      pts.push({ lat: Number(en.lat), lng: Number(en.lng) });
+    }
+    return pts;
+  };
   // Only offer to calculate once there is enough real data: a start, an end and
   // at least one employee/stop with a location.
-  const canCalculate = form.start_lat != null && form.start_lng != null && form.end_lat != null && form.end_lng != null && coords.length >= 1;
+  const canCalculate = hasXY(effStart()) && hasXY(effEnd()) && coords.length >= 1;
 
   const calcDirections = async () => {
-    if (coords.length < 2) return toast('Add coordinates for the start and end of the route first (search the start and end points, then add stops).', 'err');
+    const points = routePoints();
+    if (points.length < 2) return toast('Add a start, an end and at least one employee stop with a location first.', 'err');
     setDirLoading(true);
     setDir(null);
     try {
-      const ordered = coords;
-      const points = [];
-      if (form.start_lat != null && form.start_lng != null) points.push({ lat: Number(form.start_lat), lng: Number(form.start_lng) });
-      coords.forEach((s) => points.push({ lat: Number(s.lat), lng: Number(s.lng) }));
-      if (form.end_lat != null && form.end_lng != null &&
-          !(points.length && Math.abs(points[points.length - 1].lat - Number(form.end_lat)) < 1e-6 && Math.abs(points[points.length - 1].lng - Number(form.end_lng)) < 1e-6)) {
-        points.push({ lat: Number(form.end_lat), lng: Number(form.end_lng) });
-      }
-      if (points.length < 2) { setDir({ status: 'ERROR', msg: 'Add coordinates to at least 2 stops, or start & end points.' }); setDirLoading(false); return; }
       const res = await calculateRoute(points);
       const distKm = (res.distanceMeters || 0) / 1000;
       const mins = (res.durationSeconds || 0) / 60;
@@ -273,25 +359,37 @@ export default function RoutesPage() {
 
   const previewMarkers = () => {
     const mk = [];
-    if (form.start_lat != null && form.start_lng != null) mk.push({ id: 'start', lat: Number(form.start_lat), lng: Number(form.start_lng), label: 'A', color: 'green', title: form.start_point || 'Start' });
-    coords.forEach((s, i) => mk.push({ id: `s${form.stops.indexOf(s)}`, lat: Number(s.lat), lng: Number(s.lng), label: String(i + 1), color: 'amber', title: s.name || `Stop ${i + 1}` }));
-    if (form.end_lat != null && form.end_lng != null) mk.push({ id: 'end', lat: Number(form.end_lat), lng: Number(form.end_lng), label: 'B', color: 'red', title: form.end_point || 'End' });
+    const st = effStart(); const en = effEnd();
+    if (hasXY(st)) mk.push({ id: 'start', lat: Number(st.lat), lng: Number(st.lng), label: 'A', color: 'green', title: st.name || 'Start' });
+    coords.forEach((s, i) => mk.push({ id: `s${form.stops.indexOf(s)}`, lat: Number(s.lat), lng: Number(s.lng), label: String(i + 1), color: 'amber', title: s.employee_name || s.name || `Stop ${i + 1}` }));
+    if (hasXY(en)) mk.push({ id: 'end', lat: Number(en.lat), lng: Number(en.lng), label: 'B', color: 'red', title: en.name || 'End' });
     return mk;
   };
 
   const previewLines = () => {
     const lines = [];
-    if (coords.length > 1) lines.push({ path: coords.map((s) => ({ lat: Number(s.lat), lng: Number(s.lng) })), color: '#f59e0b', weight: 4, dash: true, opacity: 0.8 });
+    const pts = routePoints();
+    if (pts.length > 1) lines.push({ path: pts, color: '#f59e0b', weight: 4, dash: true, opacity: 0.8 });
     if (dir && dir.status === 'OK' && dir.polyline.length > 1) lines.push({ path: dir.polyline, color: '#22c55e', weight: 5 });
     return lines;
   };
 
   const dragStop = (id, la, ln) => {
-    const n = Number(String(id).replace(/^s/, ''));
-    if (Number.isNaN(n)) return;
     setForm((f) => {
-      if (id === 'start') return { ...f, start_lat: la, start_lng: ln };
-      if (id === 'end') return { ...f, end_lat: la, end_lng: ln };
+      // For LOGIN/LOGOUT the start/end markers are the first/last employee, so
+      // dragging them edits that employee's location (never the office).
+      if (id === 'start') {
+        if (f.route_type === 'CUSTOM') return { ...f, start_lat: la, start_lng: ln };
+        if (f.route_type === 'LOGIN' && f.stops[0]) { const stops = [...f.stops]; stops[0] = { ...stops[0], lat: la, lng: ln }; return { ...f, stops }; }
+        return f;
+      }
+      if (id === 'end') {
+        if (f.route_type === 'CUSTOM') return { ...f, end_lat: la, end_lng: ln };
+        if (f.route_type === 'LOGOUT' && f.stops.length) { const stops = [...f.stops]; const k = stops.length - 1; stops[k] = { ...stops[k], lat: la, lng: ln }; return { ...f, stops }; }
+        return f;
+      }
+      const n = Number(String(id).replace(/^s/, ''));
+      if (Number.isNaN(n)) return f;
       const stops = [...f.stops];
       if (stops[n]) stops[n] = { ...stops[n], lat: la, lng: ln };
       return { ...f, stops };
@@ -368,7 +466,7 @@ export default function RoutesPage() {
                       {!isVendor && <button className="btn btn-sm btn-outline" title="Auto-optimize pickup/drop sequence" onClick={() => optimizeRoute(r)}>{optId === r.id ? <Loader2 size={14} style={{ animation: 'spin .8s linear infinite' }} /> : <Wand2 size={14} />} Optimize</button>}
                       {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => openAssign(r)}><User size={14} /> Assign</button>}
                       {!isVendor && <button className="btn btn-sm btn-primary" onClick={() => openTrip(r)} title="Create an operational trip/cab run from this route"><Play size={14} /> Create Trip</button>}
-                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
+                      {!isVendor && <button className="btn btn-sm btn-outline" onClick={() => { setEditing(r.id); setForm({ name: r.name, route_type: (r.route_type === 'LOGIN' || r.route_type === 'LOGOUT') ? r.route_type : 'CUSTOM', office_point_id: r.office_point_id ?? null, office_label: r.office_label || '', office_address: '', office_lat: r.office_lat ?? null, office_lng: r.office_lng ?? null, start_point: r.start_point, end_point: r.end_point, speed_limit: r.speed_limit, stops: Array.isArray(r.stops) ? r.stops.map((s) => ({ ...s })) : [], start_lat: r.start_lat ?? null, start_lng: r.start_lng ?? null, end_lat: r.end_lat ?? null, end_lng: r.end_lng ?? null }); setDir(null); setModal(true); }}><Pencil size={14} /> Edit</button>}
                       {!isVendor && <button className="btn btn-sm btn-ghost" title="Delete route" onClick={() => delRoute(r)}><Trash2 size={14} color="#ef4444" /></button>}
                     </div>
                   </td>
@@ -383,75 +481,111 @@ export default function RoutesPage() {
       <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit route' : 'New route'} wide>
         <div className="field" style={{ marginBottom: 12 }}><label>Route name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Electronic City → Manyata Tech Park" /></div>
 
-        <div className="startend-duo">
-          <div className="field">
-            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#22c55e" />Start point (search & pick exact location)</label>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <AddressPicker
-                  value={form.start_point ? { address: form.start_point, lat: form.start_lat, lng: form.start_lng } : null}
-                  onChange={(item) => setForm((f) => ({ ...f, start_point: item.address || f.start_point, start_lat: item.lat ?? f.start_lat, start_lng: item.lng ?? f.start_lng }))}
-                />
-              </div>
-              <button type="button" title="Pick start point on map" className="btn btn-outline" onClick={() => setMapFor('start')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
-                <MapPinned size={15} color="#22c55e" />
-              </button>
-            </div>
-            {form.start_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
-          </div>
-          <div className="field">
-            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#ef4444" />End point (search & pick exact location)</label>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <AddressPicker
-                  value={form.end_point ? { address: form.end_point, lat: form.end_lat, lng: form.end_lng } : null}
-                  onChange={(item) => setForm((f) => ({ ...f, end_point: item.address || f.end_point, end_lat: item.lat ?? f.end_lat, end_lng: item.lng ?? f.end_lng }))}
-                />
-              </div>
-              <button type="button" title="Pick end point on map" className="btn btn-outline" onClick={() => setMapFor('end')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
-                <MapPinned size={15} color="#ef4444" />
-              </button>
-            </div>
-            {form.end_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
-            <button type="button" className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => setForm((f) => ({ ...f, end_point: f.start_point, end_lat: f.start_lat, end_lng: f.start_lng }))}>Same as Start Point</button>
+        {/* Route type determines the direction automatically. */}
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label>Route type</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[['LOGIN', 'LOGIN · Employees → Office'], ['LOGOUT', 'LOGOUT · Office → Employees']].map(([t, lbl]) => (
+              <button key={t} type="button" className={`btn btn-sm ${form.route_type === t ? 'btn-primary' : 'btn-outline'}`} onClick={() => setForm((f) => ({ ...f, route_type: t }))}>{lbl}</button>
+            ))}
+            {form.route_type === 'CUSTOM' && <button type="button" className="btn btn-sm btn-primary" disabled>CUSTOM (legacy)</button>}
           </div>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0 8px' }}>
-          <b style={{ fontSize: 14 }}>Stops (pick-up / drop sequence — drag the numbered pin on the preview map to fine-tune)</b>
-          <button className="btn btn-sm btn-outline" onClick={() => setForm({ ...form, stops: [...form.stops, { sequence: form.stops.length + 1, name: '', lat: 12.97, lng: 77.59 }] })}><Plus size={14} /> Add stop</button>
+        {form.route_type === 'CUSTOM' ? (
+          <div className="startend-duo">
+            <div className="field">
+              <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#22c55e" />Start point (search & pick exact location)</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <AddressPicker
+                    value={form.start_point ? { address: form.start_point, lat: form.start_lat, lng: form.start_lng } : null}
+                    onChange={(item) => setForm((f) => ({ ...f, start_point: item.address || f.start_point, start_lat: item.lat ?? f.start_lat, start_lng: item.lng ?? f.start_lng }))}
+                  />
+                </div>
+                <button type="button" title="Pick start point on map" className="btn btn-outline" onClick={() => setMapFor('start')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
+                  <MapPinned size={15} color="#22c55e" />
+                </button>
+              </div>
+              {form.start_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
+            </div>
+            <div className="field">
+              <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#ef4444" />End point (search & pick exact location)</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <AddressPicker
+                    value={form.end_point ? { address: form.end_point, lat: form.end_lat, lng: form.end_lng } : null}
+                    onChange={(item) => setForm((f) => ({ ...f, end_point: item.address || f.end_point, end_lat: item.lat ?? f.end_lat, end_lng: item.lng ?? f.end_lng }))}
+                  />
+                </div>
+                <button type="button" title="Pick end point on map" className="btn btn-outline" onClick={() => setMapFor('end')} style={{ padding: '7px 9px', alignSelf: 'flex-start' }}>
+                  <MapPinned size={15} color="#ef4444" />
+                </button>
+              </div>
+              {form.end_point && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Location selected</div>}
+              <button type="button" className="btn btn-sm btn-outline" style={{ marginTop: 6 }} onClick={() => setForm((f) => ({ ...f, end_point: f.start_point, end_lat: f.start_lat, end_lng: f.start_lng }))}>Same as Start Point</button>
+            </div>
+          </div>
+        ) : (
+          <div className="field" style={{ marginBottom: 12 }}>
+            <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#0ea5e9" />Office location ({form.route_type === 'LOGIN' ? 'route end' : 'route start'})</label>
+            {offices.length ? (
+              <select value={form.office_point_id ?? ''} onChange={(e) => {
+                const o = offices.find((x) => String(x._id) === String(e.target.value));
+                if (!o) return setForm((f) => ({ ...f, office_point_id: null, office_label: '', office_lat: null, office_lng: null }));
+                setForm((f) => ({ ...f, office_point_id: o._id, office_label: o.label, office_address: o.address || '', office_lat: o.lat, office_lng: o.lng }));
+              }}>
+                <option value="">Select the office location…</option>
+                {offices.map((o) => (<option key={o._id} value={o._id}>{o.label}{o.address ? ` — ${o.address}` : ''}</option>))}
+              </select>
+            ) : (
+              <div style={{ fontSize: 12, color: '#ef4444' }}>Office location is not configured. Please configure the office location before creating this route.</div>
+            )}
+            {form.office_label && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>🏢 {form.office_label}</div>}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0 8px', gap: 8, flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 14 }}>Employee stops — order sets the route (drag or use ↑ ↓)</b>
+          <select value="" onChange={(e) => { if (e.target.value) addEmployeeStop(e.target.value); }} style={{ maxWidth: 260 }}>
+            <option value="">{employeesWithAddr.length ? '+ Add employee…' : 'No approved addresses yet — approve address requests under Approvals'}</option>
+            {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
+          </select>
         </div>
+        {!form.stops.length && <div style={{ fontSize: 13, color: 'var(--muted)', padding: '8px 0' }}>Add at least one employee to create this route.</div>}
         {form.stops.map((s, i) => (
-          <div key={i} className="stop-row">
-            <GripVertical size={18} style={{ color: 'var(--muted)' }} />
+          <div key={i} className="stop-row" draggable
+            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragIdx(i); }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); reorderStops(dragIdx, i); setDragIdx(null); }}>
+            <GripVertical size={18} style={{ color: 'var(--muted)', cursor: 'grab' }} />
+            <select value={s.employee_id ? String(s.employee_id) : ''} onChange={(e) => setStopEmployee(i, e.target.value)} style={{ maxWidth: 190 }}>
+              <option value="">— Manual address —</option>
+              {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
+            </select>
             <AddressPicker
               value={(s.lat && s.lng) ? { address: s.name, lat: s.lat, lng: s.lng } : (s.name ? { address: s.name } : null)}
-              onChange={(item) => setForm((f) => {
-                const stops = [...f.stops];
-                stops[i] = { ...stops[i], name: item.address || stops[i].name, lat: item.lat ?? stops[i].lat, lng: item.lng ?? stops[i].lng };
-                return { ...f, stops };
-              })}
+              onChange={(item) => setStopAddress(i, item)}
             />
             <button type="button" title={`Pick stop ${i + 1} on map`} className="btn btn-outline" onClick={() => setMapFor(i)} style={{ padding: '7px 9px' }}>
               <MapPinned size={15} color="#f59e0b" />
             </button>
             <div className="stop-coords">
-              <button className="btn btn-sm btn-ghost" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
-              <button className="btn btn-sm btn-ghost" disabled={i === form.stops.length - 1} onClick={() => move(i, 1)}>↓</button>
-              {form.stops.length > 1 && <button className="btn btn-sm btn-danger" onClick={() => setForm({ ...form, stops: form.stops.filter((_, j) => j !== i) })}><Trash2 size={13} /></button>}
+              <button className="btn btn-sm btn-ghost" disabled={i === 0} onClick={() => moveStop(i, -1)}>↑</button>
+              <button className="btn btn-sm btn-ghost" disabled={i === form.stops.length - 1} onClick={() => moveStop(i, 1)}>↓</button>
+              <button className="btn btn-sm btn-danger" onClick={() => removeStop(i)}><Trash2 size={13} /></button>
             </div>
           </div>
         ))}
 
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label><User size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add employee by address (auto-fills their saved address)</label>
-          <select value={empPick} onChange={(e) => pickEmployee(e.target.value)}>
-            <option value="">{employeesWithAddr.length ? 'Select an employee to add their address…' : 'No approved addresses yet — approve address requests under Approvals…'}</option>
-            {employeesWithAddr.map((e) => (
-              <option key={e.id || e._id} value={String(e.id || e._id)}>{e.name} · {e.emp_id} — {String(e.home_address || e.address || e.pickup_address).split(',').slice(0, 2).join(',')}</option>
-            ))}
-          </select>
-        </div>
+        {form.route_type !== 'CUSTOM' && (
+          <div style={{ margin: '10px 0 4px', padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2)', fontSize: 13 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>{form.route_type} route summary</div>
+            <div>📍 <b>Start:</b> {effStart().name || '—'} {hasXY(effStart()) ? `(${Number(effStart().lat).toFixed(4)}, ${Number(effStart().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing location</span>}</div>
+            <div style={{ color: 'var(--muted)', margin: '4px 0' }}>↓ stops in order: {form.stops.map((s, i) => `${i + 1}. ${s.employee_name || s.name || '—'}`).join('  →  ') || '—'}</div>
+            <div>🏢 <b>End:</b> {effEnd().name || '—'} {hasXY(effEnd()) ? `(${Number(effEnd().lat).toFixed(4)}, ${Number(effEnd().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing location</span>}</div>
+          </div>
+        )}
 
         <div style={{ margin: '14px 0 8px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-outline" disabled={dirLoading || !canCalculate} onClick={calcDirections}>

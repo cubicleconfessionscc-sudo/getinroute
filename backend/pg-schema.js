@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS routes (
   start_lng DOUBLE PRECISION,
   end_lat DOUBLE PRECISION,
   end_lng DOUBLE PRECISION,
+  route_type TEXT DEFAULT 'CUSTOM',
+  office_point_id BIGINT,
+  office_label TEXT,
+  office_lat DOUBLE PRECISION,
+  office_lng DOUBLE PRECISION,
   PRIMARY KEY (id)
 );
 
