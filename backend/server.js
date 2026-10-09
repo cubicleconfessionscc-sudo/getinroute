@@ -521,6 +521,35 @@ function canAccessAdminObject(req, kind, id) {
   }
   return false;
 }
+// Tenant guard for a single schedule row. Never trusts a company_id from the
+// frontend — ownership is derived from the authenticated session. Owner admins
+// are global; a company admin may only touch schedules whose employee belongs to
+// their company; a vendor only schedules on vehicles allotted to them.
+function adminOwnsSchedule(req, s) {
+  if (!s) return false;
+  if (isVendorReq(req)) {
+    if (!s.vehicle_id) return false;
+    const v = db.prepare('SELECT vendor_id FROM vehicles WHERE id=?').get(s.vehicle_id);
+    return !!(v && Number(v.vendor_id) === Number(req.user.vendor_id));
+  }
+  const sc = companyAdminScope(req);
+  if (sc.isOwner) return true;
+  const emp = db.prepare('SELECT id FROM users WHERE id=? AND role=? AND company_id=?').get(s.employee_id, 'employee', sc.cid);
+  return !!emp;
+}
+// Tenant guard for a persisted no-show log row (same rules as above).
+function adminOwnsNoShow(req, row) {
+  if (!row) return false;
+  if (isVendorReq(req)) {
+    const ctx = vendorCtx(req);
+    if (Number(row.vendor_id) === Number(ctx.vid)) return true;
+    return vendorPeopleIds(ctx).includes(Number(row.employee_id));
+  }
+  const sc = companyAdminScope(req);
+  if (sc.isOwner) return true;
+  const emp = db.prepare('SELECT id FROM users WHERE id=? AND company_id=?').get(row.employee_id, sc.cid);
+  return !!emp;
+}
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 function emitToUser(userId, event, payload) {
@@ -2005,7 +2034,7 @@ app.get('/api/admin/no-shows', auth, role('admin', 'vendor'), (req, res) => {
     FROM schedules s
     JOIN users u ON u.id = s.employee_id
     LEFT JOIN vehicles v ON v.id = s.vehicle_id
-    WHERE s.date = ? AND s.status IN ('confirmed','in_progress') ${venJoin} ${companyJoin}
+    WHERE s.date = ? AND s.status IN ('confirmed','in_progress') AND s.archived_at IS NULL ${venJoin} ${companyJoin}
   `).all(targetDate);
   const noShows = [];
   for (const s of scheduled) {
@@ -2045,7 +2074,7 @@ function activeSuspensionOf(employeeId) {
 function noShowCountFor(employeeId) {
   const settings = loadSettings() || {};
   const windowDays = Number(settings.noShowWindowDays) || 90;
-  const row = db.prepare('SELECT COUNT(*) AS c FROM employee_no_show_log WHERE employee_id=? AND date >= ?')
+  const row = db.prepare('SELECT COUNT(*) AS c FROM employee_no_show_log WHERE employee_id=? AND date >= ? AND archived_at IS NULL')
     .get(employeeId, dateOffsetDays(-windowDays));
   return row ? Number(row.c) : 0;
 }
@@ -2152,7 +2181,7 @@ app.get('/api/admin/no-shows/log', auth, role('admin', 'vendor'), (req, res) => 
     LEFT JOIN vehicles v ON v.id = l.vehicle_id
     LEFT JOIN users m ON m.id = l.marked_by
     LEFT JOIN users d ON d.id = l.driver_id
-    WHERE ${where}
+    WHERE ${where} AND l.archived_at IS NULL
     ORDER BY l.id DESC LIMIT 500
   `).all(...params);
   res.json(rows);
@@ -2160,7 +2189,7 @@ app.get('/api/admin/no-shows/log', auth, role('admin', 'vendor'), (req, res) => 
 app.get('/api/admin/suspensions', auth, role('admin', 'vendor'), (req, res) => {
   const rows = db.prepare(`
     SELECT s.*, u.name AS emp_name, u.emp_id AS emp_emp_id, u.department, u.email,
-      (SELECT COUNT(*) FROM employee_no_show_log l WHERE l.employee_id = s.employee_id) AS total_no_shows
+      (SELECT COUNT(*) FROM employee_no_show_log l WHERE l.employee_id = s.employee_id AND l.archived_at IS NULL) AS total_no_shows
     FROM employee_suspensions s
     LEFT JOIN users u ON u.id = s.employee_id
     WHERE s.status = 'suspended'
@@ -2186,6 +2215,51 @@ app.post('/api/admin/employees/:id/suspension/reactivate', auth, role('admin'), 
   res.json({ ok: true, id: susp.id, status: 'reactivated' });
 });
 
+// Soft-delete one authoritative no-show log record (archive-only). The row is
+// preserved for suspension math, employee history, compliance and audit; reads
+// and suspension counts skip archived rows.
+app.delete('/api/admin/no-shows/log/:id', auth, role('admin', 'vendor'), (req, res) => {
+  const id = Number(req.params.id);
+  const row = db.prepare('SELECT * FROM employee_no_show_log WHERE id=?').get(id);
+  if (!row) return res.status(404).json({ error: 'No-show record not found' });
+  if (!adminOwnsNoShow(req, row)) return res.status(403).json({ error: 'Not your record' });
+  if (row.archived_at) return res.status(409).json({ error: 'Record already removed' });
+  db.prepare('UPDATE employee_no_show_log SET archived_at=?, archived_by=? WHERE id=? AND archived_at IS NULL').run(ts(), req.user.id, id);
+  authLog('no-show-deleted', { actor: req.user.id, record: id, employee: row.employee_id });
+  res.json({ ok: true, deleted: true, id });
+});
+
+// Clear eligible no-show records for the current tenant (archive-only; other
+// companies' records are never touched). Strong confirmation phrase required.
+app.post('/api/admin/no-shows/clear', auth, role('admin', 'vendor'), (req, res) => {
+  const confirm = String((req.body || {}).confirm || '').trim().toUpperCase();
+  if (confirm !== 'CLEAR ALL NO-SHOWS') return res.status(400).json({ error: 'Confirmation phrase required', required: 'CLEAR ALL NO-SHOWS' });
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  let where = 'archived_at IS NULL';
+  if (ven) {
+    const ctx = vendorCtx(req);
+    const people = vendorPeopleIds(ctx);
+    const pList = people.length ? people.map(Number).join(',') : '0';
+    where += ` AND (employee_id IN (${pList}) OR vendor_id = ${Number(ctx.vid) || -1})`;
+  } else if (!sc.isOwner) {
+    const ids = sc.ids();
+    where += ` AND employee_id IN (${(ids && ids.length) ? ids.join(',') : '0'})`;
+  }
+  const ids = db.prepare(`SELECT id FROM employee_no_show_log WHERE ${where}`).all().map((r) => Number(r.id));
+  let deleted = 0;
+  if (ids.length) {
+    const tsV = ts();
+    for (const id of ids) {
+      const r = db.prepare('UPDATE employee_no_show_log SET archived_at=?, archived_by=? WHERE id=? AND archived_at IS NULL').run(tsV, req.user.id, id);
+      if (Number(r.changes || 0) > 0) deleted++;
+    }
+  }
+  const failed = ids.length - deleted;
+  authLog('no-shows-clear-all', { actor: req.user.id, deleted, failed, tenant: sc.isOwner ? 'owner' : (ven ? `vendor:${req.user.vendor_id}` : `company:${sc.cid}`) });
+  res.json({ ok: true, deleted, preserved: 0, failed, total: ids.length });
+});
+
 /* ---------------- TRIPS / CAB RUNS ---------------- */
 
 app.get('/api/admin/runs', auth, role('admin', 'vendor'), (req, res) => {
@@ -2202,7 +2276,7 @@ app.get('/api/admin/runs', auth, role('admin', 'vendor'), (req, res) => {
     JOIN users u ON u.id = s.employee_id
     LEFT JOIN vehicles v ON v.id = s.vehicle_id
     LEFT JOIN routes r ON r.id = s.route_id
-    WHERE s.date = ? ${venJoin}
+    WHERE s.date = ? AND s.archived_at IS NULL ${venJoin}
     ORDER BY v.id, s.sequence
   `).all(targetDate);
 
@@ -2253,12 +2327,54 @@ app.get('/api/admin/runs/export', auth, role('admin'), (req, res) => {
   const rows = db.prepare(`
     SELECT s.date, v.vehicle_name, v.plate, v.driver_name, v.line, v.status AS vstatus, COUNT(*) AS pax
     FROM schedules s LEFT JOIN vehicles v ON v.id = s.vehicle_id
-    WHERE s.date = ? GROUP BY s.vehicle_id ORDER BY v.line
+    WHERE s.date = ? AND s.archived_at IS NULL GROUP BY s.vehicle_id ORDER BY v.line
   `).all(dateOnly());
   const content = [headers.map(esc).join(','), ...rows.map((r) => [r.date, r.vehicle_name, r.plate, r.driver_name, `L${r.line}`, 'toOffice', '—', r.vstatus, r.pax].map(esc).join(','))].join('\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="getinroute-runs-${dateOnly()}.csv"`);
   res.send('\uFEFF' + content);
+});
+
+// Clear All Trips: soft-archives ONLY the current tenant's *eligible* schedules
+// (not yet boarded, no no-show/safety history). Protected operational history —
+// completed/cancelled/absent trips and anything with a check-in, check-out,
+// no-show or safety record — is preserved untouched. Never a hard delete.
+app.post('/api/admin/runs/clear', auth, role('admin', 'vendor'), (req, res) => {
+  const confirm = String((req.body || {}).confirm || '').trim().toUpperCase();
+  if (confirm !== 'CLEAR ALL') return res.status(400).json({ error: 'Confirmation phrase required', required: 'CLEAR ALL' });
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  let tenantWhere = '1=1';
+  const params = [];
+  if (ven) {
+    tenantWhere += ' AND s.vehicle_id IN (SELECT id FROM vehicles WHERE vendor_id = ?)';
+    params.push(Number(req.user.vendor_id) || -1);
+  } else if (!sc.isOwner) {
+    const ids = sc.ids();
+    tenantWhere += ` AND s.employee_id IN (${(ids && ids.length) ? ids.join(',') : '0'})`;
+  }
+  const total = Number((db.prepare(`SELECT COUNT(*) AS c FROM schedules s WHERE ${tenantWhere} AND s.archived_at IS NULL`).get(...params) || {}).c) || 0;
+  const eligible = db.prepare(`
+    SELECT s.id, s.vehicle_id FROM schedules s
+    WHERE ${tenantWhere} AND s.archived_at IS NULL
+      AND s.status IN ('scheduled','requested','confirmed','in_progress')
+      AND COALESCE(s.absent,0) = 0
+      AND NOT EXISTS (SELECT 1 FROM checkins c WHERE c.schedule_id = s.id)
+      AND NOT EXISTS (SELECT 1 FROM employee_no_show_log l WHERE l.schedule_id = s.id AND l.archived_at IS NULL)
+  `).all(...params);
+  const ids = eligible.map((r) => Number(r.id));
+  let deleted = 0;
+  let failed = 0;
+  if (ids.length) {
+    const out = archiveRecords({ table: 'schedules', ids, actorId: req.user.id, actorRole: req.user.role, reason: 'admin_clear_all', companyId: req.user.company_id });
+    deleted = out && out.ok ? Number(out.changed) || 0 : 0;
+    failed = ids.length - deleted;
+    const vehs = [...new Set(eligible.map((r) => r.vehicle_id).filter(Boolean))];
+    for (const vid of vehs) { try { recomputeRunState(vid, dateOnly()); } catch (e) {} }
+  }
+  const preserved = Math.max(0, total - ids.length);
+  authLog('trips-clear-all', { actor: req.user.id, deleted, preserved, failed, tenant: sc.isOwner ? 'owner' : (ven ? `vendor:${req.user.vendor_id}` : `company:${sc.cid}`) });
+  res.json({ ok: true, deleted, preserved, failed, eligible: ids.length, total });
 });
 
 /* ---------------- SCHEDULES (employee-facing) ---------------- */
@@ -2872,8 +2988,14 @@ app.put('/api/admin/schedules/:id', auth, role('admin', 'vendor'), (req, res) =>
   }
   res.json({ ok: true });
 });
-app.delete('/api/admin/schedules/:id', auth, role('admin'), (req, res) => {
-  const out = archiveRecords({ table: 'schedules', ids: [req.params.id], actorId: req.user.id, actorRole: req.user.role, reason: 'admin_delete', companyId: req.user.company_id });
+app.delete('/api/admin/schedules/:id', auth, role('admin', 'vendor'), (req, res) => {
+  const s = db.prepare('SELECT * FROM schedules WHERE id=?').get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Schedule not found' });
+  if (!adminOwnsSchedule(req, s)) return res.status(403).json({ error: 'Not your trip' });
+  // Soft-delete: the row (and its check-in/out, no-show and audit history) is
+  // preserved with archived_at set — never a hard DELETE of operational history.
+  const out = archiveRecords({ table: 'schedules', ids: [s.id], actorId: req.user.id, actorRole: req.user.role, reason: 'admin_delete', companyId: req.user.company_id });
+  if (s.vehicle_id) { try { recomputeRunState(s.vehicle_id, s.date); } catch (e) {} }
   res.status(out.ok ? 200 : 400).json(out.ok ? { ok: true, archived: out.changed > 0 } : out);
 });
 
@@ -3685,6 +3807,27 @@ app.get('/api/admin/driver-assignments', auth, role('admin', 'vendor'), (req, re
   res.json(rows);
 });
 
+// Delete a driver's Trip·Line·Stand assignment. Removes ONLY the assignment
+// relationship the driver selected — never the driver account, employee, vehicle,
+// route, historical trips, check-in/out or audit records.
+app.delete('/api/admin/driver-assignments/:id', auth, role('admin', 'vendor'), (req, res) => {
+  const id = Number(req.params.id);
+  const drv = db.prepare("SELECT * FROM users WHERE id=? AND role='driver'").get(id);
+  if (!drv) return res.status(404).json({ error: 'Driver not found' });
+  if (isVendorReq(req)) {
+    if (Number(drv.vendor_id) !== Number(req.user.vendor_id)) return res.status(403).json({ error: 'Not your driver' });
+  } else {
+    const sc = companyAdminScope(req);
+    if (!sc.isOwner && Number(drv.company_id) !== Number(sc.cid)) return res.status(403).json({ error: 'Not your driver' });
+  }
+  if (!drv.assign_trip && !drv.assign_line && !drv.assign_stand && !drv.assign_at) {
+    return res.status(409).json({ error: 'This driver has no assignment to delete' });
+  }
+  db.prepare('UPDATE users SET assign_trip=NULL, assign_line=NULL, assign_stand=NULL, assign_at=NULL WHERE id=?').run(id);
+  authLog('driver-assignment-deleted', { actor: req.user.id, driver: id, name: drv.name });
+  res.json({ ok: true, deleted: true, driver_id: id });
+});
+
 app.get('/api/driver/standing-point', auth, role('driver'), (req, res) => {
   const veh = db.prepare('SELECT id, stand FROM vehicles WHERE id=?').get(req.user.vehicle_id);
   if (!veh) return res.status(400).json({ error: 'No vehicle assigned' });
@@ -3775,7 +3918,7 @@ const EXPORT_KINDS = {
     headers: ['Date', 'Emp ID', 'Employee', 'Vehicle', 'Plate', 'Route', 'Pickup', 'Drop', 'Login', 'Logout', 'Seq', 'Status'],
     rows: () => db.prepare(`
       SELECT s.date, u.emp_id, u.name, v.vehicle_name, v.plate, r.name AS route_name, s.pickup_time, s.drop_time, s.login_time, s.logout_time, s.sequence, s.status
-      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.date DESC`).all().map(Object.values)
+      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id WHERE s.archived_at IS NULL ORDER BY s.date DESC`).all().map(Object.values)
   },
   runs: {
     headers: ['Date', 'Emp ID', 'Employee', 'Vehicle', 'Plate', 'Route', 'Status', 'Check-in', 'Check-out'],
@@ -3783,7 +3926,7 @@ const EXPORT_KINDS = {
       SELECT s.date, u.emp_id, u.name, v.vehicle_name, r.name AS route_name, s.status,
         (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkin') AS checkin_time,
         (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkout') AS checkout_time
-      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.id DESC`).all()
+      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id WHERE s.archived_at IS NULL ORDER BY s.id DESC`).all()
       .map((r) => [r.date, r.emp_id, r.name, r.vehicle_name, r.plate ?? null, r.route_name, r.status, r.checkin_time, r.checkout_time])
   },
   feedback: {
@@ -3800,7 +3943,7 @@ const EXPORT_KINDS = {
       SELECT s.date, u.emp_id, u.name, v.vehicle_name, r.name AS route_name, s.status,
         (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkin') AS checkin_time,
         (SELECT time FROM checkins WHERE schedule_id=s.id AND type='checkout') AS checkout_time
-      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id ORDER BY s.id DESC`).all()
+      FROM schedules s JOIN users u ON u.id=s.employee_id LEFT JOIN vehicles v ON v.id=s.vehicle_id LEFT JOIN routes r ON r.id=s.route_id WHERE s.archived_at IS NULL ORDER BY s.id DESC`).all()
       .map((r) => [r.date, r.emp_id, r.name, r.vehicle_name, r.route_name, r.status, r.checkin_time, r.checkout_time])
   },
   'sms-log': {
@@ -3827,7 +3970,7 @@ const EXPORT_KINDS = {
       const targetDate = req.query.date || dateOnly();
       const scheduled = db.prepare(`SELECT s.*, u.name AS emp_name, u.emp_id, u.phone, v.vehicle_name, v.plate, v.driver_name
         FROM schedules s JOIN users u ON u.id = s.employee_id LEFT JOIN vehicles v ON v.id = s.vehicle_id
-        WHERE s.date = ? AND s.status IN ('confirmed','in_progress')`).all(targetDate);
+        WHERE s.date = ? AND s.status IN ('confirmed','in_progress') AND s.archived_at IS NULL`).all(targetDate);
       const out = [];
       for (const s of scheduled) {
         const ci = db.prepare("SELECT id FROM checkins WHERE schedule_id = ? AND type = 'checkin'").get(s.id);
@@ -3882,9 +4025,12 @@ app.get('/api/admin/export/:kind', auth, role('admin'), exportRoute);
 // Analytics report exports (reuse the V3 report generators).
 function reportExportRoute(req, res, isXlsx) {
   const kind = req.params.kind;
+  const label = String(kind || 'Report').replace(/(^|[-_ ])\w/g, (m) => m.toUpperCase().replace(/[-_ ]/g, ''));
   try {
     const ops = require('./v3/ops');
-    const out = ops.report(req.user && req.user.company_id, kind);
+    // Effective tenant for the export (never trust the frontend): owner = global.
+    const sc = companyAdminScope(req);
+    const out = ops.report(sc.isOwner ? null : sc.cid, kind);
     const rows = (out && out.rows) || [];
     const headers = rows.length ? Object.keys(rows[0]) : ['empty'];
     const body = rows.map((r) => headers.map((h) => r[h]));
@@ -3894,11 +4040,11 @@ function reportExportRoute(req, res, isXlsx) {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Data');
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="getinroute-report-${kind}-${dateOnly()}.xlsx"`);
+      res.setHeader('Content-Disposition', `attachment; filename="GetInRoute_${label}_Report_${dateOnly()}.xlsx"`);
       return res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="getinroute-report-${kind}-${dateOnly()}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="GetInRoute_${label}_Report_${dateOnly()}.csv"`);
     res.send('\uFEFF' + csv(headers, body));
   } catch (e) {
     console.error('[export:report]', kind, e.message);
@@ -5542,6 +5688,11 @@ try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN driver_id INTEGER;`);
 try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN lat REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN lng REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN pickup_address TEXT;`); } catch (e) {}
+// Soft-delete/archive for the authoritative no-show log. Authoritative records are
+// never hard-deleted (they feed suspensions, employee history, compliance, audit);
+// admin "delete"/"clear" only sets archived_at so reads + suspension counts skip them.
+try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN archived_at TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE employee_no_show_log ADD COLUMN archived_by INTEGER;`); } catch (e) {}
 
 function locProfile(u) {
   let p = {};

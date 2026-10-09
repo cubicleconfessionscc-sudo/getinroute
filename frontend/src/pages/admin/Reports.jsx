@@ -31,7 +31,8 @@ export default function Reports() {
   const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
 
   const exportReport = async (xlsx) => {
-    const name = `report-${kind}-${new Date().toISOString().slice(0, 10)}`;
+    const label = kind.charAt(0).toUpperCase() + kind.slice(1);
+    const name = `GetInRoute_${label}_Report_${new Date().toISOString().slice(0, 10)}`;
     try {
       if (xlsx) await downloadFile(`/api/admin/export/report/${kind}.xlsx`, name + '.xlsx');
       else await downloadCsv(`/api/admin/export/report/${kind}`, name + '.csv');

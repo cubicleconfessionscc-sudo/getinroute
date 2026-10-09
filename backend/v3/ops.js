@@ -81,31 +81,40 @@ function retryStuck() {
 
 /* ---------------- ADVANCED ANALYTICS (V3 §36-37) ---------------- */
 function report(companyId, kind) {
+  // Tenant isolation: `companyId` is the *effective* tenant id (the owning admin's
+  // user id for a company admin, or null for the platform owner). When set, every
+  // company report is narrowed to that company's employees/vehicles/routes so one
+  // company can never see another's data. Owner (null) keeps platform-wide view.
+  const cid = companyId == null ? null : Number(companyId);
+  const scoped = cid != null;
+  const EMP = scoped ? 'AND employee_id IN (SELECT id FROM users WHERE company_id=?)' : '';
+  const VEH = scoped ? 'AND vehicle_id IN (SELECT DISTINCT vehicle_id FROM schedules WHERE employee_id IN (SELECT id FROM users WHERE company_id=?))' : '';
+  const P = scoped ? [cid] : [];
   switch (kind) {
     case 'operations':
       return {
         rows: db.prepare(`SELECT date, COUNT(*) AS trips, SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
           SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled, SUM(CASE WHEN absent=1 THEN 1 ELSE 0 END) AS no_show
-          FROM schedules WHERE vertical = 'company' GROUP BY date ORDER BY date DESC LIMIT 90`).all()
+          FROM schedules WHERE vertical = 'company' AND archived_at IS NULL ${EMP} GROUP BY date ORDER BY date DESC LIMIT 90`).all(...P)
       };
     case 'fleet':
-      return { rows: db.prepare(`SELECT v.id, v.plate, v.capacity, v.status, (SELECT COUNT(*) FROM schedules s WHERE s.vehicle_id = v.id AND s.status <> 'cancelled') AS trips,
-        (SELECT COUNT(*) FROM schedules s WHERE s.vehicle_id = v.id AND s.status = 'completed') AS completed
-        FROM vehicles v WHERE v.vertical = 'company' ORDER BY v.id DESC LIMIT 200`).all() };
+      return { rows: db.prepare(`SELECT v.id, v.plate, v.capacity, v.status, (SELECT COUNT(*) FROM schedules s WHERE s.vehicle_id = v.id AND s.status <> 'cancelled' AND s.archived_at IS NULL) AS trips,
+        (SELECT COUNT(*) FROM schedules s WHERE s.vehicle_id = v.id AND s.status = 'completed' AND s.archived_at IS NULL) AS completed
+        FROM vehicles v WHERE v.vertical = 'company' ${scoped ? 'AND v.id IN (SELECT DISTINCT vehicle_id FROM schedules WHERE employee_id IN (SELECT id FROM users WHERE company_id=?))' : ''} ORDER BY v.id DESC LIMIT 200`).all(...P) };
     case 'drivers':
-      return { rows: db.prepare(`SELECT u.id, u.name, u.designation, (SELECT COUNT(*) FROM schedules s WHERE s.employee_id = u.id AND s.status = 'completed') AS trips
-        FROM users u WHERE u.role = 'driver' AND (u.company_id IS NULL OR u.company_id = ?) ORDER BY u.id DESC LIMIT 200`).all(companyId || null) };
+      return { rows: db.prepare(`SELECT u.id, u.name, u.designation, (SELECT COUNT(*) FROM schedules s WHERE s.employee_id = u.id AND s.status = 'completed' AND s.archived_at IS NULL) AS trips
+        FROM users u WHERE u.role = 'driver' AND ${scoped ? 'u.company_id = ?' : '1=1'} ORDER BY u.id DESC LIMIT 200`).all(...P) };
     case 'routes':
       return { rows: db.prepare(`SELECT r.id, r.name, LENGTH(r.stops) - LENGTH(REPLACE(r.stops,'|','')) + 1 AS stops,
-        (SELECT COUNT(*) FROM schedules s WHERE s.route_id = r.id AND s.status <> 'cancelled') AS trips,
-        (SELECT COUNT(*) FROM schedules s WHERE s.route_id = r.id AND s.status = 'completed') AS completed
-        FROM routes r WHERE r.vertical = 'company' ORDER BY r.id DESC LIMIT 200`).all() };
+        (SELECT COUNT(*) FROM schedules s WHERE s.route_id = r.id AND s.status <> 'cancelled' AND s.archived_at IS NULL) AS trips,
+        (SELECT COUNT(*) FROM schedules s WHERE s.route_id = r.id AND s.status = 'completed' AND s.archived_at IS NULL) AS completed
+        FROM routes r WHERE r.vertical = 'company' ${scoped ? 'AND (r.company_id = ? OR r.id IN (SELECT DISTINCT route_id FROM schedules WHERE employee_id IN (SELECT id FROM users WHERE company_id=?)))' : ''} ORDER BY r.id DESC LIMIT 200`).all(...(scoped ? [cid, cid] : [])) };
     case 'vendors':
       return { rows: db.prepare('SELECT id, name, status, login_count FROM vendors ORDER BY id DESC LIMIT 100').all() };
     case 'safety':
-      return { rows: db.prepare(`SELECT v.plate, sp.speed, sp.speed_limit, sp.lat, sp.lng, sp.created_at FROM speed_events sp LEFT JOIN vehicles v ON v.id = sp.vehicle_id ORDER BY sp.id DESC LIMIT 200`).all() };
+      return { rows: db.prepare(`SELECT v.plate, sp.speed, sp.speed_limit, sp.lat, sp.lng, sp.created_at FROM speed_events sp LEFT JOIN vehicles v ON v.id = sp.vehicle_id WHERE 1=1 ${scoped ? 'AND sp.vehicle_id IN (SELECT DISTINCT vehicle_id FROM schedules WHERE employee_id IN (SELECT id FROM users WHERE company_id=?))' : ''} ORDER BY sp.id DESC LIMIT 200`).all(...P) };
     case 'financial':
-      return { rows: db.prepare('SELECT * FROM billing_records WHERE ((? || \'\') IS NULL OR company_id = ?) ORDER BY id DESC LIMIT 200').all(companyId || null, companyId || null) };
+      return { rows: db.prepare('SELECT * FROM billing_records WHERE ((? || \'\') IS NULL OR company_id = ?) ORDER BY id DESC LIMIT 200').all(cid, cid) };
     default:
       return { rows: [] };
   }

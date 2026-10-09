@@ -15,6 +15,10 @@ export default function TripsPage() {
   const [editRun, setEditRun] = useState(null);
   const [editForm, setEditForm] = useState({ pickup_time: '', drop_time: '' });
   const [busy, setBusy] = useState(false);
+  const [delTarget, setDelTarget] = useState(null);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearPhrase, setClearPhrase] = useState('');
+  const [clearResult, setClearResult] = useState(null);
 
   const openEdit = (r) => {
     const slot = r.slotLabel && /^\d{2}:\d{2}/.test(r.slotLabel) ? r.slotLabel.slice(0, 5) : '';
@@ -43,8 +47,9 @@ export default function TripsPage() {
     } finally { setBusy(false); }
   };
 
-  const delRun = async (r) => {
-    if (!window.confirm('Are you sure you want to delete this trip? This removes its schedule(s) only — the route, employees, drivers and vehicles are kept.')) return;
+  const delRun = async () => {
+    const r = delTarget;
+    if (!r) return;
     const stops = (r.dropSequence || []).filter((s) => s.scheduleId);
     if (!stops.length) return toast('This trip has no schedule rows to delete.', 'err');
     setBusy(true);
@@ -54,9 +59,22 @@ export default function TripsPage() {
         try { await api.del(`/api/admin/schedules/${s.scheduleId}`); ok += 1; }
         catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
       }
-      toast(ok ? '✓ Trip deleted' : 'Nothing deleted');
+      toast(ok ? `✓ Trip deleted (${ok} stop${ok === 1 ? '' : 's'})` : 'Nothing deleted');
+      setDelTarget(null);
       load();
     } finally { setBusy(false); }
+  };
+
+  const clearAll = async () => {
+    if (clearPhrase.trim().toUpperCase() !== 'CLEAR ALL') return toast('Type CLEAR ALL to confirm.', 'err');
+    setBusy(true);
+    try {
+      const r = await api.post('/api/admin/runs/clear', { confirm: 'CLEAR ALL' });
+      setClearResult(r);
+      toast(`✓ Cleared ${r.deleted} trip${r.deleted === 1 ? '' : 's'} · preserved ${r.preserved}`);
+      load();
+    } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+    finally { setBusy(false); }
   };
 
   const load = () => {
@@ -117,6 +135,7 @@ export default function TripsPage() {
             <option value="completed">Completed</option>
           </select>
           {!isVendor && <button className="btn btn-primary" onClick={exportRuns}><Download size={16} /> Export spreadsheet</button>}
+          {!isVendor && <button className="btn btn-danger" onClick={() => { setClearResult(null); setClearPhrase(''); setClearOpen(true); }}>Clear All Trips</button>}
         </div>
       </div>
 
@@ -184,7 +203,7 @@ export default function TripsPage() {
                       <td>
                         <div className="actions" onClick={(e) => e.stopPropagation()}>
                           <button className="btn btn-sm btn-outline" onClick={() => openEdit(r)}>Edit</button>
-                          <button className="btn btn-sm btn-ghost" title="Delete trip" onClick={() => delRun(r)}>Delete</button>
+                          <button className="btn btn-sm btn-ghost" title="Delete trip" onClick={() => setDelTarget(r)}>Delete</button>
                         </div>
                       </td>
                     </tr>
@@ -255,6 +274,56 @@ export default function TripsPage() {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={() => setEditRun(null)}>Cancel</button>
           <button className="btn btn-primary" disabled={busy} onClick={saveEdit}>{busy ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </Modal>
+
+      <Modal open={!!delTarget} onClose={() => setDelTarget(null)} title="Delete Trip?">
+        <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 10 }}>
+          Are you sure you want to delete this trip? Its schedule(s) are archived (soft-deleted) so check-in/out,
+          no-show and audit history is preserved. The route, employees, drivers and vehicles are kept.
+        </p>
+        {delTarget && (
+          <div style={{ fontSize: 13, marginBottom: 16, padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2)' }}>
+            <div><b>{delTarget.vehicleId?.vehicleNumber || '—'}</b>{delTarget.vehicleId?.plate ? ` (${delTarget.vehicleId.plate})` : ''} · Driver: {delTarget.driverId?.name || '—'}</div>
+            <div style={{ color: 'var(--muted)', marginTop: 4 }}>
+              {delTarget.date ? new Date(delTarget.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              {' · '}{delTarget.direction === 'toOffice' ? 'Login' : 'Logout'}
+              {' · '}{delTarget.slotLabel || '—'}
+              {' · '}{delTarget.dropSequence?.length || 0} stop(s)
+            </div>
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => setDelTarget(null)}>Cancel</button>
+          <button className="btn btn-danger" disabled={busy} onClick={delRun}>{busy ? 'Deleting…' : 'Delete'}</button>
+        </div>
+      </Modal>
+
+      <Modal open={clearOpen} onClose={() => setClearOpen(false)} title="Clear All Trips?">
+        <p style={{ fontSize: 14, color: 'var(--muted)' }}>
+          This clears <b>eligible trips for your company only</b>. Completed/historical trips and any trip with
+          check-in, check-out, no-show or safety history are <b>preserved</b>. It never deletes the database, other
+          companies, users, drivers, vehicles, routes, audit logs or backups.
+        </p>
+        {clearResult ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 14, textAlign: 'center' }}>
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--surface-2)' }}><div style={{ fontSize: 22, fontWeight: 800 }}>{clearResult.deleted}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>Deleted</div></div>
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--surface-2)' }}><div style={{ fontSize: 22, fontWeight: 800 }}>{clearResult.preserved}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>Preserved</div></div>
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--surface-2)' }}><div style={{ fontSize: 22, fontWeight: 800 }}>{clearResult.failed}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>Failed</div></div>
+          </div>
+        ) : (
+          <div className="field" style={{ marginTop: 14 }}>
+            <label>Type <b>CLEAR ALL</b> to confirm</label>
+            <input value={clearPhrase} onChange={(e) => setClearPhrase(e.target.value)} placeholder="CLEAR ALL" autoFocus />
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={() => setClearOpen(false)}>Close</button>
+          {!clearResult && (
+            <button className="btn btn-danger" disabled={busy || clearPhrase.trim().toUpperCase() !== 'CLEAR ALL'} onClick={clearAll}>
+              {busy ? 'Clearing…' : 'Clear All Trips'}
+            </button>
+          )}
         </div>
       </Modal>
     </div>

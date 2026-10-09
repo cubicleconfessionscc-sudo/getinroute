@@ -63,6 +63,9 @@ if (USE_PG) {
   try { pgdb.exec("ALTER TABLE trip_events ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  // Authoritative no-show log soft-delete columns (admin delete/clear is archive-only).
+  try { pgdb.exec("ALTER TABLE employee_no_show_log ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE employee_no_show_log ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));

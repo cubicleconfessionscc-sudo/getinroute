@@ -316,6 +316,12 @@ table.tbl .actions { display: flex; gap: 6px; }
 .hero-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .hero-visual { display: flex; flex-direction: column; gap: 12px; }
 .pub-hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 40px; align-items: center; max-width: 1180px; margin: 0 auto; text-align: left; position: relative; z-index: 1; }
+/* Let hero columns shrink below their content's intrinsic width so the layout
+   never overflows the viewport on narrow (iPhone) screens. */
+.pub-hero-grid > * { min-width: 0; }
+.pub-hero-visual, .live-dashboard-preview { max-width: 100%; }
+.live-dashboard-preview svg, .live-map-placeholder svg, .pub-hero-visual svg { max-width: 100%; height: auto; }
+.live-stat-row, .rc-head { min-width: 0; }
 .pub-eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .06em; margin-bottom: 16px; text-transform: uppercase; }
 .pub-hero-desc { color: var(--text-2); font-size: 16.5px; max-width: 580px; line-height: 1.7; margin: 0 0 28px; }
 .dot-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; flex-shrink: 0; animation: pulse 1.6s infinite; }
@@ -842,10 +848,18 @@ a.pub-card:hover, .pub-card.pub-access:hover { transform: translateY(-3px); box-
 :root[data-theme="royal-slate"] { --primary:#64748b; --primary-2:#475569; --accent:#cbd5e1; --violet:#94a3b8; --violet-2:#64748b; --bg:#0b0f17; --surface:#121826; --card:#1a2233; --card-2:#222c40; --grad:linear-gradient(135deg,#64748b,#475569); --grad-violet:linear-gradient(135deg,#94a3b8,#cbd5e1); --shadow-glow:0 0 40px -12px rgba(100,116,139,.4); }
 :root[data-theme="royal-midnight"] { --primary:#1e40af; --primary-2:#1e3a8a; --accent:#60a5fa; --violet:#3b82f6; --violet-2:#2563eb; --bg:#020617; --surface:#0a1120; --card:#101a2e; --card-2:#16243c; --grad:linear-gradient(135deg,#1e40af,#1e3a8a); --grad-violet:linear-gradient(135deg,#2563eb,#3b82f6); --shadow-glow:0 0 40px -12px rgba(30,64,175,.5); }
 
-.theme-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 6px; }
-.theme-opt { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer; }
-.theme-opt.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
-.theme-sw { width: 16px; height: 16px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.theme-select { position: relative; }
+.theme-select-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer; }
+.theme-select-btn:hover { border-color: var(--primary); }
+.theme-select-name { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-select-caret { color: var(--muted); font-size: 11px; }
+.theme-sw { width: 16px; height: 16px; border-radius: 50%; display: inline-block; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+.theme-menu { position: absolute; z-index: 60; left: 0; right: 0; bottom: calc(100% + 6px); max-height: 340px; overflow-y: auto; margin: 0; padding: 6px; list-style: none; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); box-shadow: 0 18px 50px -20px rgba(2,6,23,.8); }
+.theme-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: none; border-radius: 9px; background: transparent; color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer; text-align: left; }
+.theme-menu-item:hover { background: var(--surface-2); }
+.theme-menu-item.on { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--primary); }
+.theme-menu-name { flex: 1; }
+.theme-menu-check { color: var(--primary); font-weight: 800; }
 
 /* =====================================================================
    EMPLOYEE PORTAL — scoped premium light theme (does not affect admin/vendor)

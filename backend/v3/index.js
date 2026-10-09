@@ -169,7 +169,10 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   /* ---- ANALYTICS ---- */
   R.get('/reports/:kind', auth, (req, res) => {
     try {
-      const cid = req.user && req.user.company_id;
+      // Effective tenant: a company admin is scoped to their own company (their
+      // user id is the employees' company_id); the platform owner is global (null).
+      const u = req.user || {};
+      const cid = u.emp_id === 'ADMIN' ? null : (u.role === 'admin' && u.id != null ? Number(u.id) : (u.company_id != null ? Number(u.company_id) : null));
       res.json(ops.report(cid, req.params.kind));
     } catch (e) { res.json({ rows: [], error: e.message }); }
   });

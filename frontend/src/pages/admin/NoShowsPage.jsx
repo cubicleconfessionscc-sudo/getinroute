@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, todayStr, downloadCsv, downloadFile } from '../../api';
-import { Download, FileSpreadsheet, ShieldAlert, History, UserCheck, RefreshCw } from 'lucide-react';
+import { Modal, useToast } from '../../components/ui';
+import { Download, FileSpreadsheet, ShieldAlert, History, UserCheck, RefreshCw, Trash2 } from 'lucide-react';
 
 const TABS = [
   { key: 'report', label: 'Report', icon: <FileSpreadsheet size={15} /> },
@@ -9,6 +10,7 @@ const TABS = [
 ];
 
 export default function NoShowsPage() {
+  const toast = useToast();
   const [tab, setTab] = useState('report');
   const [rows, setRows] = useState([]);
   const [logRows, setLogRows] = useState([]);
@@ -17,6 +19,34 @@ export default function NoShowsPage() {
   const [date, setDate] = useState(todayStr());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [delRow, setDelRow] = useState(null);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearPhrase, setClearPhrase] = useState('');
+  const [clearResult, setClearResult] = useState(null);
+
+  const deleteLog = async () => {
+    if (!delRow) return;
+    setBusy(true);
+    try {
+      await api.del(`/api/admin/no-shows/log/${delRow.id}`);
+      toast('✓ No-show record removed');
+      setDelRow(null);
+      loadLog();
+    } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+    finally { setBusy(false); }
+  };
+
+  const clearAll = async () => {
+    if (clearPhrase.trim().toUpperCase() !== 'CLEAR ALL NO-SHOWS') return toast('Type CLEAR ALL NO-SHOWS to confirm.', 'err');
+    setBusy(true);
+    try {
+      const r = await api.post('/api/admin/no-shows/clear', { confirm: 'CLEAR ALL NO-SHOWS' });
+      setClearResult(r);
+      toast(`✓ Removed ${r.deleted} no-show record${r.deleted === 1 ? '' : 's'}`);
+      loadLog();
+    } catch (e) { toast(e.response?.data?.error || e.message, 'err'); }
+    finally { setBusy(false); }
+  };
 
   const loadReport = () => {
     setLoading(true);
@@ -63,6 +93,9 @@ export default function NoShowsPage() {
             <button className="btn btn-outline btn-sm" onClick={() => downloadCsv(`/api/admin/export/no-shows?date=${date}`, `no-shows-${date}.csv`).catch((e) => setMsg(e.message))}><Download size={14} /> CSV</button>
             <button className="btn btn-green btn-sm" onClick={() => downloadFile(`/api/admin/export/no-shows.xlsx?date=${date}`, `no-shows-${date}.xlsx`).catch((e) => setMsg(e.message))}><FileSpreadsheet size={14} /> Excel</button>
           </>
+        )}
+        {tab === 'log' && (
+          <button className="btn btn-danger btn-sm" onClick={() => { setClearResult(null); setClearPhrase(''); setClearOpen(true); }}><Trash2 size={14} /> Clear No-Show Records</button>
         )}
         <button className="btn btn-outline btn-sm" onClick={() => (tab === 'report' ? loadReport() : tab === 'log' ? loadLog() : loadSuspensions())}><RefreshCw size={14} /> Refresh</button>
         <span style={{ marginLeft: 'auto' }} />
@@ -121,6 +154,7 @@ export default function NoShowsPage() {
                 <th>Marked By</th>
                 <th>Role</th>
                 <th>Marked At</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -144,6 +178,11 @@ export default function NoShowsPage() {
                   <td>{r.marked_by_name || 'system'}</td>
                   <td>{r.marked_by_actual_role || r.marked_by_role || '—'}</td>
                   <td>{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
+                  <td>
+                    <button className="btn btn-sm btn-ghost" title="Delete no-show record" onClick={() => setDelRow(r)}>
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -187,6 +226,53 @@ export default function NoShowsPage() {
           </table>
         </div>
       ))}
+
+      <Modal open={!!delRow} onClose={() => setDelRow(null)} title="Delete No-Show Record?">
+        <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 10 }}>
+          This removes the record from active reports. The authoritative no-show history is archived (soft-deleted),
+          not destroyed, so compliance, audit and suspension calculations stay intact.
+        </p>
+        {delRow && (
+          <div style={{ fontSize: 13, marginBottom: 16, padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2)' }}>
+            <div><b>Date:</b> {delRow.date || '—'}</div>
+            <div><b>Employee:</b> {delRow.emp_name || delRow.employee_id || '—'}{delRow.emp_emp_id ? ` (${delRow.emp_emp_id})` : ''}</div>
+            <div><b>Vehicle:</b> {delRow.vehicle_name || delRow.plate || '—'}</div>
+            <div><b>Direction:</b> {delRow.direction || '—'}</div>
+            <div><b>Slot:</b> {delRow.slot || delRow.slotLabel || '—'}</div>
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => setDelRow(null)}>Cancel</button>
+          <button className="btn btn-danger" disabled={busy} onClick={deleteLog}>{busy ? 'Deleting…' : 'Delete'}</button>
+        </div>
+      </Modal>
+
+      <Modal open={clearOpen} onClose={() => setClearOpen(false)} title="Clear No-Show Records?">
+        <p style={{ fontSize: 14, color: 'var(--muted)' }}>
+          This clears no-show records for <b>your company only</b>. Records are archived (soft-deleted) — the underlying
+          data is preserved for audit/compliance, and other companies' records are never touched.
+        </p>
+        {clearResult ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 14, textAlign: 'center' }}>
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--surface-2)' }}><div style={{ fontSize: 22, fontWeight: 800 }}>{clearResult.deleted}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>Deleted</div></div>
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--surface-2)' }}><div style={{ fontSize: 22, fontWeight: 800 }}>{clearResult.preserved}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>Preserved</div></div>
+            <div style={{ padding: 12, borderRadius: 10, background: 'var(--surface-2)' }}><div style={{ fontSize: 22, fontWeight: 800 }}>{clearResult.failed}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>Failed</div></div>
+          </div>
+        ) : (
+          <div className="field" style={{ marginTop: 14 }}>
+            <label>Type <b>CLEAR ALL NO-SHOWS</b> to confirm</label>
+            <input value={clearPhrase} onChange={(e) => setClearPhrase(e.target.value)} placeholder="CLEAR ALL NO-SHOWS" autoFocus />
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={() => setClearOpen(false)}>Close</button>
+          {!clearResult && (
+            <button className="btn btn-danger" disabled={busy || clearPhrase.trim().toUpperCase() !== 'CLEAR ALL NO-SHOWS'} onClick={clearAll}>
+              {busy ? 'Clearing…' : 'Clear No-Show Records'}
+            </button>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

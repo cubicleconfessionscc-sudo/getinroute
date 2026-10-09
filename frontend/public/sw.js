@@ -1,5 +1,5 @@
-const SHELL = ['/admin', '/admin/index.html', '/manifest.webmanifest', '/icon.svg'];
-const VERSION = 'getinroute-v3';
+const SHELL = ['/admin', '/admin/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png'];
+const VERSION = 'getinroute-v4';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
