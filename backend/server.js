@@ -1212,10 +1212,13 @@ app.get('/api/admin/routes', auth, role('admin', 'vendor'), (req, res) => {
   const sc = companyAdminScope(req);
   // A company admin must see routes they created even before any schedule
   // references them, so include routes owned by this company (company_id) in
-  // addition to the schedule-derived list.
-  const routes = sc.isOwner
-    ? db.prepare('SELECT * FROM routes ORDER BY id DESC').all()
-    : db.prepare(`SELECT * FROM routes WHERE company_id = ? OR id IN (${sc.routeList()}) ORDER BY id DESC`).all(sc.cid);
+  // addition to the schedule-derived list. A location-scoped admin is further
+  // narrowed to their operational location (legacy NULL-location rows stay visible).
+  let rWhere; let rParams;
+  if (sc.isOwner) { rWhere = '1=1'; rParams = []; }
+  else { rWhere = `(company_id = ? OR id IN (${sc.routeList()}))`; rParams = [sc.cid]; }
+  rWhere = applyLocationScope(rWhere, rParams, locationScope(req), 'company_location_id');
+  const routes = db.prepare(`SELECT * FROM routes WHERE ${rWhere} ORDER BY id DESC`).all(...rParams);
   const roster = db.prepare(`
     SELECT re.route_id, u.id AS employee_id, u.name, u.emp_id, u.home_address, u.home_lat, u.home_lng
     FROM route_employees re JOIN users u ON u.id = re.employee_id
@@ -1361,9 +1364,10 @@ app.post('/api/admin/routes', auth, role('admin'), (req, res) => {
   if (!db.prepare('SELECT id FROM vendors WHERE id=?').get(vid)) return res.status(400).json({ error: 'Vendor not found.' });
   const sc = companyAdminScope(req);
   const companyId = sc.isOwner ? null : sc.cid;
+  const locId = req.user.company_location_id != null ? Number(req.user.company_location_id) : null;
   const office = { point_id: office_point_id ?? null, label: office_label ?? null, lat: routeNum(office_lat), lng: routeNum(office_lng) };
-  const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, company_id, route_type, office_point_id, office_label, office_lat, office_lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(String(name).trim(), null, null, 40, '[]', null, null, null, null, companyId,
+  const info = db.prepare('INSERT INTO routes (name, start_point, end_point, speed_limit, stops, start_lat, start_lng, end_lat, end_lng, company_id, company_location_id, route_type, office_point_id, office_label, office_lat, office_lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(String(name).trim(), null, null, 40, '[]', null, null, null, null, companyId, locId,
       null, office.point_id, office.label, office.lat, office.lng);
   const id = Number(info.lastInsertRowid);
   setRouteVendor(id, vid);
@@ -1969,6 +1973,24 @@ function accessibleLocationIds(req) {
   }
   return u.company_location_id != null ? [Number(u.company_location_id)] : [];
 }
+// Row-level location restriction for a request: null = no location restriction
+// (owner, or a company admin with no location assigned); otherwise the list of
+// company_location_id values the caller may see. Legacy rows with a NULL
+// location are treated as "unresolved" and remain visible (never hidden/lost).
+function locationScope(req) {
+  const u = req.user;
+  if (!u) return [];
+  if (u.emp_id === 'ADMIN') return null;
+  if (u.company_location_id != null) return [Number(u.company_location_id)];
+  return null;
+}
+function applyLocationScope(where, params, scope, column) {
+  if (!scope || !scope.length) return where;
+  const col = column || 'company_location_id';
+  where += ` AND (${col} IN (${scope.map(() => '?').join(',')}) OR ${col} IS NULL)`;
+  for (const id of scope) params.push(id);
+  return where;
+}
 
 app.get('/api/admin/locations', auth, role('admin', 'vendor'), (req, res) => {
   const cid = locCompanyId(req);
@@ -2052,13 +2074,14 @@ app.get('/api/admin/users', auth, role('admin', 'vendor'), (req, res) => {
   const sc = companyAdminScope(req);
   // Non-owner admins must not see other companies' users. Legacy unbound rows
   // (company_id NULL) stay visible so single-company workspaces keep working.
-  const scWhere = (!isVendorReq(req) && !sc.isOwner) ? ' AND (company_id IS NULL OR company_id = ' + sc.cid + ')' : '';
-  let rows;
-  if (roleFilter) {
-    rows = db.prepare(`SELECT * FROM users WHERE role = ? AND (name LIKE ? OR emp_id LIKE ? OR email LIKE ?)${scWhere} ORDER BY id`).all(roleFilter, q, q, q);
-  } else {
-    rows = db.prepare(`SELECT * FROM users WHERE name LIKE ? OR emp_id LIKE ? OR email LIKE ?${scWhere} ORDER BY id`).all(q, q, q);
-  }
+  // A location-scoped admin is further narrowed to their operational location.
+  const params = [];
+  let where = '(name LIKE ? OR emp_id LIKE ? OR email LIKE ?)';
+  params.push(q, q, q);
+  if (roleFilter) { where = 'role = ? AND ' + where; params.unshift(roleFilter); }
+  if (!isVendorReq(req) && !sc.isOwner) { where += ' AND (company_id IS NULL OR company_id = ?)'; params.push(sc.cid); }
+  if (!isVendorReq(req)) where = applyLocationScope(where, params, locationScope(req), 'company_location_id');
+  let rows = db.prepare(`SELECT * FROM users WHERE ${where} ORDER BY id`).all(...params);
   if (isVendorReq(req)) {
     const ctx = vendorCtx(req);
     rows = rows.filter((u) => u.role === 'employee' || u.role === 'driver' ? vendorOwnsUser(u, ctx) : Number(u.id) === Number(req.user.id));

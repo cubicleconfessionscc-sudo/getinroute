@@ -74,6 +74,7 @@ if (USE_PG) {
   try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS office_lng DOUBLE PRECISION;"); } catch (e) {}
   // Operational location a user belongs to (nullable; additive).
   try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));
@@ -670,6 +671,9 @@ try { db.exec(`ALTER TABLE routes ADD COLUMN office_lng REAL;`); } catch (e) {}
 // nullable so every existing user keeps working (unassigned = no location scope).
 try { db.exec(`ALTER TABLE users ADD COLUMN company_location_id INTEGER;`); } catch (e) {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_users_company_location ON users(company_location_id);`); } catch (e) {}
+// Operational location a route belongs to (set from the creating admin's location).
+try { db.exec(`ALTER TABLE routes ADD COLUMN company_location_id INTEGER;`); } catch (e) {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_routes_company_location ON routes(company_location_id);`); } catch (e) {}
 // Employee home pickup radius (metres) set by admin on address approval; governs
 // whether pickup defaults to the home address vs a shared pickup point.
 try { db.exec(`ALTER TABLE users ADD COLUMN pickup_radius REAL;`); } catch (e) {}

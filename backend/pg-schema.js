@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS routes (
   office_label TEXT,
   office_lat DOUBLE PRECISION,
   office_lng DOUBLE PRECISION,
+  company_location_id BIGINT,
   PRIMARY KEY (id)
 );
 
