@@ -2053,6 +2053,26 @@ app.delete('/api/admin/locations/locations/:id', auth, role('admin'), (req, res)
   res.json({ ok: true });
 });
 
+app.delete('/api/admin/locations/cities/:id', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  const row = db.prepare('SELECT id FROM company_cities WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'City not found' });
+  const kids = db.prepare('SELECT COUNT(*) c FROM company_locations WHERE city_id=?').get(row.id).c;
+  if (kids) return res.status(409).json({ error: `City has ${kids} location(s). Delete them first.` });
+  db.prepare('DELETE FROM company_cities WHERE id=?').run(row.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/locations/states/:id', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  const row = db.prepare('SELECT id FROM company_states WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'State not found' });
+  const kids = db.prepare('SELECT COUNT(*) c FROM company_cities WHERE state_id=?').get(row.id).c;
+  if (kids) return res.status(409).json({ error: `State has ${kids} city(ies). Delete them first.` });
+  db.prepare('DELETE FROM company_states WHERE id=?').run(row.id);
+  res.json({ ok: true });
+});
+
 // Assign a user to an operational location (validated within the company).
 app.put('/api/admin/users/:id/location', auth, role('admin'), (req, res) => {
   const cid = locCompanyId(req);
