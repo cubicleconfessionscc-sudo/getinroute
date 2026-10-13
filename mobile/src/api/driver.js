@@ -43,3 +43,17 @@ export function setDriverStatus(status) {
 export function confirmRiderCheckIn(scheduleId, otp) {
   return client.post("/driver/confirm-checkin", { scheduleId, otp }).then((r) => r.data);
 }
+
+// Part 5 — Driver invite code duty session.
+// The driver signs in once, then redeems an invite code (issued by the
+// admin/vendor for a specific company + location) to start a duty session
+// bound to that location. Re-login with a different code switches the session.
+export function getDuty() {
+  return client.get("/driver/duty").then((r) => r.data);
+}
+export function redeemInvite(code) {
+  return client.post("/driver/invite/redeem", { code }).then((r) => r.data);
+}
+export function endDuty() {
+  return client.post("/driver/duty/end").then((r) => r.data);
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../auth';
 import { useInterval, useToast } from '../../components/ui';
@@ -40,8 +40,10 @@ const NAV_OWNER = [
     { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents' },
     { to: '/admin/billing', icon: <DollarSign size={18} />, text: 'Billing' },
     { to: '/admin/notification-templates', icon: <Bell size={18} />, text: 'Notification Templates' },
-    { to: '/admin/reports', icon: <BarChart3 size={18} />, text: 'Analytics Reports' },
+    { to: '/admin/reports', icon: <BarChart3 size={18} />, text: 'Analytics Reports', flag: 'ANALYTICS' },
+    { to: '/admin/system-health', icon: <Activity size={18} />, text: 'System Health' },
     { to: '/admin/settings', icon: <Settings size={18} />, text: 'Settings' },
+    { to: '/admin/operations', icon: <Building2 size={18} />, text: 'Company Operations' },
     { to: '/admin/cs', icon: <HeadphonesIcon size={18} />, text: 'CS & Owner Portal' },
     { to: '/admin/raw-data', icon: <Database size={18} />, text: 'Raw Data' }
   ]}
@@ -61,7 +63,7 @@ const NAV_ADMIN = [
     { to: '/admin/driver-assignments', icon: <Truck size={18} />, text: 'Driver Assignments' },
     { to: '/admin/schedules', icon: <CalendarClock size={18} />, text: 'Schedules' },
     { to: '/admin/trips', icon: <History size={18} />, text: 'All Trips' },
-    { to: '/admin/vendors', icon: <Building2 size={18} />, text: 'Vendor Management' }
+    { to: '/admin/vendors', icon: <Building2 size={18} />, text: 'Vendor Management', flag: 'VENDOR_MODULE' }
   ]},
   { label: 'Operations', items: [
     { to: '/admin/parking-lines', icon: <ParkingCircle size={18} />, text: 'Parking Lines' },
@@ -76,14 +78,14 @@ const NAV_ADMIN = [
   ]},
   { label: 'Reports', items: [
     { to: '/admin/exports', icon: <FileSpreadsheet size={18} />, text: 'Export Spreadsheets' },
-    { to: '/admin/reports', icon: <BarChart3 size={18} />, text: 'Analytics Reports' },
+    { to: '/admin/reports', icon: <BarChart3 size={18} />, text: 'Analytics Reports', flag: 'ANALYTICS' },
     { to: '/admin/notifications', icon: <Bell size={18} />, text: 'Notifications' },
     { to: '/admin/notification-templates', icon: <Send size={18} />, text: 'Notification Templates' },
     { to: '/admin/checkin-logs', icon: <ShieldAlert size={18} />, text: 'Check-In/Out Logs' },
     { to: '/admin/no-shows', icon: <UserX size={18} />, text: 'No-Show Report' }
   ]},
   { label: 'Intelligence', items: [
-    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center' },
+    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center', flag: 'AI_COMMAND_CENTER' },
     { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
     { to: '/admin/intelligence', icon: <Brain size={18} />, text: 'AI Intelligence' },
     { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' },
@@ -91,9 +93,10 @@ const NAV_ADMIN = [
   ]},
   { label: 'Configuration', items: [
     { to: '/admin/policies', icon: <ShieldCheck size={18} />, text: 'Policies' },
-    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents' },
+    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents', flag: 'DOCUMENT_MANAGEMENT' },
     { to: '/admin/billing', icon: <DollarSign size={18} />, text: 'Billing' },
     { to: '/admin/feature-flags', icon: <Flag size={18} />, text: 'Feature Flags' },
+    { to: '/admin/system-health', icon: <Activity size={18} />, text: 'System Health' },
     { to: '/admin/settings', icon: <Settings size={18} />, text: 'Settings' }
   ]}
 ];
@@ -107,9 +110,10 @@ const NAV_VENDOR = [
     { to: '/admin/routes', icon: <RouteIcon size={18} />, text: 'Routes' },
     { to: '/admin/vehicles', icon: <Truck size={18} />, text: 'Vehicles & Drivers' },
     { to: '/admin/employees', icon: <Users size={18} />, text: 'Employees' },
+    { to: '/admin/settings', icon: <Settings size={18} />, text: 'Settings' },
     { to: '/admin/schedules', icon: <CalendarClock size={18} />, text: 'Schedules' },
     { to: '/admin/trips', icon: <History size={18} />, text: 'All Trips' },
-    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents' }
+    { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents', flag: 'DOCUMENT_MANAGEMENT' }
   ]},
   { label: 'Operations', items: [
     { to: '/admin/parking-lines', icon: <ParkingCircle size={18} />, text: 'Parking Lines' },
@@ -123,7 +127,7 @@ const NAV_VENDOR = [
     { to: '/admin/tickets', icon: <Ticket size={18} />, text: 'Support Tickets' }
   ]},
   { label: 'Intelligence', items: [
-    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center' },
+    { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center', flag: 'AI_COMMAND_CENTER' },
     { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
     { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' },
     { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator' }
@@ -136,8 +140,21 @@ export default function AdminLayout() {
   const toast = useToast();
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(() => window.innerWidth > 900);
+  const [flags, setFlags] = useState(null);
   const nav = useNavigate();
   const location = useLocation();
+
+  // Effective feature flags for THIS company. When the owner disables a feature
+  // for a company, the matching nav item is hidden for that company's portal.
+  useEffect(() => {
+    api.get('/api/v3/flags/mine')
+      .then((r) => {
+        const map = {};
+        (Array.isArray(r) ? r : []).forEach((f) => { map[f.flag_key] = !!f.enabled; });
+        setFlags(map);
+      })
+      .catch(() => setFlags(null));
+  }, [user?.id]);
 
   useInterval(() => {
     api.get('/api/admin/stats').then((s) => setUnread(Number(s?.unread_notifications) || 0)).catch(() => {});
@@ -161,6 +178,11 @@ export default function AdminLayout() {
   const initials = (user?.name || 'A').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const navItems = user?.isOwner ? NAV_OWNER : (user?.role === 'vendor' ? NAV_VENDOR : NAV_ADMIN);
   const isVendor = user?.role === 'vendor';
+  // Fail-open: until flags load (or if the request fails) every item is shown.
+  const flagOn = (k) => !k || !flags || flags[k] !== false;
+  const visibleNav = navItems
+    .map((g) => ({ ...g, items: g.items.filter((it) => flagOn(it.flag)) }))
+    .filter((g) => g.items.length);
 
   return (
     <div className="shell">
@@ -171,7 +193,7 @@ export default function AdminLayout() {
           <div><div className="brand-name">GetinRoute</div><div style={{ fontSize: 11, color: '#64748b' }}>{user?.isOwner ? 'Owner Console' : 'Admin Console'}</div></div>
           <button className="btn btn-ghost btn-icon sidebar-close-btn" style={{ marginLeft: 'auto', color: 'var(--text)' }} onClick={() => setOpen(false)}><X size={18} /></button>
         </div>
-        {navItems.map((group) => (
+        {visibleNav.map((group) => (
           <React.Fragment key={group.label}>
             <div className="nav-label">{group.label}</div>
             {group.items.map((item) => (

@@ -9,3 +9,9 @@ export function lookupCompany(params) {
 export function getMyCompany() {
   return client.get("/company/me").then((r) => r.data);
 }
+
+// Pre-auth: list the company's State > City > Location for the given employee
+// identifier. Used by the Employee app's onboarding location picker.
+export function getEmployeeLocations(identifier) {
+  return client.post("/auth/employee-locations", { identifier }).then((r) => r.data);
+}

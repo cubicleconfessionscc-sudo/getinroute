@@ -35,6 +35,7 @@ import AdminNotifications from './pages/admin/AdminNotifications';
 import AdminChat from './pages/admin/AdminChat';
 import SmsLogPage from './pages/admin/SmsLogPage';
 import SettingsPage from './pages/admin/SettingsPage';
+import AdminOpsPage from './pages/admin/AdminOpsPage';
 import CheckInLogsPage from './pages/admin/CheckInLogsPage';
 import NoShowsPage from './pages/admin/NoShowsPage';
 import TicketListPage from './pages/admin/TicketListPage';
@@ -52,6 +53,8 @@ import VendorLogin from './pages/VendorLogin';
 
 import SubscriptionCommandCenter from './pages/admin/SubscriptionCommandCenter';
 import FeatureFlags from './pages/admin/FeatureFlags';
+import SystemHealth from './pages/admin/SystemHealth';
+import GoogleLocationPickerPage from './pages/admin/GoogleLocationPickerPage';
 import PolicyEngine from './pages/admin/PolicyEngine';
 import IntelligenceCenter from './pages/admin/IntelligenceCenter';
 import AITransportManager from './pages/admin/AITransportManager';
@@ -161,6 +164,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/parent/register" element={<ParentRegister />} />
 
+          <Route path="/admin/map-picker" element={<Require role="admin" roles={['admin', 'vendor']} vertical="company"><GoogleLocationPickerPage /></Require>} />
           <Route path="/admin" element={<Require role="admin" roles={['admin', 'vendor']} vertical="company"><AdminLayout /></Require>}>
             <Route index element={<Dashboard />} />
             <Route path="tracking" element={<LiveTracking />} />
@@ -177,6 +181,7 @@ export default function App() {
             <Route path="chat" element={<AdminChat />} />
             <Route path="sms-log" element={<SmsLogPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="operations" element={<AdminOpsPage />} />
             <Route path="checkin-logs" element={<CheckInLogsPage />} />
             <Route path="no-shows" element={<NoShowsPage />} />
             <Route path="tickets" element={<TicketListPage />} />
@@ -192,6 +197,7 @@ export default function App() {
             <Route path="safety" element={<SafetyPage />} />
             <Route path="subscription" element={<SubscriptionCommandCenter />} />
             <Route path="feature-flags" element={<FeatureFlags />} />
+            <Route path="system-health" element={<SystemHealth />} />
             <Route path="policies" element={<PolicyEngine />} />
             <Route path="intelligence" element={<IntelligenceCenter />} />
             <Route path="transport-manager" element={<AITransportManager />} />

@@ -16,6 +16,7 @@ import { notifyTripAssigned, notifyChatMessage } from "../../services/notificati
 import { scheduleAlarmBefore } from "../../services/alarms";
 import { colors, spacing, radius } from "../../theme";
 import client from "../../api/client";
+import { getDuty, redeemInvite, endDuty } from "../../api/duty";
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -92,6 +93,11 @@ export default function DriverHomeScreen({ navigation }) {
   const [arrived, setArrived] = useState({});
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  // Part 5: invite-code redeem modal + active duty banner.
+  const [duty, setDuty] = useState(null);
+  const [inviteModal, setInviteModal] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
   const idleTimerRef = useRef(null);
   // Tracks which active run/trip ids we've already announced, so a (re)assigned
   // run only speaks once per session.
@@ -116,6 +122,39 @@ export default function DriverHomeScreen({ navigation }) {
       .then((r) => setStandingPointState(r.standingPoint || null))
       .catch(() => {});
   }, []);
+
+  // Part 5: load the active duty session so we can show the current duty
+  // location in the header. If there is none, the driver can tap the
+  // "Enter invite code" button on the empty state to redeem one.
+  useEffect(() => {
+    getDuty()
+      .then((d) => setDuty(d && d.active ? d : null))
+      .catch(() => setDuty(null));
+  }, []);
+
+  async function redeemCode() {
+    if (!inviteCode.trim()) return Alert.alert("Enter the invite code", "Ask your admin or vendor for the code.");
+    setInviteBusy(true);
+    try {
+      const d = await redeemInvite(inviteCode.trim().toUpperCase());
+      setDuty(d && d.active ? d : null);
+      setInviteCode("");
+      setInviteModal(false);
+      Alert.alert("Duty started", "You're now on duty at the location issued by your admin.");
+    } catch (e) {
+      Alert.alert("Couldn't start duty", e?.response?.data?.error || e.message || "Please try again.");
+    } finally { setInviteBusy(false); }
+  }
+
+  async function endCurrentDuty() {
+    if (!duty) return;
+    Alert.alert("End duty?", "This ends your current duty session. Your trip data stays with this location; sign in again with a different code to switch.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "End duty", style: "destructive", onPress: async () => {
+        try { await endDuty(); setDuty(null); } catch (e) { Alert.alert("Couldn't end duty", e.message); }
+      } }
+    ]);
+  }
 
   async function saveStandingPoint(spot) {
     try {
@@ -557,6 +596,9 @@ export default function DriverHomeScreen({ navigation }) {
             <TouchableOpacity onPress={logout}><Text style={styles.logout}>Sign out</Text></TouchableOpacity>
           </ScrollView>
         </View>
+        <TouchableOpacity style={styles.inviteButton} onPress={() => setInviteModal(true)}>
+          <Text style={styles.inviteButtonText}>Enter invite code</Text>
+        </TouchableOpacity>
         <ScrollView
           style={styles.fill}
           contentContainerStyle={styles.emptyState}
@@ -602,6 +644,21 @@ export default function DriverHomeScreen({ navigation }) {
       {user?.company_id ? (
         <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xs }}>
           <SubscriptionStatusBar companyId={user.company_id} compact />
+        </View>
+      ) : null}
+
+      {duty && duty.company_location_id ? (
+        <View style={styles.dutyBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.dutyLabel}>CURRENT DUTY LOCATION</Text>
+            <Text style={styles.dutyName}>{duty.location_name || `Location #${duty.company_location_id}`}</Text>
+            {duty.city_name || duty.state_name ? (
+              <Text style={styles.dutyMeta}>{[duty.city_name, duty.state_name].filter(Boolean).join(", ")}</Text>
+            ) : null}
+          </View>
+          <TouchableOpacity style={styles.dutyEnd} onPress={endCurrentDuty}>
+            <Text style={styles.dutyEndText}>End duty</Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 
@@ -886,6 +943,35 @@ export default function DriverHomeScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Invite code modal (Part 5) */}
+      <Modal visible={inviteModal} transparent animationType="fade" onRequestClose={() => setInviteModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Enter invite code</Text>
+            <Text style={styles.modalBody}>
+              Ask your admin or vendor for the code. The code binds your duty session to a specific company location.
+            </Text>
+            <TextInput
+              style={styles.inviteInput}
+              value={inviteCode}
+              onChangeText={(t) => setInviteCode(t.toUpperCase())}
+              placeholder="Invite code (e.g. ABCD-EFGH-JKLM)"
+              placeholderTextColor={colors.textDim}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setInviteModal(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirm} onPress={redeemCode} disabled={inviteBusy}>
+                <Text style={styles.modalConfirmText}>{inviteBusy ? "Starting…" : "Start duty"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1074,5 +1160,15 @@ const styles = StyleSheet.create({
   standCell: { width: 58, height: 44, borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", backgroundColor: colors.panel2 },
   standCellActive: { borderColor: colors.teal, backgroundColor: colors.teal },
   standCellText: { color: colors.text, fontSize: 12, fontWeight: "700" },
-  standCellTextActive: { color: "#02201C" }
+  standCellTextActive: { color: "#02201C" },
+  // Part 5: duty location banner + invite code entry.
+  dutyBanner: { flexDirection: "row", alignItems: "center", marginHorizontal: spacing.lg, marginTop: spacing.xs, padding: spacing.md, backgroundColor: "rgba(0,217,192,0.08)", borderWidth: 1, borderColor: colors.teal, borderRadius: radius.md },
+  dutyLabel: { color: colors.teal, fontSize: 10, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase" },
+  dutyName: { color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 2 },
+  dutyMeta: { color: colors.textDim, fontSize: 12, marginTop: 1 },
+  dutyEnd: { paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.teal, borderRadius: radius.sm, marginLeft: spacing.sm },
+  dutyEndText: { color: colors.teal, fontSize: 12, fontWeight: "700" },
+  inviteButton: { marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: 14, borderRadius: radius.md, alignItems: "center", borderWidth: 1, borderColor: colors.teal },
+  inviteButtonText: { color: colors.teal, fontSize: 14, fontWeight: "700" },
+  inviteInput: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, padding: 12, color: colors.text, fontSize: 15, marginBottom: 14, letterSpacing: 0.5 }
 });
