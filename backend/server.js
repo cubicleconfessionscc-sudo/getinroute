@@ -13,6 +13,8 @@ const db = require('./db');
 const { initMailer, sendMail } = require('./mailer');
 const { sendSms } = require('./sms');
 const { archiveRecords, unarchiveRecords } = require('./v3/archive');
+const metrics = require('./metrics');
+metrics.setDb(db);
 
 const app = express();
 app.disable('x-powered-by');
@@ -54,6 +56,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// Metrics middleware: per-request latency + 5xx counting.
+app.use((req, res, next) => {
+  const t = Date.now();
+  res.on('finish', () => {
+    metrics.recordLatency(Date.now() - t);
+    if (res.statusCode >= 500) metrics.inc('api_errors');
+  });
+  next();
+});
+
 /* ---------------- RATE LIMITING (in-memory) ---------------- */
 const rateBuckets = new Map();
 function rateLimited(key, limit, windowMs) {
@@ -72,6 +84,7 @@ if (clearRates.unref) clearRates.unref();
 function ipOf(req) { return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown'; }
 function guard(limit, windowMs) {
   return (req, res, next) => {
+    if (process.env.DISABLE_RATE_LIMITS === '1') return next();
     if (rateLimited(`rl:${ipOf(req)}`, limit, windowMs)) {
       return res.status(429).json({ error: 'Too many requests. Please wait a moment and try again.' });
     }
@@ -134,6 +147,132 @@ const BUILD_ID = (() => {
   } catch (e) { return 'unknown'; }
 })();
 
+/* -------------------------------------------------------------------
+ * India states + union territories master list (Part 2)
+ *
+ * 28 states and 8 union territories. The company registration form
+ * presents this list as a multi-select; every chosen value becomes a
+ * row in `company_states`. The matching city list is intentionally
+ * short (top metros + a representative district) — the underlying
+ * `company_cities` table accepts any city name, so a free-text "Other"
+ * entry in the form is also valid. Codes follow the ISO/RTO standard
+ * for state code disambiguation.
+ * ------------------------------------------------------------------- */
+const INDIAN_STATES_AND_UTS = [
+  { code: 'AN', name: 'Andaman and Nicobar Islands' },
+  { code: 'AP', name: 'Andhra Pradesh' },
+  { code: 'AR', name: 'Arunachal Pradesh' },
+  { code: 'AS', name: 'Assam' },
+  { code: 'BR', name: 'Bihar' },
+  { code: 'CH', name: 'Chandigarh' },
+  { code: 'CG', name: 'Chhattisgarh' },
+  { code: 'DN', name: 'Dadra and Nagar Haveli and Daman and Diu' },
+  { code: 'DL', name: 'Delhi' },
+  { code: 'GA', name: 'Goa' },
+  { code: 'GJ', name: 'Gujarat' },
+  { code: 'HR', name: 'Haryana' },
+  { code: 'HP', name: 'Himachal Pradesh' },
+  { code: 'JK', name: 'Jammu and Kashmir' },
+  { code: 'JH', name: 'Jharkhand' },
+  { code: 'KA', name: 'Karnataka' },
+  { code: 'KL', name: 'Kerala' },
+  { code: 'LA', name: 'Ladakh' },
+  { code: 'LD', name: 'Lakshadweep' },
+  { code: 'MP', name: 'Madhya Pradesh' },
+  { code: 'MH', name: 'Maharashtra' },
+  { code: 'MN', name: 'Manipur' },
+  { code: 'ML', name: 'Meghalaya' },
+  { code: 'MZ', name: 'Mizoram' },
+  { code: 'NL', name: 'Nagaland' },
+  { code: 'OD', name: 'Odisha' },
+  { code: 'PY', name: 'Puducherry' },
+  { code: 'PB', name: 'Punjab' },
+  { code: 'RJ', name: 'Rajasthan' },
+  { code: 'SK', name: 'Sikkim' },
+  { code: 'TN', name: 'Tamil Nadu' },
+  { code: 'TS', name: 'Telangana' },
+  { code: 'TR', name: 'Tripura' },
+  { code: 'UP', name: 'Uttar Pradesh' },
+  { code: 'UK', name: 'Uttarakhand' },
+  { code: 'WB', name: 'West Bengal' }
+];
+const INDIAN_STATE_NAME_TO_CODE = INDIAN_STATES_AND_UTS.reduce((acc, s) => { acc[s.name.toLowerCase()] = s.code; return acc; }, {});
+// Curated starter city list. The form also accepts a free-text "Other" so any
+// city/town is supported; this list is the dropdown suggestion only.
+const INDIAN_CITIES_BY_STATE = {
+  'andhra pradesh': ['Visakhapatnam', 'Vijayawada', 'Guntur', 'Tirupati', 'Nellore', 'Kurnool', 'Rajahmundry', 'Kakinada'],
+  'arunachal pradesh': ['Itanagar', 'Naharlagun', 'Pasighat', 'Tawang'],
+  'assam': ['Guwahati', 'Silchar', 'Dibrugarh', 'Jorhat', 'Tezpur'],
+  'bihar': ['Patna', 'Gaya', 'Bhagalpur', 'Muzaffarpur', 'Darbhanga'],
+  'chhattisgarh': ['Raipur', 'Bhilai', 'Bilaspur', 'Korba', 'Durg'],
+  'goa': ['Panaji', 'Margao', 'Vasco da Gama', 'Mapusa'],
+  'gujarat': ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Bhavnagar', 'Jamnagar', 'Gandhinagar'],
+  'haryana': ['Gurugram', 'Faridabad', 'Panipat', 'Ambala', 'Karnal', 'Hisar', 'Rohtak'],
+  'himachal pradesh': ['Shimla', 'Dharamshala', 'Mandi', 'Solan', 'Kullu'],
+  'jharkhand': ['Ranchi', 'Jamshedpur', 'Dhanbad', 'Bokaro', 'Deoghar'],
+  'karnataka': ['Bengaluru', 'Mysuru', 'Mangaluru', 'Hubballi', 'Belagavi', 'Davanagere', 'Tumakuru', 'Udupi'],
+  'kerala': ['Thiruvananthapuram', 'Kochi', 'Kozhikode', 'Thrissur', 'Kollam', 'Alappuzha', 'Kannur'],
+  'madhya pradesh': ['Bhopal', 'Indore', 'Jabalpur', 'Gwalior', 'Ujjain', 'Sagar', 'Dewas'],
+  'maharashtra': ['Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Aurangabad', 'Thane', 'Navi Mumbai', 'Kolhapur', 'Solapur'],
+  'manipur': ['Imphal'],
+  'meghalaya': ['Shillong', 'Tura'],
+  'mizoram': ['Aizawl', 'Lunglei'],
+  'nagaland': ['Kohima', 'Dimapur'],
+  'odisha': ['Bhubaneswar', 'Cuttack', 'Rourkela', 'Brahmapur', 'Sambalpur', 'Puri'],
+  'punjab': ['Ludhiana', 'Amritsar', 'Jalandhar', 'Patiala', 'Bathinda', 'Mohali'],
+  'rajasthan': ['Jaipur', 'Jodhpur', 'Udaipur', 'Kota', 'Bikaner', 'Ajmer', 'Pushkar'],
+  'sikkim': ['Gangtok', 'Namchi'],
+  'tamil nadu': ['Chennai', 'Coimbatore', 'Madurai', 'Tiruchirappalli', 'Salem', 'Tirunelveli', 'Vellore', 'Erode'],
+  'telangana': ['Hyderabad', 'Warangal', 'Nizamabad', 'Karimnagar', 'Khammam'],
+  'tripura': ['Agartala'],
+  'uttar pradesh': ['Lucknow', 'Kanpur', 'Agra', 'Varanasi', 'Prayagraj', 'Noida', 'Greater Noida', 'Ghaziabad', 'Meerut', 'Bareilly'],
+  'uttarakhand': ['Dehradun', 'Haridwar', 'Rishikesh', 'Haldwani', 'Roorkee'],
+  'west bengal': ['Kolkata', 'Howrah', 'Asansol', 'Siliguri', 'Durgapur', 'Darjeeling'],
+  'andaman and nicobar islands': ['Port Blair'],
+  'chandigarh': ['Chandigarh'],
+  'dadra and nagar haveli and daman and diu': ['Daman', 'Diu', 'Silvassa'],
+  'delhi': ['New Delhi', 'Delhi'],
+  'jammu and kashmir': ['Srinagar', 'Jammu', 'Leh'],
+  'ladakh': ['Leh', 'Kargil'],
+  'lakshadweep': ['Kavaratti'],
+  'puducherry': ['Puducherry', 'Karaikal', 'Mahe', 'Yanam']
+};
+function suggestCitiesForState(stateName) {
+  if (!stateName) return [];
+  return INDIAN_CITIES_BY_STATE[String(stateName).toLowerCase()] || [];
+}
+function resolveStateName(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  // Match by code first (e.g. "KA"), then by case-insensitive name.
+  const byCode = INDIAN_STATES_AND_UTS.find((x) => x.code.toLowerCase() === s.toLowerCase());
+  if (byCode) return byCode.name;
+  const byName = INDIAN_STATES_AND_UTS.find((x) => x.name.toLowerCase() === s.toLowerCase());
+  if (byName) return byName.name;
+  return null;
+}
+
+// Operational metrics for monitoring/alerting. When METRICS_TOKEN is set it must
+// be supplied (Authorization: Bearer <token> or ?token=); otherwise it is open
+// for local/dev scrapers. Contains no PII and no secrets.
+app.get('/metrics', (req, res) => {
+  const token = process.env.METRICS_TOKEN;
+  if (token) {
+    const provided = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.token;
+    if (provided !== token) return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json(metrics.snapshot());
+});
+app.get('/metrics/alerts', (req, res) => {
+  const token = process.env.METRICS_TOKEN;
+  if (token) {
+    const provided = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.query.token;
+    if (provided !== token) return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json(metrics.recentAlerts());
+});
+
 app.get(['/health', '/api/health'], (req, res) => {
   let dbOk = true;
   try {
@@ -176,7 +315,7 @@ app.get('/api/config/public', (req, res) => {
     // Browser key for the Google Maps JS API on Admin/Vendor ROUTE planning only.
     // It is a browser key (referrer-restricted) so exposing it here is safe; the
     // dashboard/live-tracking maps stay on MapLibre/OSM.
-    googleMapsKey: process.env.GOOGLE_MAPS_BROWSER_KEY || process.env.GOOGLE_MAPS_API_KEY || null
+    googleMapsKey: process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_BROWSER_KEY || null
   });
 });
 
@@ -374,6 +513,7 @@ function publicUser(u) {
     approved: u.approved, status: u.status, vehicle_id: u.vehicle_id, invite_code: u.invite_code || null,
     vendor_id: u.vendor_id || null,
     company_id: u.company_id || null,
+    company_location_id: u.company_location_id != null ? Number(u.company_location_id) : null,
     vertical: u.vertical || 'company', school_id: u.school_id || null, driver_verified: u.driver_verified || 0,
     safety_drop_eligible: u.safety_drop_eligible ? 1 : 0,
 lat: u.lat, lng: u.lng, last_update: u.last_update, created_at: u.created_at,
@@ -398,10 +538,38 @@ function linkDriver(vehicleId, driverId, vendorId) {
 function unlinkDrivers(vehicleId) {
   db.prepare("UPDATE users SET vehicle_id=NULL WHERE role='driver' AND vehicle_id=?").run(vehicleId);
 }
-function sign(user, sid) {
-  const payload = { id: user.id, role: user.role };
+function sign(user, sid, extra = {}) {
+  // jti makes every issued token unique (independent per-session credentials,
+  // even for two logins in the same second) and enables future revocation.
+  const payload = { id: user.id, role: user.role, jti: crypto.randomBytes(8).toString('hex'), ...extra };
   if (sid) payload.sid = sid;
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+}
+// One active device session per EMPLOYEE / DRIVER (admins and vendors may run
+// multiple tabs/workers). A second login is rejected until logout or expiry.
+const SINGLE_SESSION_ROLES = new Set(['employee', 'driver']);
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+function sessionIsActive(user, payload) {
+  if (!user || !SINGLE_SESSION_ROLES.has(user.role)) return true;
+  const exp = Number(user.active_sid_expires_at);
+  return !!(payload && payload.sid && user.active_sid && payload.sid === user.active_sid && Number.isFinite(exp) && exp > Date.now());
+}
+function startUserSession(user) {
+  if (!user || !SINGLE_SESSION_ROLES.has(user.role)) return { sid: null, conflict: false };
+  const sid = crypto.randomBytes(24).toString('hex');
+  const expiresAt = String(Date.now() + SESSION_TTL_MS);
+  // Conditional update closes the simultaneous-login race: only one request can
+  // claim an empty/expired session slot.
+  const updated = db.prepare(`UPDATE users SET active_sid=?, active_sid_expires_at=?
+    WHERE id=? AND (active_sid IS NULL OR active_sid='' OR active_sid_expires_at IS NULL OR CAST(active_sid_expires_at AS INTEGER)<=?)`)
+    .run(sid, expiresAt, user.id, Date.now());
+  return updated.changes > 0 ? { sid, conflict: false } : { sid: null, conflict: true };
+}
+function endUserSession(user, payload) {
+  if (!user || !SINGLE_SESSION_ROLES.has(user.role) || !payload || !payload.sid) return false;
+  const r = db.prepare('UPDATE users SET active_sid=NULL, active_sid_expires_at=NULL WHERE id=? AND active_sid=?').run(user.id, payload.sid);
+  if (r.changes > 0 && io) { try { io.in(`user:${user.id}`).disconnectSockets(true); } catch (e) {} }
+  return r.changes > 0;
 }
 function auth(req, res, next) {
   const hh = req.headers.authorization || '';
@@ -416,14 +584,22 @@ function auth(req, res, next) {
       return res.status(401).json({ error: 'Session expired, please login again' });
     }
     if (user.status !== 'active') return res.status(403).json({ error: 'Account is deactivated' });
+    // Single active session for employees/drivers: a newer login invalidates older tokens.
+    if (!sessionIsActive(user, payload)) {
+      return res.status(401).json({ error: 'This session has ended or expired. Please sign in again.', code: 'SESSION_REPLACED' });
+    }
     // Single active session for employees: a login on another device rotates the
     // stored session id, so any older token is rejected here. Legacy tokens with
     // no `sid` still work while active_sid is unset (no forced logouts on upgrade).
     if (EMPLOYEE_SINGLE_SESSION && user.role === 'employee' && user.active_sid && payload.sid !== user.active_sid) {
       return res.status(401).json({ error: 'This account is already signed in on another device.', code: 'SESSION_REPLACED' });
     }
+    // A signed `loc` claim makes the login-selected operational location the
+    // authoritative session scope for every downstream location-scoped query.
+    if (payload.loc != null) user.company_location_id = Number(payload.loc);
     req.user = user;
     req.tokenPayload = payload;
+    req.appVariant = payload.app || null; // signed app claim (unforgeable)
     next();
   } catch {
     return res.status(401).json({ error: 'Session expired, please login again' });
@@ -482,10 +658,17 @@ function vendorPeopleIds(ctx) {
 // company's employees' schedules — a safe, additive scoping that never widens data.
 function companyAdminScope(req) {
   const isOwner = !!(req.user && req.user.emp_id === 'ADMIN');
-  const cid = req.user ? Number(req.user.id) : -1;
+  // A company's key is its owner-admin's user id. A location-scoped sub-admin
+  // instead carries company_id = the parent company, so prefer company_id when
+  // set and fall back to the admin's own id (legacy single-company workspaces).
+  const cid = req.user ? Number(req.user.company_id != null ? req.user.company_id : req.user.id) : -1;
+  // A location-scoped admin is additionally narrowed to their operational location.
+  const locScope = req.user && req.user.company_location_id != null ? Number(req.user.company_location_id) : null;
   const ids = () => {
     if (isOwner) return null;
-    const rows = db.prepare('SELECT id FROM users WHERE role=\'employee\' AND company_id=?').all(cid).map((r) => Number(r.id));
+    const rows = locScope != null
+      ? db.prepare("SELECT id FROM users WHERE role='employee' AND company_id=? AND company_location_id=?").all(cid, locScope).map((r) => Number(r.id))
+      : db.prepare('SELECT id FROM users WHERE role=\'employee\' AND company_id=?').all(cid).map((r) => Number(r.id));
     return rows.length ? rows : [];
   };
   const idsList = () => {
@@ -556,7 +739,12 @@ function emitToUser(userId, event, payload) {
   if (io) io.to(`user:${userId}`).emit(event, payload);
 }
 function emitToAdmins(event, payload) {
+  // Company + owner admins only (vertical-scoped). School admins are in a
+  // separate room so company events never leak to a school portal and vice-versa.
   if (io) io.to('role:admin').emit(event, payload);
+}
+function emitToSchoolAdmins(event, payload) {
+  if (io) io.to('role:admin:school').emit(event, payload);
 }
 function adminId() {
   return db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get()?.id;
@@ -703,6 +891,12 @@ const APP_ROLES = {
   employee: new Set(['employee']),
   driver: new Set(['driver']),
   school: new Set(['admin', 'student', 'parent', 'driver']),
+  // Admin/Vendor mobile app (com.getinroute.adminvendor): only company Admins
+  // and Vendors may sign in. Owner (platform) is deliberately NOT allowed here.
+  adminvendor: new Set(['admin', 'vendor']),
+  // Explicit web-portal variant. Role-based access is still enforced per route;
+  // the app gate exists to isolate the MOBILE builds from each other.
+  web: new Set(['admin', 'vendor', 'employee', 'driver', 'parent', 'student']),
 };
 function appVariantOf(req) {
   return String((req.body && req.body.app) || req.get('x-app-variant') || '').trim().toLowerCase();
@@ -711,13 +905,18 @@ function appRoleMismatch(app) {
   if (app === 'employee') return 'This app is for employees. Drivers should use the GetInRoute Driver app.';
   if (app === 'driver') return 'This app is for drivers. Employees should use the GetInRoute app.';
   if (app === 'school') return 'This app is for GetInRoute School accounts only.';
+  if (app === 'adminvendor') return 'This app is for company Admin and Vendor accounts only.';
   return null;
 }
+// Missing or unknown app context is DENIED (never a bypass of APP_ROLES gating).
 function enforceAppLogin(app, user) {
-  if (!app) return null;
   const allowed = APP_ROLES[app];
-  if (!allowed || !allowed.has(user.role)) return appRoleMismatch(app);
+  if (!allowed) return { code: 'APP_REQUIRED', message: 'Missing or unknown app context. Update your app and try again.' };
+  // A role not allowed for this app is always denied (even when the variant has
+  // no bespoke human message) — never fall through to a silent allow.
+  if (!allowed.has(user.role)) return appRoleMismatch(app) || { code: 'APP_ROLE_MISMATCH', message: 'This account cannot sign in to this app.' };
   if (app === 'school' && user.vertical !== 'school') return appRoleMismatch(app);
+  if (app === 'adminvendor' && user.emp_id === 'ADMIN') return { code: 'APP_ROLE_MISMATCH', message: 'Owner accounts sign in on the owner console, not the Admin/Vendor app.' };
   return null;
 }
 
@@ -778,6 +977,7 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
       db.prepare('UPDATE users SET locked_until = ? WHERE id = ?').run(new Date(Date.now() + FAIL_LOCK_MS).toISOString(), primary.id);
       authLog('login locked-up', { id: primary.id, key: maskKey(identifier) });
     }
+    metrics.inc('auth_failures');
     return res.status(401).json({ error: 'Invalid credentials', message: 'Invalid credentials' });
   }
 
@@ -795,8 +995,10 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
   const appName = appVariantOf(req);
   const appBlock = enforceAppLogin(appName, user);
   if (appBlock) {
-    authLog('login app-role-mismatch', { id: user.id, role: user.role, app: appName || null, vertical: user.vertical || null });
-    return res.status(403).json({ error: appBlock, message: appBlock });
+    const msg = typeof appBlock === 'string' ? appBlock : appBlock.message;
+    const code = typeof appBlock === 'string' ? 'APP_ROLE_MISMATCH' : appBlock.code;
+    authLog('login app-blocked', { id: user.id, role: user.role, app: appName || null, vertical: user.vertical || null, code });
+    return res.status(403).json({ error: msg, message: msg, code });
   }
   if (user.role === 'student') {
     // Students never login by default. School-level students are blocked hard;
@@ -807,6 +1009,57 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
       authLog('login student-disallowed', { id: user.id, vertical: user.vertical, school_id: user.school_id || null });
       return res.status(403).json({ error: 'Student login is not enabled for this account. Parents can track the bus from the Parent app.', message: 'Student login is not enabled for this account. Parents can track the bus from the Parent app.' });
     }
+  }
+  // ---- Admin operational-location scope chosen at login ----
+  // The selected company_location_id becomes the SESSION scope (carried as a signed
+  // `loc` claim). It is validated server-side against the company's locations and
+  // the admin's own authorization — never trusted from the client.
+  //
+  // Part 3.2: a location-scoped admin must also present the location's active
+  // code (issued by a company-wide admin via /api/admin/location-codes). The
+  // code is the credential that binds this login to that specific location.
+  // Without the matching code, the session is REJECTED — no fallback to a
+  // company-wide scope. A company-wide admin (no company_location_id) does not
+  // need a code.
+  let sessionLoc = null;
+  const rawLoc = req.body && req.body.company_location_id;
+  const rawCode = req.body && req.body.locationCode;
+  if (user.role === 'admin' && rawLoc != null && rawLoc !== '') {
+    const locId = Number(rawLoc);
+    const cid = user.company_id != null ? Number(user.company_id) : Number(user.id);
+    const loc = db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locId, cid);
+    if (!loc) {
+      authLog('login location-invalid', { id: user.id, loc: locId });
+      return res.status(403).json({ error: 'The selected location is not valid for your company.', code: 'LOCATION_INVALID' });
+    }
+    if (user.company_location_id != null && Number(user.company_location_id) !== locId) {
+      authLog('login location-forbidden', { id: user.id, loc: locId, allowed: user.company_location_id });
+      return res.status(403).json({ error: 'You are not authorized for the selected location.', code: 'LOCATION_FORBIDDEN' });
+    }
+    // If this admin is location-scoped, they MUST present a valid location code
+    // and the code MUST match the active code for the chosen location.
+    if (user.company_location_id != null) {
+      if (!rawCode) {
+        return res.status(403).json({ error: 'Enter the location code for this location.', code: 'LOCATION_CODE_REQUIRED' });
+      }
+      const codeRow = db.prepare(`SELECT id, status FROM location_codes
+        WHERE company_location_id=? AND code=?`).get(locId, String(rawCode).trim());
+      if (!codeRow || codeRow.status !== 'active') {
+        authLog('login location-code-bad', { id: user.id, loc: locId });
+        return res.status(403).json({ error: 'The location code is invalid or has been revoked.', code: 'LOCATION_CODE_INVALID' });
+      }
+    }
+    sessionLoc = locId;
+  } else if (user.role === 'admin' && user.company_location_id != null && rawCode) {
+    // Caller supplied a code but no location_id. We use the admin's bound
+    // location and verify the code against it. This lets a pre-filled
+    // location login form work without an explicit company_location_id.
+    const codeRow = db.prepare(`SELECT id, status FROM location_codes
+      WHERE company_location_id=? AND code=?`).get(Number(user.company_location_id), String(rawCode).trim());
+    if (!codeRow || codeRow.status !== 'active') {
+      return res.status(403).json({ error: 'The location code is invalid or has been revoked.', code: 'LOCATION_CODE_INVALID' });
+    }
+    sessionLoc = Number(user.company_location_id);
   }
   clearFailures(ipOf(req), identifier);
   if (user.locked_until) db.prepare('UPDATE users SET locked_until = NULL WHERE id = ?').run(user.id);
@@ -820,19 +1073,19 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
   authLog('login ok', { id: user.id, role: user.role, vertical: user.vertical, school_id: user.school_id || null, company_id: user.company_id || null, emp_id: user.emp_id, domain: emailDomain(user.email) });
   // Single active session for employees: rotate the session id so a prior device
   // holding an older token can no longer authenticate.
-  let sid = null;
-  if (user.role === 'employee') {
-    sid = require('crypto').randomBytes(16).toString('hex');
-    db.prepare('UPDATE users SET active_sid = ? WHERE id = ?').run(sid, user.id);
+  // One active session for employees/drivers (admins/vendors may have several).
+  const session = startUserSession(user);
+  if (session.conflict) {
+    return res.status(409).json({ error: 'This account is already signed in on another device. Log out there first, then try again.', code: 'SESSION_EXISTS' });
   }
-  res.json({ token: sign(user, sid), user: publicUser(user) });
+  // The app variant + chosen operational location are embedded as SIGNED claims
+  // so a client cannot forge them later.
+  res.json({ token: sign(user, session.sid, { app: appName, ...(sessionLoc != null ? { loc: sessionLoc } : {}) }), user: publicUser(user) });
 });
 
 app.post('/api/auth/logout', auth, (req, res) => {
-  // Invalidate the employee's active session so the next login starts clean.
-  if (req.user.role === 'employee' && req.user.active_sid) {
-    db.prepare('UPDATE users SET active_sid = NULL WHERE id = ? AND active_sid = ?').run(req.user.id, req.user.active_sid);
-  }
+  // Release the employee/driver active session so the next login starts clean.
+  endUserSession(req.user, req.tokenPayload);
   res.json({ ok: true });
 });
 
@@ -845,6 +1098,9 @@ app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => 
   // employee accounts and the Driver app only driver accounts. School accounts
   // are created on the school portal (/api/auth/parent/register and admins).
   const appName = appVariantOf(req);
+  if (!appName || !APP_ROLES[appName]) {
+    return res.status(400).json({ error: 'Missing or unknown app context. Update your app and try again.', message: 'Missing or unknown app context. Update your app and try again.', code: 'APP_REQUIRED' });
+  }
   if (appName === 'school') {
     return res.status(400).json({ error: 'School accounts are managed on the GetInRoute School portal.', message: 'School accounts are managed on the GetInRoute School portal.' });
   }
@@ -950,7 +1206,13 @@ const SESSION_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000;
 app.get('/api/auth/me', auth, (req, res) => {
   const iat = req.tokenPayload && req.tokenPayload.iat ? req.tokenPayload.iat * 1000 : Date.now();
   if (Date.now() - iat > SESSION_ABSOLUTE_MS) return res.status(401).json({ error: 'Session expired, please login again' });
-  res.json({ token: sign(req.user), user: publicUser(req.user) });
+  const tp = req.tokenPayload || {};
+  if (SINGLE_SESSION_ROLES.has(req.user.role) && tp.sid) {
+    db.prepare('UPDATE users SET active_sid_expires_at=? WHERE id=? AND active_sid=?').run(String(Date.now() + SESSION_TTL_MS), req.user.id, tp.sid);
+  }
+  const claims = { app: tp.app };
+  if (tp.loc != null) claims.loc = tp.loc;
+  res.json({ token: sign(req.user, tp.sid, claims), user: publicUser(req.user) });
 });
 
 app.post('/api/auth/change-password', auth, (req, res) => {
@@ -961,29 +1223,197 @@ app.post('/api/auth/change-password', auth, (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------------- COMPANY ONBOARDING ---------------- */
-
+/* ---------------- COMPANY ONBOARDING (Part 2) ----------------
+ *
+ * Accepts the new multi-state + per-city + per-location address payload:
+ *   {
+ *     companyName, domain, phone,
+ *     adminName, adminEmail, adminPassword,
+ *     states: ["Karnataka", "Tamil Nadu", ...],            // multi-select of all 36 IN states/UTs
+ *     addresses: [
+ *       { state: "Karnataka", city: "Bengaluru", locations: [
+ *         { name: "Bangalore Location 1", address: "...", lat: 12.97, lng: 77.59 },
+ *         { name: "Bangalore Location 2", address: "...", lat: 12.95, lng: 77.62 }
+ *       ]},
+ *       { state: "Tamil Nadu", city: "Chennai", locations: [{ name: "Chennai Location 1", address: "...", lat: 13.08, lng: 80.27 }] }
+ *     ]
+ *   }
+ *
+ * Persists:
+ *   - a row in users (role='admin', approved=0) for the company owner
+ *   - one row in company_states for each state in `states`
+ *   - one row in company_cities for each (state, city) referenced in `addresses`
+ *   - one row in company_locations for each (city, name) in `addresses`
+ *   - one row in company_addresses for each `locations[].address` if lat/lng provided
+ *
+ * The endpoint is fully backward compatible: if `states`/`addresses` are missing,
+ * the old behavior (admin user only) is preserved.
+ *
+ * Validation:
+ *   - companyName, adminName, adminEmail, adminPassword: required
+ *   - adminPassword: >= 8 chars
+ *   - adminEmail: not already used
+ *   - states: every entry must be a valid state or UT name (or 2-letter code)
+ *   - addresses: every state must be in `states` (no orphan states)
+ *   - duplicate (state, city, name) is rejected at the unique index level
+ */
 app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) => {
-  const { companyName, domain, adminName, adminEmail, adminPassword, phone } = req.body || {};
+  const b = req.body || {};
+  const companyName = String(b.companyName || '').trim();
+  const domain = String(b.domain || '').trim();
+  const phone = String(b.phone || '').trim();
+  const adminName = String(b.adminName || '').trim();
+  const adminEmail = String(b.adminEmail || '').trim();
+  const adminPassword = String(b.adminPassword || '');
   if (!companyName || !adminName || !adminEmail || !adminPassword) {
     return res.status(400).json({ error: 'Company name, admin name, admin email, and password are required' });
   }
   if (adminPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (domain) {
+    // Domain format: simple sanity check. Subdomain allowed.
+    if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(domain)) {
+      return res.status(400).json({ error: 'Invalid company domain (e.g. acme.com)' });
+    }
+  }
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(adminEmail);
   if (existing) return res.status(400).json({ error: 'An account with this email already exists' });
+
+  // Resolve states list: every entry must be a known state or UT.
+  const rawStates = Array.isArray(b.states) ? b.states.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const stateNames = [];
+  for (const s of rawStates) {
+    const name = resolveStateName(s);
+    if (!name) return res.status(400).json({ error: `Unknown state or union territory: "${s}"` });
+    if (!stateNames.includes(name)) stateNames.push(name);
+  }
+
+  // Resolve addresses (if provided). Every state referenced must be in `states`
+  // (or we silently add it — same outcome, more forgiving UX).
+  const rawAddresses = Array.isArray(b.addresses) ? b.addresses : [];
+  const expandedStates = new Set(stateNames);
+  const addressPlan = [];
+  for (const entry of rawAddresses) {
+    if (!entry || typeof entry !== 'object') continue;
+    const stateName = resolveStateName(entry.state);
+    const cityName = String(entry.city || '').trim();
+    if (!stateName || !cityName) {
+      return res.status(400).json({ error: 'Each address must include a state and a city.' });
+    }
+    if (!stateNames.length) {
+      // The form sent addresses but not `states` — accept and treat the
+      // referenced states as the canonical set so the per-state scope is
+      // never silently narrower than the address list.
+      stateNames.push(stateName);
+      expandedStates.add(stateName);
+    }
+    if (!stateNames.includes(stateName)) stateNames.push(stateName);
+    const locs = Array.isArray(entry.locations) ? entry.locations : [];
+    if (!locs.length) {
+      return res.status(400).json({ error: `Address entry for ${stateName} > ${cityName} must list at least one location.` });
+    }
+    for (const loc of locs) {
+      if (!loc || typeof loc !== 'object') continue;
+      const name = String(loc.name || '').trim();
+      const addr = String(loc.address || '').trim();
+      const lat = loc.lat == null || loc.lat === '' ? null : Number(loc.lat);
+      const lng = loc.lng == null || loc.lng === '' ? null : Number(loc.lng);
+      if (!name) return res.status(400).json({ error: `Every location needs a name (e.g. "${cityName} Location 1").` });
+      if (lat != null && (Number.isNaN(lat) || lat < -90 || lat > 90)) return res.status(400).json({ error: 'Invalid latitude on an address.' });
+      if (lng != null && (Number.isNaN(lng) || lng < -180 || lng > 180)) return res.status(400).json({ error: 'Invalid longitude on an address.' });
+      addressPlan.push({ state: stateName, city: cityName, name, address: addr, lat, lng });
+    }
+  }
+  if (!stateNames.length && rawAddresses.length) {
+    return res.status(400).json({ error: 'Address entries present but no state could be resolved.' });
+  }
+
   const hash = bcrypt.hashSync(adminPassword, 10);
   const emp_id = 'ADMIN-' + Date.now().toString(36).toUpperCase();
   const inviteCode = genInviteCode(companyName);
-  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, invite_code) VALUES (?,?,?,?,?,?,?,?,0,?)`)
-    .run('admin', emp_id, adminEmail, adminName, phone || null, String(companyName).trim() || 'Administration', 'Company Admin', hash, inviteCode);
-  const userId = Number(info.lastInsertRowid);
-  notify(1, 'New Company Registered', `${companyName} (${domain || 'N/A'}) — admin: ${adminName} (${adminEmail}). Approve in Admin → Approvals.`);
-  res.json({ ok: true, message: 'Company registered. Your account is pending owner approval. You will be able to sign in once approved.', userId, emp_id, inviteCode });
+  // Use a single transaction so either everything lands or nothing does.
+  // node:sqlite's DatabaseSync does not expose a .transaction() helper the way
+  // better-sqlite3 does, so we drive BEGIN/COMMIT explicitly.
+  let result = null;
+  try {
+    db.exec('BEGIN');
+    const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, invite_code)
+      VALUES (?,?,?,?,?,?,?,?,0,?)`)
+      .run('admin', emp_id, adminEmail, adminName, phone || null, companyName, 'Company Admin', hash, inviteCode);
+    const userId = Number(info.lastInsertRowid);
+    const stateRowByName = {};
+    for (const sName of stateNames) {
+      const code = INDIAN_STATE_NAME_TO_CODE[sName.toLowerCase()] || null;
+      let existing = db.prepare('SELECT id FROM company_states WHERE company_id=? AND name=?').get(userId, sName);
+      if (!existing) {
+        const info2 = db.prepare('INSERT INTO company_states (company_id, name, code) VALUES (?,?,?)').run(userId, sName, code);
+        existing = { id: Number(info2.lastInsertRowid) };
+      }
+      stateRowByName[sName] = existing;
+    }
+    let addressesCreated = 0;
+    for (const a of addressPlan) {
+      const stateId = stateRowByName[a.state].id;
+      let city = db.prepare('SELECT id FROM company_cities WHERE company_id=? AND state_id=? AND name=?').get(userId, stateId, a.city);
+      if (!city) {
+        const info3 = db.prepare('INSERT INTO company_cities (company_id, state_id, name) VALUES (?,?,?)').run(userId, stateId, a.city);
+        city = { id: Number(info3.lastInsertRowid) };
+      }
+      let loc = db.prepare('SELECT id FROM company_locations WHERE company_id=? AND city_id=? AND name=?').get(userId, city.id, a.name);
+      if (!loc) {
+        const info4 = db.prepare('INSERT INTO company_locations (company_id, state_id, city_id, name, address, lat, lng) VALUES (?,?,?,?,?,?,?)')
+          .run(userId, stateId, city.id, a.name, a.address || null, a.lat, a.lng);
+        loc = { id: Number(info4.lastInsertRowid) };
+      } else if (a.address || a.lat != null || a.lng != null) {
+        db.prepare('UPDATE company_locations SET address=COALESCE(?, address), lat=COALESCE(?, lat), lng=COALESCE(?, lng) WHERE id=?')
+          .run(a.address || null, a.lat, a.lng, loc.id);
+      }
+      if (a.lat != null && a.lng != null) {
+        const label = `${a.city} ${a.name}`;
+        try {
+          db.prepare(`INSERT INTO company_addresses (company_id, company_location_id, label, address, lat, lng)
+            VALUES (?,?,?,?,?,?)`).run(userId, loc.id, label, a.address || null, a.lat, a.lng);
+          addressesCreated++;
+        } catch (e) {
+          if (!String(e.message).includes('UNIQUE')) throw e;
+        }
+      }
+    }
+    db.exec('COMMIT');
+    result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (e2) {}
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate state, city or location name in the registration form.' });
+    return res.status(500).json({ error: 'Could not complete registration.' });
+  }
+  notify(1, 'New Company Registered',
+    `${companyName} (${domain || 'N/A'}) — admin: ${adminName} (${adminEmail}). ` +
+    `States: ${result.statesCreated}, locations: ${result.locationsCreated}, addresses: ${result.addressesCreated}. Approve in Admin → Approvals.`);
+  res.json({
+    ok: true,
+    message: 'Company registered. Your account is pending owner approval. You will be able to sign in once approved.',
+    userId: result.userId,
+    emp_id,
+    inviteCode,
+    statesCreated: result.statesCreated,
+    locationsCreated: result.locationsCreated,
+    addressesCreated: result.addressesCreated
+  });
 }));
 
 /* ---------------- ADMIN ---------------- */
 
+// Short-TTL cache for the dashboard aggregate (many subqueries). Keyed by tenant
+// + location + day so a burst of dashboard reads does not re-run the same heavy
+// query per request. Invalidated naturally by the TTL.
+const STATS_CACHE = new Map();
+const STATS_TTL_MS = Number(process.env.STATS_CACHE_MS) || 5000;
 app.get('/api/admin/stats', auth, role('admin', 'vendor'), (req, res) => {
+  const scKey = isVendorReq(req) ? `v${Number(req.user.vendor_id) || 0}` : `a${companyAdminScope(req).cid}`;
+  const cacheKey = `${scKey}:${req.user.company_location_id || 0}:${dateOnly()}`;
+  const hit = STATS_CACHE.get(cacheKey);
+  if (hit && Date.now() - hit.t < STATS_TTL_MS) return res.json(hit.data);
+  const origJson = res.json.bind(res);
+  res.json = (body) => { if (body && !body.error) STATS_CACHE.set(cacheKey, { t: Date.now(), data: body }); return origJson(body); };
   if (isVendorReq(req)) {
     const ctx = vendorCtx(req);
     const vids = myVehicleIds(ctx.vid);
@@ -1034,14 +1464,16 @@ app.get('/api/admin/stats', auth, role('admin', 'vendor'), (req, res) => {
     const vidList = sc.vehList();
     const routeList = sc.routeList();
     const empIds = sc.ids();
+    const locId = req.user.company_location_id != null ? Number(req.user.company_location_id) : null;
+    const locClause = locId != null ? ` AND company_location_id=${locId}` : '';
     const phonesOf = empIds && empIds.length
       ? db.prepare(`SELECT phone FROM users WHERE id IN (${empIds.join(',')}) AND phone IS NOT NULL`).all().map((r) => String(r.phone).replace(/'/g, ''))
       : [];
     const phList = phonesOf.length ? phonesOf.map((p) => "'" + p + "'").join(',') : "''";
     s = db.prepare(`
       SELECT
-        (SELECT COUNT(*) FROM users WHERE role='employee' AND company_id=@cid) AS employees,
-        (SELECT COUNT(*) FROM users WHERE role='employee' AND approved=0 AND company_id=@cid) AS pending_employees,
+        (SELECT COUNT(*) FROM users WHERE role='employee' AND company_id=@cid${locClause}) AS employees,
+        (SELECT COUNT(*) FROM users WHERE role='employee' AND approved=0 AND company_id=@cid${locClause}) AS pending_employees,
         (SELECT COUNT(*) FROM users WHERE role='driver' AND company_id=@cid AND last_login IS NOT NULL) AS drivers,
         (SELECT COUNT(*) FROM vehicles WHERE id IN (${vidList})) AS vehicles,
         (SELECT COUNT(*) FROM vehicles WHERE id IN (${vidList}) AND status='active') AS vehicles_on_trip,
@@ -1521,11 +1953,23 @@ app.get('/api/admin/employees', auth, role('admin', 'vendor'), (req, res) => {
   const q = `%${req.query.q || ''}%`;
   const sc = companyAdminScope(req);
   const scWhere = sc.isOwner ? '' : ' AND u.company_id = ?';
+  const params = [q, q, q, ...(sc.isOwner ? [] : [sc.cid])];
+  // A location-scoped admin must only see employees in their own location
+  // (Part 3.2 / Part 4.2). The locationScope() helper returns the
+  // authoritative set: null for company-wide admins, [locId] for location-scoped.
+  let locWhere = '';
+  if (!isVendorReq(req)) {
+    const scope = locationScope(req);
+    if (scope && scope.length) {
+      locWhere = ' AND (u.company_location_id IN (' + scope.map(() => '?').join(',') + ') OR u.company_location_id IS NULL)';
+      for (const id of scope) params.push(id);
+    }
+  }
   const rows = db.prepare(`
     SELECT u.*,
       (SELECT COUNT(*) FROM schedules s WHERE s.employee_id=u.id) AS total_schedules,
       (SELECT COUNT(*) FROM schedules s WHERE s.employee_id=u.id AND s.status='completed') AS completed_trips
-    FROM users u WHERE u.role='employee' AND (u.name LIKE ? OR u.emp_id LIKE ? OR u.email LIKE ?)${scWhere} ORDER BY u.id`).all(q, q, q, ...(sc.isOwner ? [] : [sc.cid]));
+    FROM users u WHERE u.role='employee' AND (u.name LIKE ? OR u.emp_id LIKE ? OR u.email LIKE ?)${scWhere}${locWhere} ORDER BY u.id`).all(...params);
   const filtered = isVendorReq(req) ? rows.filter((u) => vendorOwnsUser(u, vendorCtx(req))) : rows;
   res.json(filtered.map(publicUser));
 });
@@ -1859,9 +2303,10 @@ function loadSettings() {
 
 app.get('/api/admin/settings', auth, role('admin'), (req, res) => {
   const s = loadSettings();
-  const nps = db.prepare('SELECT * FROM nodal_points ORDER BY id').all();
+  const npsScope = nodalPointScope(req);
+  const nps = db.prepare(`SELECT * FROM nodal_points WHERE ${npsScope.where} ORDER BY id`).all(...npsScope.params);
   s.company = s.company || {};
-  s.company.nodalPoints = nps.map((n) => ({ _id: n.id, label: n.label, address: n.address, lat: n.lat, lng: n.lng, type: n.type, radiusMeters: n.radius_meters }));
+  s.company.nodalPoints = nps.map(nodalPointJson);
   let ic = req.user ? (db.prepare('SELECT invite_code FROM users WHERE id = ?').get(req.user.id) || {}).invite_code : null;
   if (!ic) {
     ic = genInviteCode(req.user?.department || 'COMPANY');
@@ -1922,30 +2367,87 @@ app.post('/api/admin/change-password', auth, role('admin'), (req, res) => {
 
 /* ---------------- NODAL POINTS ---------------- */
 
-app.get('/api/company/me/nodal-points', auth, (req, res) => {
-  const nps = db.prepare('SELECT * FROM nodal_points ORDER BY id').all();
-  res.json(nps.map((n) => ({ _id: n.id, label: n.label, address: n.address, lat: n.lat, lng: n.lng, type: n.type, radiusMeters: n.radius_meters })));
+function nodalPointScope(req, companyHint = null) {
+  let where = '1=1';
+  const params = [];
+  if (isVendorReq(req)) {
+    where += ' AND vendor_id=?'; params.push(Number(req.user.vendor_id) || -1);
+  } else {
+    const sc = companyAdminScope(req);
+    if (!sc.isOwner) { where += ' AND company_id=?'; params.push(Number(sc.cid)); }
+    else {
+      const cid = Number(companyHint || req.query.company_id || 0);
+      if (cid > 0) { where += ' AND company_id=?'; params.push(cid); }
+    }
+  }
+  const scope = locationScope(req);
+  if (scope && scope.length) {
+    where += ` AND (company_location_id IN (${scope.map(() => '?').join(',')}) OR company_location_id IS NULL)`;
+    params.push(...scope);
+  }
+  return { where, params };
+}
+function validateNodalPointBody(b, partial = false) {
+  const errors = [];
+  if (!partial || b.label !== undefined) if (!String(b.label || '').trim()) errors.push('Label required');
+  if (!partial || b.lat !== undefined) { const v = Number(b.lat); if (!Number.isFinite(v) || v < -90 || v > 90) errors.push('Latitude must be between -90 and 90'); }
+  if (!partial || b.lng !== undefined) { const v = Number(b.lng); if (!Number.isFinite(v) || v < -180 || v > 180) errors.push('Longitude must be between -180 and 180'); }
+  const hasRadius = b.radiusMeters !== undefined && b.radiusMeters !== null && b.radiusMeters !== '';
+  if (hasRadius) { const v = Number(b.radiusMeters); if (!Number.isInteger(v) || v < 1 || v > 100000) errors.push('Radius must be an integer between 1 and 100000 meters'); }
+  return errors;
+}
+function nodalPointJson(n) {
+  return { _id: n.id, label: n.label, address: n.address, lat: n.lat, lng: n.lng, place_id: n.place_id || null, type: n.type,
+    radiusMeters: n.radius_meters, company_id: n.company_id ?? null, company_location_id: n.company_location_id ?? null, vendor_id: n.vendor_id ?? null };
+}
+
+app.get('/api/company/me/nodal-points', auth, role('admin', 'vendor'), (req, res) => {
+  const sc = nodalPointScope(req);
+  const nps = db.prepare(`SELECT * FROM nodal_points WHERE ${sc.where} ORDER BY id`).all(...sc.params);
+  res.json(nps.map(nodalPointJson));
 });
 
-app.post('/api/company/me/nodal-points', auth, role('admin'), (req, res) => {
-  const { label, address, lat, lng, type, radiusMeters } = req.body || {};
-  if (!label) return res.status(400).json({ error: 'Label required' });
-  const info = db.prepare('INSERT INTO nodal_points (label, address, lat, lng, type, radius_meters) VALUES (?,?,?,?,?,?)')
-    .run(label, address || '', lat || 0, lng || 0, type || 'office', radiusMeters || 1000);
-  res.json({ _id: info.lastInsertRowid, label, address, lat, lng, type: type || 'office', radiusMeters: radiusMeters || 1000 });
+app.post('/api/company/me/nodal-points', auth, role('admin', 'vendor'), (req, res) => {
+  const b = req.body || {};
+  const errors = validateNodalPointBody(b);
+  if (errors.length) return res.status(400).json({ error: errors[0], errors });
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  const companyId = ven ? (req.user.company_id != null ? Number(req.user.company_id) : null) : (sc.isOwner ? (Number(b.company_id) || null) : Number(sc.cid));
+  const vendorId = ven ? (Number(req.user.vendor_id) || null) : null;
+  const scope = locationScope(req);
+  const locId = b.company_location_id == null || b.company_location_id === '' ? (req.user.company_location_id ?? null) : Number(b.company_location_id);
+  if (ven && locId != null && companyId == null) return res.status(403).json({ error: 'Your Vendor account is not linked to a company location.' });
+  if (locId != null && scope && !scope.includes(Number(locId))) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  if (locId != null && companyId != null && !db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(Number(locId), companyId)) return res.status(403).json({ error: 'Location does not belong to this company.' });
+  const radius = (b.radiusMeters == null || b.radiusMeters === '') ? 1000 : Number(b.radiusMeters);
+  const info = db.prepare(`INSERT INTO nodal_points (label,address,lat,lng,place_id,type,radius_meters,company_id,company_location_id,vendor_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(String(b.label).trim(), String(b.address || '').trim(), Number(b.lat), Number(b.lng), String(b.place_id || '').trim() || null, b.type || 'office', radius, companyId, locId, vendorId);
+  res.json(nodalPointJson(db.prepare('SELECT * FROM nodal_points WHERE id=?').get(Number(info.lastInsertRowid))));
 });
 
-app.put('/api/company/me/nodal-points/:id', auth, role('admin'), (req, res) => {
-  const np = db.prepare('SELECT * FROM nodal_points WHERE id = ?').get(req.params.id);
-  if (!np) return res.status(404).json({ error: 'Not found' });
-  const { label, address, lat, lng, type, radiusMeters } = req.body || {};
-  db.prepare('UPDATE nodal_points SET label=?, address=?, lat=?, lng=?, type=?, radius_meters=? WHERE id=?')
-    .run(label ?? np.label, address ?? np.address, lat ?? np.lat, lng ?? np.lng, type ?? np.type, radiusMeters ?? np.radius_meters, np.id);
-  res.json({ _id: np.id, label: label ?? np.label, address: address ?? np.address, lat: lat ?? np.lat, lng: lng ?? np.lng, type: type ?? np.type, radiusMeters: radiusMeters ?? np.radius_meters });
+app.put('/api/company/me/nodal-points/:id', auth, role('admin', 'vendor'), (req, res) => {
+  const b = req.body || {};
+  const errors = validateNodalPointBody(b, true);
+  if (errors.length) return res.status(400).json({ error: errors[0], errors });
+  const scopeQ = nodalPointScope(req);
+  const np = db.prepare(`SELECT * FROM nodal_points WHERE id=? AND ${scopeQ.where}`).get(Number(req.params.id), ...scopeQ.params);
+  if (!np) return res.status(404).json({ error: 'Address point not found in your authorized scope.' });
+  const locId = b.company_location_id === undefined ? np.company_location_id : (b.company_location_id == null || b.company_location_id === '' ? null : Number(b.company_location_id));
+  const scope = locationScope(req);
+  if (isVendorReq(req) && locId != null && np.company_id == null) return res.status(403).json({ error: 'Your Vendor account is not linked to a company location.' });
+  if (locId != null && scope && !scope.includes(Number(locId))) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  if (locId != null && np.company_id != null && !db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(Number(locId), np.company_id)) return res.status(403).json({ error: 'Location does not belong to this company.' });
+  db.prepare(`UPDATE nodal_points SET label=?,address=?,lat=?,lng=?,place_id=?,type=?,radius_meters=?,company_location_id=? WHERE id=?`)
+    .run(b.label ?? np.label, b.address ?? np.address, b.lat ?? np.lat, b.lng ?? np.lng, b.place_id ?? np.place_id, b.type ?? np.type, b.radiusMeters ?? np.radius_meters, locId, np.id);
+  res.json(nodalPointJson(db.prepare('SELECT * FROM nodal_points WHERE id=?').get(np.id)));
 });
 
-app.delete('/api/company/me/nodal-points/:id', auth, role('admin'), (req, res) => {
-  db.prepare('DELETE FROM nodal_points WHERE id = ?').run(req.params.id);
+app.delete('/api/company/me/nodal-points/:id', auth, role('admin', 'vendor'), (req, res) => {
+  const scopeQ = nodalPointScope(req);
+  const np = db.prepare(`SELECT id FROM nodal_points WHERE id=? AND ${scopeQ.where}`).get(Number(req.params.id), ...scopeQ.params);
+  if (!np) return res.status(404).json({ error: 'Address point not found in your authorized scope.' });
+  db.prepare('DELETE FROM nodal_points WHERE id=?').run(np.id);
   res.json({ ok: true });
 });
 
@@ -2073,6 +2575,130 @@ app.delete('/api/admin/locations/states/:id', auth, role('admin'), (req, res) =>
   res.json({ ok: true });
 });
 
+/* -------------------------------------------------------------------
+ * Company address book (Part 2 / Part 3.3)
+ *
+ * Each address is bound to a company_location. The endpoints are
+ * company-scoped (a non-owner admin can only see/manage addresses for
+ * their own company) AND location-scoped (a location-scoped admin can
+ * only see/manage addresses for their own location). The same scope
+ * rules apply to list, create, update and delete.
+ * ------------------------------------------------------------------- */
+function addressList(req) {
+  const cid = locCompanyId(req);
+  if (cid == null) return [];
+  const scope = locationScope(req);
+  // The location_scope is either null (company-wide) or [locId]. Build a
+  // single query and add the AND clause if we're location-scoped.
+  let q = `SELECT a.id, a.company_id, a.company_location_id, a.label, a.address,
+    a.lat, a.lng, a.place_id, a.status, a.created_at, a.updated_at,
+    l.name AS location_name, l.city_id, c.name AS city_name, s.name AS state_name
+    FROM company_addresses a
+    JOIN company_locations l ON l.id = a.company_location_id
+    JOIN company_cities c ON c.id = l.city_id
+    JOIN company_states s ON s.id = l.state_id
+    WHERE a.company_id = ? AND a.status = 'active'`;
+  const params = [cid];
+  if (scope && scope.length) {
+    q += ' AND a.company_location_id IN (' + scope.map(() => '?').join(',') + ')';
+    for (const id of scope) params.push(id);
+  }
+  q += ' ORDER BY s.name, c.name, l.name, a.label';
+  return db.prepare(q).all(...params);
+}
+app.get('/api/admin/addresses', auth, role('admin', 'vendor'), (req, res) => {
+  res.json(addressList(req));
+});
+app.post('/api/admin/addresses', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const b = req.body || {};
+  const locId = Number(b.company_location_id);
+  const label = String(b.label || '').trim();
+  if (!locId || !label) return res.status(400).json({ error: 'Location and label are required.' });
+  if (!db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locId, cid)) {
+    return res.status(403).json({ error: 'Location does not belong to this company.' });
+  }
+  // Location-scoped admin may only create within their own location.
+  const scope = locationScope(req);
+  if (scope && !scope.includes(locId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  const lat = b.lat == null || b.lat === '' ? null : Number(b.lat);
+  const lng = b.lng == null || b.lng === '' ? null : Number(b.lng);
+  if (lat != null && (Number.isNaN(lat) || lat < -90 || lat > 90)) return res.status(400).json({ error: 'Invalid latitude.' });
+  if (lng != null && (Number.isNaN(lng) || lng < -180 || lng > 180)) return res.status(400).json({ error: 'Invalid longitude.' });
+  try {
+    const info = db.prepare(`INSERT INTO company_addresses (company_id, company_location_id, label, address, lat, lng, place_id)
+      VALUES (?,?,?,?,?,?,?)`)
+      .run(cid, locId, label, String(b.address || '').trim() || null, lat, lng, b.place_id ? String(b.place_id).trim() : null);
+    res.json({ ok: true, id: Number(info.lastInsertRowid) });
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'An address with that label already exists for this location.' });
+    return res.status(500).json({ error: 'Could not save address.' });
+  }
+});
+app.put('/api/admin/addresses/:id', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const row = db.prepare('SELECT * FROM company_addresses WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'Address not found.' });
+  const scope = locationScope(req);
+  if (scope && !scope.includes(Number(row.company_location_id))) return res.status(403).json({ error: 'Address is outside your authorized scope.' });
+  const b = req.body || {};
+  const label = b.label != null ? String(b.label).trim() : row.label;
+  const address = b.address != null ? String(b.address).trim() : row.address;
+  const lat = b.lat == null || b.lat === '' ? row.lat : Number(b.lat);
+  const lng = b.lng == null || b.lng === '' ? row.lng : Number(b.lng);
+  if (lat != null && (Number.isNaN(lat) || lat < -90 || lat > 90)) return res.status(400).json({ error: 'Invalid latitude.' });
+  if (lng != null && (Number.isNaN(lng) || lng < -180 || lng > 180)) return res.status(400).json({ error: 'Invalid longitude.' });
+  try {
+    db.prepare('UPDATE company_addresses SET label=?, address=?, lat=?, lng=?, place_id=COALESCE(?, place_id), updated_at=datetime(\'now\',\'localtime\') WHERE id=?')
+      .run(label, address || null, lat, lng, b.place_id ? String(b.place_id).trim() : null, row.id);
+    res.json({ ok: true });
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'An address with that label already exists for this location.' });
+    return res.status(500).json({ error: 'Could not update address.' });
+  }
+});
+app.delete('/api/admin/addresses/:id', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const row = db.prepare('SELECT id, company_location_id FROM company_addresses WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'Address not found.' });
+  const scope = locationScope(req);
+  if (scope && !scope.includes(Number(row.company_location_id))) return res.status(403).json({ error: 'Address is outside your authorized scope.' });
+  db.prepare("UPDATE company_addresses SET status='archived', updated_at=datetime('now','localtime') WHERE id=?").run(row.id);
+  res.json({ ok: true });
+});
+
+/* Pre-auth list for the Employee app's location picker (Part 4.1).
+   Returns the same set of locations the admin authorised for this company,
+   filtered to the ones the employee has been bound to (or all, for the
+   first-time onboarding flow). The endpoint is rate-limited and accepts
+   the employee's company identifier (email or emp_id) so a never-validated
+   request cannot enumerate all locations. */
+app.post('/api/auth/employee-locations', guard(60, 60 * 1000), (req, res) => {
+  const ident = String((req.body || {}).identifier || '').trim();
+  if (!ident) return res.json({ company: null, locations: [] });
+  const u = db.prepare(`SELECT * FROM users WHERE (lower(email)=lower(?) OR lower(emp_id)=lower(?))
+    AND role='employee' AND status='active' ORDER BY id LIMIT 1`).get(ident, ident);
+  if (!u) return res.json({ company: null, locations: [] });
+  const cid = u.company_id != null ? Number(u.company_id) : null;
+  if (cid == null) return res.json({ company: { id: null, name: u.department || '' }, locations: [] });
+  const company = db.prepare('SELECT id, name, department FROM users WHERE id=?').get(cid);
+  const rows = db.prepare(`SELECT l.id, l.name, l.address, l.lat, l.lng,
+      c.name AS city, s.name AS state
+    FROM company_locations l
+    JOIN company_cities c ON c.id = l.city_id
+    JOIN company_states s ON s.id = l.state_id
+    WHERE l.company_id = ? AND l.status = 'active'
+    ORDER BY s.name, c.name, l.name`).all(cid);
+  res.json({
+    company: { id: cid, name: company ? (company.name || company.department) : '' },
+    locations: rows,
+    current_location_id: u.company_location_id != null ? Number(u.company_location_id) : null
+  });
+});
+
 // Assign a user to an operational location (validated within the company).
 app.put('/api/admin/users/:id/location', auth, role('admin'), (req, res) => {
   const cid = locCompanyId(req);
@@ -2082,8 +2708,30 @@ app.put('/api/admin/users/:id/location', auth, role('admin'), (req, res) => {
   const raw = (req.body || {}).company_location_id;
   const locId = raw == null || raw === '' ? null : Number(raw);
   if (locId != null && !db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locId, cid)) return res.status(403).json({ error: 'Location does not belong to this company.' });
+  // A location-scoped admin may only assign within their own authorized location.
+  const scope = locationScope(req);
+  if (locId != null && scope && !scope.includes(locId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
   db.prepare('UPDATE users SET company_location_id=? WHERE id=?').run(locId, target.id);
   res.json({ ok: true, company_location_id: locId });
+});
+
+// Pre-auth: given an Admin ID/email, return ONLY that admin's authorized
+// State -> City -> Operational Location options for the login dropdowns.
+app.post('/api/auth/admin-locations', guard(60, 60 * 1000), (req, res) => {
+  const ident = String((req.body || {}).identifier || '').trim();
+  const empty = { states: [], cities: [], locations: [] };
+  if (!ident) return res.json(empty);
+  const u = db.prepare(`SELECT * FROM users WHERE (lower(email)=lower(?) OR lower(emp_id)=lower(?))
+    AND role='admin' AND approved=1 AND status='active' ORDER BY id LIMIT 1`).get(ident, ident);
+  if (!u) return res.json(empty);
+  const cid = u.company_id != null ? Number(u.company_id) : Number(u.id);
+  let locations = db.prepare('SELECT * FROM company_locations WHERE company_id=? ORDER BY name').all(cid);
+  if (u.company_location_id != null) locations = locations.filter((l) => Number(l.id) === Number(u.company_location_id));
+  res.json({
+    states: db.prepare('SELECT * FROM company_states WHERE company_id=? ORDER BY name').all(cid),
+    cities: db.prepare('SELECT * FROM company_cities WHERE company_id=? ORDER BY name').all(cid),
+    locations
+  });
 });
 
 /* ---------------- ADMIN USERS LIST (compatible format) ---------------- */
@@ -3120,6 +3768,8 @@ app.post('/api/schedules', auth, h(async (req, res) => {
       created.push({ id: Number(info.lastInsertRowid), direction, startDate: dt, startTime: t, slotLabel });
     }
     if (emp) notify(adminId(), 'Cab Request', `${emp.name} requested a ${direction === 'toOffice' ? 'pickup' : 'drop'} cab for ${dates.length} day(s). Review in Schedules.`);
+    metrics.inc('bookings', created.length);
+    STATS_CACHE.clear();
     return res.json({ ok: true, created, skipped, id: created[0]?.id ?? null, pendingApproval: true });
   }
 
@@ -4089,15 +4739,68 @@ app.post('/api/driver/feedback', auth, role('driver'), (req, res) => {
 // Driver reports where their cab is parked/standing at the office (L1..L60).
 // The tap-grid UI sends plain "L<n>"; we store it in the vehicles.stand column.
 const STANDING_POINT_RE = /^(L[1-9]|L[1-5][0-9]|L60)$/;
-// Driver saves the assignment they picked (Trip / Line / Stand). Optional Line
-// and Stand are allowed (2nd+ trip). Tracked for Admin/Vendor.
+// Driver saves the End-Trip assignment (Trip / Line / Stand). Validated against the
+// driver's assigned vehicle, saved transactionally, and appended to history.
 app.post('/api/driver/assignment', auth, role('driver'), (req, res) => {
   const { tripId, tripName, line, stand } = req.body || {};
-  const trip = tripName != null ? String(tripName) : (tripId != null ? String(tripId) : null);
-  db.prepare('UPDATE users SET assign_trip = ?, assign_line = ?, assign_stand = ?, assign_at = ? WHERE id = ?')
-    .run(trip, line != null && line !== '' ? String(line) : null, stand != null && stand !== '' ? String(stand) : null, ts(), req.user.id);
-  emitToAdmins('driver:assignment', { driver_id: req.user.id, trip, line: line ?? null, stand: stand ?? null });
-  res.json({ ok: true, assignment: { trip, line: line ?? null, stand: stand ?? null } });
+  const trip = String(tripName || '').trim();
+  if (!['First Trip', 'Second Trip'].includes(trip)) return res.status(400).json({ error: 'Select First Trip or Second Trip.' });
+  const lineNum = Number(String(line ?? '').trim().replace(/^line\s*/i, ''));
+  if (!Number.isInteger(lineNum) || lineNum < 1 || lineNum > 60) return res.status(400).json({ error: 'Select a valid configured Line.' });
+  const standText = String(stand ?? '').trim().toUpperCase();
+  if (!STANDING_POINT_RE.test(standText)) return res.status(400).json({ error: 'Select a Stand from L1 to L60.' });
+  const vehicle = req.user.vehicle_id ? db.prepare('SELECT id, line FROM vehicles WHERE id=?').get(req.user.vehicle_id) : null;
+  if (!vehicle) return res.status(400).json({ error: 'No vehicle is assigned to this driver.' });
+  if (vehicle.line == null || Number(vehicle.line) < 1 || Number(vehicle.line) > 60) {
+    return res.status(400).json({ error: 'No valid Line is configured for your assigned vehicle. Please contact your transport admin.' });
+  }
+  if (Number(vehicle.line) !== lineNum) return res.status(400).json({ error: 'The selected Line does not match your assigned vehicle.' });
+  const runId = tripId == null || tripId === '' ? null : String(tripId).trim();
+  if (runId) {
+    const match = runId.match(/^run-(\d+)-(\d{4}-\d{2}-\d{2})$/);
+    if (!match || Number(match[1]) !== Number(vehicle.id)) return res.status(403).json({ error: 'This trip does not belong to your assigned vehicle.' });
+    const exists = db.prepare('SELECT id FROM schedules WHERE vehicle_id=? AND date=? LIMIT 1').get(Number(match[1]), match[2]);
+    if (!exists) return res.status(404).json({ error: 'The selected trip could not be verified.' });
+  }
+  const at = ts();
+  try {
+    db.exec('BEGIN;');
+    db.prepare('UPDATE users SET assign_trip=?, assign_line=?, assign_stand=?, assign_at=? WHERE id=?')
+      .run(trip, String(lineNum), standText, at, req.user.id);
+    db.prepare('UPDATE vehicles SET stand=?, last_update=? WHERE id=?').run(standText, at, vehicle.id);
+    db.prepare(`INSERT INTO driver_assignment_events (driver_id, vehicle_id, run_id, trip_name, line, stand, company_id, vendor_id)
+      VALUES (?,?,?,?,?,?,?,?)`)
+      .run(req.user.id, vehicle.id, runId, trip, String(lineNum), standText, req.user.company_id ?? null, req.user.vendor_id ?? null);
+    db.exec('COMMIT;');
+  } catch (e) {
+    try { db.exec('ROLLBACK;'); } catch (_) {}
+    throw e;
+  }
+  if (io) {
+    const update = { driver_id: req.user.id, company_id: req.user.company_id ?? null, vendor_id: req.user.vendor_id ?? null, trip, line: String(lineNum), stand: standText, assigned_at: at };
+    let target = io.to('role:admin');
+    if (update.company_id != null) target = target.to(`company-live:${Number(update.company_id)}`);
+    if (update.vendor_id != null) target = target.to(`vendor-live:${Number(update.vendor_id)}`);
+    target.emit('driver:assignment', update);
+  }
+  res.json({ ok: true, assignment: { trip, line: String(lineNum), stand: standText, runId, assignedAt: at } });
+});
+
+// Append-only confirmed End-Trip history (tenant/location scoped).
+app.get('/api/admin/driver-assignment-events', auth, role('admin', 'vendor'), (req, res) => {
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  let where = '1=1';
+  const params = [];
+  if (ven) { where = 'e.vendor_id=?'; params.push(Number(req.user.vendor_id) || -1); }
+  else if (!sc.isOwner) { where = 'e.company_id=?'; params.push(Number(sc.cid)); }
+  const rows = db.prepare(`SELECT e.id, e.driver_id, u.name, u.emp_id, e.trip_name AS trip, e.line, e.stand,
+      COALESCE(v.vehicle_name,'') AS vehicle, v.plate, e.created_at AS assigned_at
+    FROM driver_assignment_events e
+    LEFT JOIN users u ON u.id=e.driver_id
+    LEFT JOIN vehicles v ON v.id=e.vehicle_id
+    WHERE ${where} ORDER BY e.id DESC LIMIT 500`).all(...params);
+  res.json(rows);
 });
 
 // Admin/Vendor: see every driver's current assignment (company/vendor scoped).
@@ -4137,9 +4840,9 @@ app.delete('/api/admin/driver-assignments/:id', auth, role('admin', 'vendor'), (
 });
 
 app.get('/api/driver/standing-point', auth, role('driver'), (req, res) => {
-  const veh = db.prepare('SELECT id, stand FROM vehicles WHERE id=?').get(req.user.vehicle_id);
+  const veh = db.prepare('SELECT id, stand, line, trip FROM vehicles WHERE id=?').get(req.user.vehicle_id);
   if (!veh) return res.status(400).json({ error: 'No vehicle assigned' });
-  res.json({ standingPoint: veh.stand || null });
+  res.json({ standingPoint: veh.stand || null, line: veh.line ?? null, trip: veh.trip ?? null, vehicleId: veh.id });
 });
 app.put('/api/driver/standing-point', auth, role('driver'), (req, res) => {
   const spot = String((req.body || {}).standingPoint || '').trim().toUpperCase();
@@ -4560,14 +5263,25 @@ function markReconnecting(userId) {
 // Current position lives in vehicles/users; history is an append-only trail in
 // location_history. Writes are coalesced (default 15s per subject) so heavy ping
 // loads don't bloat the table — reasonable for the 5,000-user target.
-function recordGpsHistory(subject, subjectId, lat, lng, speed) {
+// RAW GPS persistence. Every point is stored (no loss) so trip history, overspeed
+// evidence and reporting can be reconstructed exactly. Only the LIVE dashboard
+// broadcasts are coalesced/throttled (see nudgeTrackingRooms / TRACKING_NUDGE_MS).
+// Storage strategy: one row per ping in location_history, indexed by
+// (subject, subject_id, id); retention is soft-archive after
+// LOCATION_HISTORY_RETAIN_DAYS (default 90) via pruneLocationHistory(), so history
+// is never hard-deleted. Set GPS_HISTORY_COALESCE_MS>0 only if you deliberately
+// want to sample the persisted trail (default 0 = keep every raw point).
+function recordGpsHistory(subject, subjectId, lat, lng, speed, heading, accuracy) {
   try {
     if (subjectId == null || lat == null || lng == null) return;
-    const coalesceMs = Number(process.env.GPS_HISTORY_COALESCE_MS) || 15000;
-    const last = db.prepare('SELECT MAX(created_at) AS created_at FROM location_history WHERE subject=? AND subject_id=?').get(subject, subjectId);
-    if (last && last.created_at && (Date.now() - new Date(String(last.created_at).replace(' ', 'T')).getTime()) < coalesceMs) return;
-    db.prepare('INSERT INTO location_history (subject, subject_id, lat, lng, speed, source) VALUES (?,?,?,?,?,?)')
-      .run(subject, subjectId, lat, lng, Number(speed) || 0, 'gps');
+    const coalesceMs = Number(process.env.GPS_HISTORY_COALESCE_MS) || 0;
+    if (coalesceMs > 0) {
+      const last = db.prepare('SELECT MAX(created_at) AS created_at FROM location_history WHERE subject=? AND subject_id=?').get(subject, subjectId);
+      if (last && last.created_at && (Date.now() - new Date(String(last.created_at).replace(' ', 'T')).getTime()) < coalesceMs) return;
+    }
+    db.prepare('INSERT INTO location_history (subject, subject_id, lat, lng, speed, heading, accuracy, source) VALUES (?,?,?,?,?,?,?,?)')
+      .run(subject, subjectId, lat, lng, Number(speed) || 0, heading != null ? Number(heading) : null, accuracy != null ? Number(accuracy) : null, 'gps');
+    metrics.inc('gps_points');
   } catch (e) { console.error('[gps-history]', e.message); }
 }
 function pruneLocationHistory() {
@@ -4676,6 +5390,23 @@ function nudgeTrackingRooms(scopes) {
 
 const server = http.createServer(app);
 io = new Server(server, { cors: { origin: corsOrigin }, transports: ['websocket', 'polling'] });
+metrics.setIo(io);
+// Optional horizontal scaling. When REDIS_URL is set, Socket.IO uses the Redis
+// adapter so a client connected to instance A receives live events produced on
+// instance B. With no REDIS_URL the app runs EXACTLY as before (single instance).
+if (process.env.REDIS_URL) {
+  try {
+    const { createClient } = require('redis');
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const pubClient = createClient({ url: process.env.REDIS_URL });
+    const subClient = pubClient.duplicate();
+    pubClient.on('error', (e) => console.error('[redis] pub error:', e.message));
+    subClient.on('error', (e) => console.error('[redis] sub error:', e.message));
+    Promise.all([pubClient.connect(), subClient.connect()])
+      .then(() => { io.adapter(createAdapter(pubClient, subClient)); console.log('[redis] Socket.IO Redis adapter enabled'); })
+      .catch((e) => console.error('[redis] adapter setup failed:', e.message));
+  } catch (e) { console.error('[redis] not available:', e.message); }
+}
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
@@ -4692,8 +5423,12 @@ io.use((socket, next) => {
 });
 io.on('connection', (socket) => {
   const user = socket.data.user;
+  const vertical = user.vertical || 'company';
   socket.join(`user:${user.id}`);
-  socket.join(`role:${user.role}`);
+  socket.join(`v:${vertical}:${user.role}`);
+  // Vertical-aware admin rooms: company/owner admins vs school admins never share.
+  if (user.role === 'admin') socket.join(vertical === 'school' ? 'role:admin:school' : 'role:admin');
+  else socket.join(`role:${user.role}`);
   for (const r of userTenantRooms(user)) socket.join(r);
   socket.on('chat:send', ({ receiver_id, message }) => {
     if (!message || !String(message).trim()) return;
@@ -4723,7 +5458,7 @@ io.on('connection', (socket) => {
   }
   // Driver GPS streaming (mobile app emits location:update every ~4s)
   const speedLimitFor = () => loadSettings().defaultSpeedLimitKmph || 40;
-  socket.on('location:update', ({ tripId, lat, lng, speedKmph }) => {
+  socket.on('location:update', ({ tripId, lat, lng, speedKmph, heading, accuracy }) => {
     if (typeof lat !== 'number' || typeof lng !== 'number') return;
     // Only drivers stream vehicle GPS, and only for the vehicle assigned to them.
     // A non-driver (or driver passing someone else's trip id) must never be able
@@ -4739,7 +5474,7 @@ io.on('connection', (socket) => {
     if (vehicle) {
       db.prepare("UPDATE vehicles SET lat=?, lng=?, speed=?, status='active', last_update=datetime('now','localtime'), connected=1, gps_status='live' WHERE id=?")
         .run(lat, lng, Number(speedKmph) || 0, vid);
-      recordGpsHistory('vehicle', vid, lat, lng, speedKmph);
+      recordGpsHistory('vehicle', vid, lat, lng, speedKmph, heading, accuracy);
       // Vehicle-level speed limit wins; fall back to the route, then the default.
       const limit = Number(
         vehicle.speed_limit ??
@@ -4753,7 +5488,12 @@ io.on('connection', (socket) => {
         if (!fresh) {
           db.prepare('INSERT INTO speed_events (vehicle_id,vehicle_name,driver_name,speed,speed_limit,lat,lng) VALUES (?,?,?,?,?,?,?)')
             .run(vid, vehicle.vehicle_name, vehicle.driver_name, Number(speedKmph), limit, lat, lng);
-          emitToAdmins('alert', { vehicle_name: vehicle.vehicle_name, driver_name: vehicle.driver_name, speed: Number(speedKmph), speed_limit: limit });
+          metrics.inc('overspeed_events');
+          STATS_CACHE.clear();
+          const alert = { vehicle_name: vehicle.vehicle_name, driver_name: vehicle.driver_name, speed: Number(speedKmph), speed_limit: limit, vehicle_id: vid };
+          emitToAdmins('alert', alert);
+          // Notify ONLY the vehicle's own vendor (vendor-live:<id>), never other vendors.
+          if (vehicle.vendor_id != null && io) io.to('vendor-live:' + Number(vehicle.vendor_id)).emit('alert', alert);
         }
       }
     } else {
@@ -4766,7 +5506,7 @@ io.on('connection', (socket) => {
     upsertDriverLocation(user, {
       vehicleId: vehicle ? vid : null,
       vendorId: vehicle ? vehicle.vendor_id : null,
-      lat, lng, speed: Number(speedKmph) || 0, heading: null
+      lat, lng, speed: Number(speedKmph) || 0, heading: heading != null ? Number(heading) : null
     });
     // Scoped, keyed broadcast: the driver's own company / vendor / owner rooms
     // only — never a global poke to every admin. Each event targets a single
@@ -5185,12 +5925,16 @@ app.post('/api/vendor/login', guard(60, 15 * 60 * 1000), (req, res) => {
   if (vendor.status !== 'active') return res.status(403).json({ error: 'Your access has been deactivated. Contact admin.', message: 'Your access has been deactivated. Contact admin.' });
   db.prepare("UPDATE vendors SET last_login = datetime('now','localtime'), login_count = login_count + 1 WHERE id = ?").run(vendor.id);
   const mirrorUser = ensureVendorUserMirror(vendor);
-  const token = jwt.sign({ id: mirrorUser.id, role: 'vendor', src: 'users' }, JWT_SECRET, { expiresIn: '7d' });
+  const token = sign(mirrorUser, null, { src: 'users', app: 'web' });
   res.json({ token, user: { ...publicVendor(vendor), role: 'vendor', id: mirrorUser.id } });
 });
 
 app.get('/api/vendor/me', vendorAuth, (req, res) => {
-  res.json(req.user);
+  // Sliding refresh: return a fresh token alongside the user (the frontend keeps
+  // whichever it needs). Vendor sessions are multi-worker, so no single-session lock.
+  const tp = req.tokenPayload || {};
+  const token = sign({ id: tp.id, role: 'vendor' }, tp.sid, { src: 'users', app: 'web' });
+  res.json({ token, user: req.user });
 });
 
 app.get('/api/vendor/employees', vendorAuth, (req, res) => {
@@ -5977,6 +6721,7 @@ try { db.exec(`ALTER TABLE users ADD COLUMN location_profile TEXT;`); } catch (e
 try { db.exec(`ALTER TABLE routes ADD COLUMN company_id INTEGER;`); } catch (e) {}
 // Single active session for employees (see auth middleware + /api/auth/login).
 try { db.exec(`ALTER TABLE users ADD COLUMN active_sid TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN active_sid_expires_at TEXT;`); } catch (e) {}
 // Defensive: older DBs may predate the vehicles.driver_id column used by linkDriver.
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN driver_id INTEGER;`); } catch (e) {}
 // Driver's selected assignment (Trip / Line / Stand) — tracked for Admin/Vendor.
@@ -6093,6 +6838,668 @@ app.get('/api/support/config', auth, (req, res) => {
     supportEmail: s.company?.supportEmail || 'getinroute0@gmail.com',
     whatsapp: s.supportWhatsapp || ''
   });
+});
+
+/* ---------------- PLATFORM MONITOR, FULL BACKUP, PER-COMPANY FLAGS ----------------
+ * Three additive capabilities, all visible to Owner/Admin (and Vendor where scoped):
+ *  1) Uptime/downtime capture — every process start/stop plus a 30s heartbeat, so
+ *     a crash or restart is recorded with the exact gap (downtime_seconds).
+ *  2) Full on-server backup — a logical snapshot of EVERY table, stored on the
+ *     persistent volume (Railway /data) with retention, for both SQLite and PG.
+ *  3) Per-company feature overrides — the owner can enable/disable a feature for a
+ *     specific company; the company's own portal then shows/hides it.
+ * Nothing here removes or rewrites existing data. */
+
+// --- (1) UPTIME / DOWNTIME ---
+function parseLocalTs(s) {
+  if (!s) return null;
+  const t = Date.parse(String(s).replace(' ', 'T'));
+  return Number.isNaN(t) ? null : t;
+}
+function recordServerStart() {
+  try {
+    const now = ts();
+    const prev = db.prepare('SELECT last_seen_at FROM server_status WHERE id=1').get();
+    const prevMs = prev ? parseLocalTs(prev.last_seen_at) : null;
+    const downtime = prevMs != null ? Math.max(0, Math.round((Date.now() - prevMs) / 1000)) : null;
+    db.prepare('INSERT INTO server_events (kind, at, downtime_seconds, note) VALUES (?,?,?,?)')
+      .run('start', now, downtime, downtime != null && downtime > 0 ? `recovered after ${downtime}s` : 'boot');
+    if (prev) db.prepare('UPDATE server_status SET last_seen_at=?, started_at=? WHERE id=1').run(now, now);
+    else db.prepare('INSERT INTO server_status (id, last_seen_at, started_at) VALUES (1,?,?)').run(now, now);
+    if (downtime != null && downtime > 0) console.log(`[monitor] server started — previous downtime ${downtime}s`);
+  } catch (e) { console.error('[monitor] start record failed:', e.message); }
+}
+function recordServerStop() {
+  try {
+    const now = ts();
+    db.prepare('INSERT INTO server_events (kind, at, downtime_seconds, note) VALUES (?,?,?,?)')
+      .run('stop', now, null, 'graceful shutdown');
+    db.prepare('UPDATE server_status SET last_seen_at=? WHERE id=1').run(now);
+    console.log('[monitor] server stop recorded');
+  } catch (e) { console.error('[monitor] stop record failed:', e.message); }
+}
+function touchServerSeen() {
+  try { db.prepare('UPDATE server_status SET last_seen_at=? WHERE id=1').run(ts()); } catch (e) {}
+}
+const serverHeartbeatTimer = setInterval(touchServerSeen, 30000);
+if (serverHeartbeatTimer.unref) serverHeartbeatTimer.unref();
+
+// --- (2) FULL ON-SERVER BACKUP (all tables, both engines) ---
+const OPS_BACKUP_DIR = process.env.BACKUP_DIR || (process.env.DATABASE_URL
+  ? (fs.existsSync('/data') ? path.join('/data', 'backups') : path.join(__dirname, 'backups'))
+  : path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : __dirname, 'backups'));
+
+function listAllTables() {
+  try {
+    if (db._isPg) {
+      return db.prepare("SELECT table_name AS name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name").all().map((r) => r.name);
+    }
+    return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+  } catch (e) { console.error('[backup] table list failed:', e.message); return []; }
+}
+function fullBackupNow(trigger = 'manual') {
+  try {
+    const tables = listAllTables();
+    const dump = { created_at: ts(), trigger, engine: db._isPg ? 'postgres' : 'sqlite', table_count: tables.length, tables: {} };
+    let rows = 0;
+    for (const t of tables) {
+      try { const data = db.prepare(`SELECT * FROM "${t}"`).all(); dump.tables[t] = data; rows += data.length; }
+      catch (e) { dump.tables[t] = { error: e.message }; }
+    }
+    if (!fs.existsSync(OPS_BACKUP_DIR)) fs.mkdirSync(OPS_BACKUP_DIR, { recursive: true });
+    const stamp = ts().replace(/[-: ]/g, '').slice(0, 14);
+    const dest = path.join(OPS_BACKUP_DIR, `getinroute-full-${stamp}.json`);
+    if (fs.existsSync(dest)) return dest;
+    fs.writeFileSync(dest, JSON.stringify(dump));
+    const keep = Math.max(1, Number(process.env.BACKUP_KEEP) || 14);
+    const files = fs.readdirSync(OPS_BACKUP_DIR).filter((f) => f.startsWith('getinroute-full-')).sort();
+    while (files.length > keep) { try { fs.unlinkSync(path.join(OPS_BACKUP_DIR, files.shift())); } catch (e) {} }
+    console.log(`[backup] full snapshot -> ${dest} (${tables.length} tables, ${rows} rows)`);
+    return dest;
+  } catch (e) { console.error('[backup] full snapshot failed:', e.message); return null; }
+}
+
+app.get('/api/admin/server-events', auth, role('admin'), (req, res) => {
+  const events = db.prepare('SELECT id, kind, at, downtime_seconds, note FROM server_events ORDER BY id DESC LIMIT 100').all();
+  const status = db.prepare('SELECT last_seen_at, started_at FROM server_status WHERE id=1').get() || {};
+  const startedMs = parseLocalTs(status.started_at);
+  res.json({
+    events,
+    last_seen_at: status.last_seen_at || null,
+    started_at: status.started_at || null,
+    uptime_seconds: startedMs != null ? Math.max(0, Math.round((Date.now() - startedMs) / 1000)) : null
+  });
+});
+
+app.get('/api/admin/backups', auth, role('admin'), (req, res) => {
+  let backups = [];
+  try {
+    backups = fs.readdirSync(OPS_BACKUP_DIR)
+      .filter((f) => f.startsWith('getinroute-full-') || f.startsWith('getinroute.db.'))
+      .sort().reverse()
+      .map((f) => { const s = fs.statSync(path.join(OPS_BACKUP_DIR, f)); return { name: f, size: s.size, at: s.mtime.toISOString() }; });
+  } catch (e) {}
+  res.json({ dir: OPS_BACKUP_DIR, backups });
+});
+app.post('/api/admin/backups/run', auth, role('admin'), ownerOnly, (req, res) => {
+  const dest = fullBackupNow('manual');
+  if (!dest) return res.status(500).json({ error: 'Backup failed' });
+  res.json({ ok: true, file: path.basename(dest) });
+});
+
+// --- (3) PER-COMPANY FEATURE OVERRIDES ---
+function globalFeatureFlags() {
+  return db.prepare('SELECT flag_key, enabled, description FROM feature_flags ORDER BY flag_key').all();
+}
+function effectiveFlagsForCompany(companyId) {
+  const globals = globalFeatureFlags();
+  const overrides = companyId != null
+    ? db.prepare('SELECT flag_key, enabled FROM company_feature_flags WHERE company_id=?').all(companyId)
+    : [];
+  const map = new Map(overrides.map((o) => [o.flag_key, Number(o.enabled)]));
+  return globals.map((g) => ({
+    flag_key: g.flag_key,
+    description: g.description,
+    enabled: map.has(g.flag_key) ? map.get(g.flag_key) : Number(g.enabled),
+    override: map.has(g.flag_key)
+  }));
+}
+
+app.get('/api/admin/feature-companies', auth, role('admin'), ownerOnly, (req, res) => {
+  res.json(db.prepare("SELECT id, name, email FROM users WHERE role='admin' AND emp_id<>'ADMIN' AND vertical='company' ORDER BY name").all());
+});
+app.get('/api/admin/company-flags/:companyId', auth, role('admin'), ownerOnly, (req, res) => {
+  res.json(effectiveFlagsForCompany(Number(req.params.companyId)));
+});
+app.put('/api/admin/company-flags/:companyId/:key', auth, role('admin'), ownerOnly, (req, res) => {
+  const companyId = Number(req.params.companyId);
+  if (!companyId) return res.status(400).json({ error: 'Valid company is required' });
+  const key = String(req.params.key);
+  const enabled = req.body && req.body.enabled ? 1 : 0;
+  db.prepare(`INSERT INTO company_feature_flags (company_id, flag_key, enabled, updated_by, updated_at)
+    VALUES (?,?,?,?,?)
+    ON CONFLICT(company_id, flag_key) DO UPDATE SET enabled=excluded.enabled, updated_by=excluded.updated_by, updated_at=excluded.updated_at`)
+    .run(companyId, key, enabled, req.user.id, ts());
+  try { require('./v3/core').audit({ company_id: companyId, actor_id: req.user.id, actor_role: req.user.role, action: 'feature:company-override', category: 'feature_flags', entity_type: 'feature_flag', entity_id: key, new_value: { enabled }, result: 'ok' }); } catch (e) {}
+  res.json({ ok: true, flag_key: key, enabled });
+});
+
+// Effective flags for the caller's own company (company admin / vendor). The owner
+// sees the platform defaults.
+app.get('/api/v3/flags/mine', auth, (req, res) => {
+  if (req.user.role === 'admin' && req.user.emp_id === 'ADMIN') return res.json(effectiveFlagsForCompany(null));
+  let companyId = null;
+  if (req.user.role === 'admin') companyId = req.user.company_id != null ? Number(req.user.company_id) : Number(req.user.id);
+  else if (req.user.role === 'vendor') companyId = req.user.company_id != null ? Number(req.user.company_id) : null;
+  res.json(effectiveFlagsForCompany(companyId));
+});
+
+// Live Intelligence Center: every module computed from the REAL database, scoped
+// to the caller's company / operational location / vendor and a date range.
+app.get('/api/v3/ai/center', auth, role('admin', 'vendor'), (req, res) => {
+  const isOwner = req.user.emp_id === 'ADMIN';
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  const companyId = ven ? (req.user.company_id != null ? Number(req.user.company_id) : null) : (isOwner ? null : Number(sc.cid));
+  const vendorId = ven ? (Number(req.user.vendor_id) || null) : null;
+  let locationId = req.query.company_location_id ? Number(req.query.company_location_id) : null;
+  const scope = locationScope(req);
+  if (locationId != null) {
+    if (scope && !scope.includes(locationId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+    if (companyId != null && !db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locationId, companyId)) return res.status(403).json({ error: 'Location does not belong to this company.' });
+  } else if (scope && scope.length === 1) {
+    locationId = scope[0];
+  }
+  const today = dateOnly();
+  const dayAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  const range = String(req.query.range || 'today');
+  let from = today, to = today;
+  if (range === '7') { from = dayAgo(6); to = today; }
+  else if (range === '30') { from = dayAgo(29); to = today; }
+  else if (range === 'custom') { from = String(req.query.from || today).slice(0, 10); to = String(req.query.to || today).slice(0, 10); }
+  if (from > to) { const t = from; from = to; to = t; }
+  const il = require('./intelligence-live');
+  il.setDb(db);
+  res.json(il.computeCenter({ companyId, locationId, vendorId, from, to, isOwner }));
+});
+// Audit-logged approval decision for a live-intelligence recommendation.
+app.post('/api/v3/ai/center/decide', auth, role('admin', 'vendor'), (req, res) => {
+  const b = req.body || {};
+  const module = String(b.module || '').slice(0, 60);
+  const decision = String(b.decision || '').toUpperCase();
+  if (!module || !['APPROVED', 'REJECTED'].includes(decision)) return res.status(400).json({ error: 'module and decision (APPROVED/REJECTED) required' });
+  try {
+    require('./v3/core').audit({ company_id: req.user.company_id ?? null, actor_id: req.user.id, actor_role: req.user.role, action: 'ai:center-decision', category: 'ai', entity_type: 'intelligence_module', entity_id: module, new_value: { decision, text: String(b.text || '').slice(0, 500) }, result: decision });
+  } catch (e) {}
+  res.json({ ok: true, module, decision });
+});
+
+/* ---------------- DRIVER INVITE ID + MULTI-LOCATION DUTY ----------------
+ * Admin/Vendor generates a secure Invite ID bound to company_id + company_location_id
+ * (+ optional vendor_id) with expiry / max-uses / revoke. A driver redeems an Invite
+ * ID to start a duty session scoped to that operational location. The same driver can
+ * work multiple locations by redeeming a different invite (one ACTIVE duty at a time,
+ * switchable). Authorization always uses company_location_id — never names. */
+function genDriverInviteCode() {
+  let code = '';
+  do { code = 'INV-' + crypto.randomBytes(4).toString('hex').toUpperCase(); }
+  while (db.prepare('SELECT id FROM driver_invites WHERE code=?').get(code));
+  return code;
+}
+function activeDutyOf(driverId) {
+  return db.prepare('SELECT * FROM driver_duty_sessions WHERE driver_id=? AND active=1 ORDER BY id DESC LIMIT 1').get(driverId) || null;
+}
+function inviteExpired(inv) {
+  return !!(inv && inv.expires_at && Date.parse(String(inv.expires_at).replace(' ', 'T')) < Date.now());
+}
+
+app.post('/api/admin/driver-invites', auth, role('admin', 'vendor'), (req, res) => {
+  const b = req.body || {};
+  const sc = companyAdminScope(req);
+  const ven = isVendorReq(req);
+  const companyId = ven
+    ? (req.user.company_id != null ? Number(req.user.company_id) : null)
+    : (sc.isOwner ? (Number(b.company_id) || null) : Number(sc.cid));
+  const scope = locationScope(req); // null = unrestricted, else allowed location ids
+  let locId = b.company_location_id != null && b.company_location_id !== '' ? Number(b.company_location_id) : null;
+  if (locId == null && scope && scope.length === 1) locId = scope[0];
+  if (locId != null && scope && !scope.includes(locId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  if (locId != null && companyId != null && !db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locId, companyId)) {
+    return res.status(403).json({ error: 'Location does not belong to this company.' });
+  }
+  const vendorId = ven ? (req.user.vendor_id != null ? Number(req.user.vendor_id) : null) : (b.vendor_id != null && b.vendor_id !== '' ? Number(b.vendor_id) : null);
+  if (vendorId != null && !ven && !db.prepare('SELECT id FROM vendors WHERE id=?').get(vendorId)) return res.status(400).json({ error: 'Vendor not found.' });
+  const maxUses = Math.max(1, Math.min(100000, Number(b.max_uses) || 1));
+  const exp = new Date(Date.now() + 7 * 86400000);
+  const p2 = (n) => String(n).padStart(2, '0');
+  const expiresAt = b.expires_at
+    ? String(b.expires_at).slice(0, 19).replace('T', ' ')
+    : `${exp.getFullYear()}-${p2(exp.getMonth() + 1)}-${p2(exp.getDate())} ${p2(exp.getHours())}:${p2(exp.getMinutes())}:${p2(exp.getSeconds())}`;
+  const code = genDriverInviteCode();
+  const info = db.prepare(`INSERT INTO driver_invites (company_id, company_location_id, vendor_id, code, max_uses, expires_at, created_by)
+    VALUES (?,?,?,?,?,?,?)`).run(companyId, locId, vendorId, code, maxUses, expiresAt, req.user.id);
+  try { require('./v3/core').audit({ company_id: companyId, actor_id: req.user.id, actor_role: req.user.role, action: 'driver-invite:create', category: 'access', entity_type: 'driver_invite', entity_id: String(info.lastInsertRowid), new_value: { code, locId, vendorId, maxUses, expiresAt }, result: 'ok' }); } catch (e) {}
+  res.json({ ok: true, id: Number(info.lastInsertRowid), code, company_id: companyId, company_location_id: locId, vendor_id: vendorId, max_uses: maxUses, expires_at: expiresAt });
+});
+
+app.get('/api/admin/driver-invites', auth, role('admin', 'vendor'), (req, res) => {
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  let where = '1=1';
+  const params = [];
+  if (ven) { where += ' AND vendor_id = ?'; params.push(Number(req.user.vendor_id) || -1); }
+  else if (!sc.isOwner) { where += ' AND company_id = ?'; params.push(Number(sc.cid)); }
+  where = applyLocationScope(where, params, locationScope(req), 'company_location_id');
+  const rows = db.prepare(`SELECT id, company_id, company_location_id, vendor_id, code, status, max_uses, used_count, expires_at, created_at
+    FROM driver_invites WHERE ${where} ORDER BY id DESC LIMIT 500`).all(...params);
+  res.json(rows.map((r) => ({ ...r, expired: inviteExpired(r) })));
+});
+
+app.post('/api/admin/driver-invites/:id/revoke', auth, role('admin', 'vendor'), (req, res) => {
+  const ven = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  const inv = db.prepare('SELECT * FROM driver_invites WHERE id=?').get(Number(req.params.id));
+  if (!inv) return res.status(404).json({ error: 'Invite not found' });
+  if (ven && Number(inv.vendor_id) !== Number(req.user.vendor_id)) return res.status(403).json({ error: 'Not your invite' });
+  if (!ven && !sc.isOwner && Number(inv.company_id) !== Number(sc.cid)) return res.status(403).json({ error: 'Not your invite' });
+  const scope = locationScope(req);
+  if (scope && inv.company_location_id != null && !scope.includes(Number(inv.company_location_id))) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  db.prepare("UPDATE driver_invites SET status='revoked' WHERE id=?").run(inv.id);
+  res.json({ ok: true, revoked: true });
+});
+
+// Driver redeems an Invite ID -> starts (or switches to) a duty session for that location.
+app.post('/api/driver/invite/redeem', auth, role('driver'), (req, res) => {
+  const code = String((req.body || {}).code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'Enter an Invite ID.' });
+  const inv = db.prepare('SELECT * FROM driver_invites WHERE code=?').get(code);
+  if (!inv) return res.status(404).json({ error: 'Invite ID not found.' });
+  if (inv.status !== 'active') return res.status(403).json({ error: 'This Invite ID has been revoked.' });
+  if (inviteExpired(inv)) return res.status(403).json({ error: 'This Invite ID has expired.' });
+  if (Number(inv.used_count) >= Number(inv.max_uses)) return res.status(403).json({ error: 'This Invite ID has reached its maximum uses.' });
+  if (inv.company_id != null && req.user.company_id != null && Number(inv.company_id) !== Number(req.user.company_id)) {
+    return res.status(403).json({ error: 'This Invite ID belongs to another company.' });
+  }
+  const at = ts();
+  try {
+    db.exec('BEGIN;');
+    db.prepare('UPDATE driver_duty_sessions SET active=0, ended_at=? WHERE driver_id=? AND active=1').run(at, req.user.id);
+    const info = db.prepare(`INSERT INTO driver_duty_sessions (driver_id, invite_id, company_id, company_location_id, vendor_id, active)
+      VALUES (?,?,?,?,?,1)`).run(req.user.id, inv.id, inv.company_id, inv.company_location_id, inv.vendor_id);
+    db.prepare('UPDATE driver_invites SET used_count=used_count+1 WHERE id=?').run(inv.id);
+    // Bind the driver's operational scope to the duty location so all location-scoped
+    // queries (trips, tracking, reporting) resolve to the active location.
+    db.prepare(`UPDATE users SET
+        company_id = COALESCE(?, company_id),
+        company_location_id = ?,
+        vendor_id = COALESCE(?, vendor_id)
+      WHERE id=?`).run(inv.company_id, inv.company_location_id, inv.vendor_id, req.user.id);
+    db.exec('COMMIT;');
+    const duty = db.prepare('SELECT * FROM driver_duty_sessions WHERE id=?').get(Number(info.lastInsertRowid));
+    if (io) emitToAdmins('driver:duty', { driver_id: req.user.id, duty });
+    res.json({ ok: true, duty });
+  } catch (e) {
+    try { db.exec('ROLLBACK;'); } catch (_) {}
+    throw e;
+  }
+});
+
+app.get('/api/driver/duty', auth, role('driver'), (req, res) => {
+  res.json(activeDutyOf(req.user.id));
+});
+app.post('/api/driver/duty/end', auth, role('driver'), (req, res) => {
+  db.prepare('UPDATE driver_duty_sessions SET active=0, ended_at=? WHERE driver_id=? AND active=1').run(ts(), req.user.id);
+  res.json({ ok: true });
+});
+
+/* -------------------------------------------------------------------
+ * LOCATION CODES (Part 3.1, Part 3.2)
+ *
+ * Each company_location has at most ONE active location code at a time.
+ * The code is a 12-character, URL-safe, cryptographically random string
+ * generated server-side. The code is what a location-scoped admin types
+ * during login to bind their session to that specific location. The
+ * backend never trusts a chosen location_id on login without first
+ * verifying the code (see /api/auth/login flow below).
+ *
+ * The endpoints:
+ *   GET    /api/admin/location-codes              list codes for the caller's scope
+ *   POST   /api/admin/location-codes              issue or regenerate the code for a location
+ *   POST   /api/admin/location-codes/:id/revoke   deactivate the active code
+ *
+ * Authorization:
+ *   - Owner admin (emp_id='ADMIN')                 -> all companies, all locations
+ *   - Company admin (no company_location_id)       -> all locations of their company
+ *   - Location-scoped admin (company_location_id)  -> only their own location
+ *   - Vendor                                       -> locations assigned to them
+ * ------------------------------------------------------------------- */
+function listLocationCodes(req) {
+  const isOwner = req.user && req.user.emp_id === 'ADMIN';
+  const isVen = isVendorReq(req);
+  let where = '1=1';
+  const params = [];
+  if (isVen) {
+    // Vendors only see codes bound to one of their assigned locations. We don't
+    // currently have a `vendors.company_location_ids` table; the existing
+    // vendor scoping (assigned_locations / assigned_route_ids) is enough for
+    // a UI hint, but location codes are still scoped by company for the
+    // surface here.
+    where += ' AND lc.company_id = ?';
+    params.push(Number(req.user.company_id) || -1);
+  } else if (!isOwner) {
+    where += ' AND lc.company_id = ?';
+    params.push(Number(req.user.company_id != null ? req.user.company_id : req.user.id));
+  }
+  const scope = locationScope(req);
+  if (scope && scope.length) {
+    where += ' AND lc.company_location_id IN (' + scope.map(() => '?').join(',') + ')';
+    for (const id of scope) params.push(id);
+  }
+  const rows = db.prepare(`SELECT lc.id, lc.company_id, lc.company_location_id, lc.code, lc.status,
+      lc.issued_at, lc.issued_by, lc.revoked_at, lc.revoked_by, lc.notes,
+      l.name AS location_name, c.name AS city_name, s.name AS state_name
+    FROM location_codes lc
+    JOIN company_locations l ON l.id = lc.company_location_id
+    JOIN company_cities c ON c.id = l.city_id
+    JOIN company_states s ON s.id = l.state_id
+    WHERE ${where}
+    ORDER BY lc.status DESC, s.name, c.name, l.name, lc.id DESC LIMIT 500`).all(...params);
+  return rows;
+}
+app.get('/api/admin/location-codes', auth, role('admin', 'vendor'), (req, res) => {
+  res.json(listLocationCodes(req));
+});
+// Issue or regenerate a code for a location. If a code is already active for
+// that location it is revoked first (single-active-code invariant).
+app.post('/api/admin/location-codes', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const locId = Number((req.body || {}).company_location_id);
+  if (!locId) return res.status(400).json({ error: 'company_location_id is required.' });
+  const loc = db.prepare('SELECT id, name, company_id FROM company_locations WHERE id=? AND company_id=?').get(locId, cid);
+  if (!loc) return res.status(403).json({ error: 'Location does not belong to this company.' });
+  const scope = locationScope(req);
+  if (scope && !scope.includes(locId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  // 12-char URL-safe random code. Avoid 0/O/1/l visually where reasonable.
+  const code = (() => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = crypto.randomBytes(12);
+    let s = '';
+    for (let i = 0; i < 12; i++) s += alphabet[bytes[i] % alphabet.length];
+    return s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8, 12);
+  })();
+  try {
+    db.exec('BEGIN');
+    db.prepare(`UPDATE location_codes SET status='revoked', revoked_at=?, revoked_by=?
+      WHERE company_location_id=? AND status='active'`).run(ts(), req.user.id, locId);
+    const info = db.prepare(`INSERT INTO location_codes (company_id, company_location_id, code, status, issued_by, notes)
+      VALUES (?,?,?,?,?,?)`).run(cid, locId, code, 'active', req.user.id, String((req.body || {}).notes || '').trim() || null);
+    db.exec('COMMIT');
+    try { require('./v3/core').audit({ company_id: cid, actor_id: req.user.id, actor_role: req.user.role, action: 'location-code:issue', category: 'access', entity_type: 'location_code', entity_id: String(info.lastInsertRowid), new_value: { code, locId }, result: 'ok' }); } catch (e) {}
+    res.json({ ok: true, id: Number(info.lastInsertRowid), code, company_id: cid, company_location_id: locId, status: 'active' });
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (e2) {}
+    return res.status(500).json({ error: 'Could not issue location code.' });
+  }
+});
+app.post('/api/admin/location-codes/:id/revoke', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const row = db.prepare('SELECT * FROM location_codes WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'Location code not found.' });
+  if (row.status !== 'active') return res.json({ ok: true, already_revoked: true });
+  const scope = locationScope(req);
+  if (scope && !scope.includes(Number(row.company_location_id))) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  db.prepare("UPDATE location_codes SET status='revoked', revoked_at=?, revoked_by=? WHERE id=?").run(ts(), req.user.id, row.id);
+  try { require('./v3/core').audit({ company_id: cid, actor_id: req.user.id, actor_role: req.user.role, action: 'location-code:revoke', category: 'access', entity_type: 'location_code', entity_id: String(row.id), old_value: { code: row.code }, result: 'ok' }); } catch (e) {}
+  res.json({ ok: true });
+});
+
+/* -------------------------------------------------------------------
+ * LOCATION CHANGE REQUESTS (Part 4.3)
+ *
+ *   POST   /api/employee/location-change-requests         create
+ *   GET    /api/employee/location-change-requests/me      list my own
+ *   POST   /api/employee/location-change-requests/:id/cancel  cancel pending
+ *   GET    /api/admin/location-change-requests            list (scoped)
+ *   POST   /api/admin/location-change-requests/:id/approve  approve (dest only)
+ *   POST   /api/admin/location-change-requests/:id/reject   reject (dest only)
+ *
+ * Rules:
+ *   - First location selection at onboarding is handled by the admin-side
+ *     assignment (PUT /api/admin/users/:id/location). The request flow
+ *     applies to LATER changes only.
+ *   - An employee can have at most one PENDING request.
+ *   - While PENDING, all bookings / trips / notifications / visibility
+ *     continue under the OLD location. The session JWT keeps the old
+ *     `loc` claim (the actual users.company_location_id value is unchanged
+ *     until approval).
+ *   - APPROVAL mutates users.company_location_id to the destination. From
+ *     that moment the destination admin sees the employee; the origin admin
+ *     keeps full history forever.
+ *   - The approver is the destination location's admin, or any company-wide
+ *     admin (no company_location_id). The origin location's admin is
+ *     notified read-only.
+ *   - Requests expire after LOCATION_CHANGE_EXPIRY_DAYS days.
+ * ------------------------------------------------------------------- */
+const LOCATION_CHANGE_EXPIRY_DAYS = 7;
+function locationChangeRequestRow(row) {
+  if (!row) return null;
+  const from = row.from_location_id
+    ? db.prepare('SELECT l.id, l.name, c.name AS city, s.name AS state FROM company_locations l JOIN company_cities c ON c.id=l.city_id JOIN company_states s ON s.id=l.state_id WHERE l.id=?').get(Number(row.from_location_id))
+    : null;
+  const to = row.to_location_id
+    ? db.prepare('SELECT l.id, l.name, c.name AS city, s.name AS state FROM company_locations l JOIN company_cities c ON c.id=l.city_id JOIN company_states s ON s.id=l.state_id WHERE l.id=?').get(Number(row.to_location_id))
+    : null;
+  const emp = db.prepare('SELECT id, name, emp_id, email, company_location_id FROM users WHERE id=?').get(row.employee_id);
+  const decider = row.decided_by ? db.prepare('SELECT id, name, emp_id FROM users WHERE id=?').get(row.decided_by) : null;
+  return { ...row, from, to, employee: emp, decided_by_user: decider };
+}
+app.post('/api/employee/location-change-requests', auth, role('employee'), (req, res) => {
+  const me = req.user;
+  const toLocId = Number((req.body || {}).to_location_id);
+  const reason = String((req.body || {}).reason || '').trim().slice(0, 500);
+  if (!toLocId) return res.status(400).json({ error: 'to_location_id is required.' });
+  if (me.company_location_id != null && Number(me.company_location_id) === toLocId) {
+    return res.status(400).json({ error: 'You are already at this location.' });
+  }
+  // Destination must belong to the employee's own company.
+  const cid = me.company_id != null ? Number(me.company_id) : null;
+  if (cid == null) return res.status(403).json({ error: 'No company binding for this account.' });
+  const dest = db.prepare('SELECT id, company_id, name, status FROM company_locations WHERE id=?').get(toLocId);
+  if (!dest || Number(dest.company_id) !== cid) return res.status(403).json({ error: 'Destination location is not part of your company.' });
+  if (dest.status !== 'active') return res.status(403).json({ error: 'Destination location is not active.' });
+  // At most one pending.
+  const existing = db.prepare("SELECT id FROM location_change_requests WHERE employee_id=? AND status='pending'").get(me.id);
+  if (existing) return res.status(409).json({ error: 'You already have a pending location-change request. Cancel it first or wait for a decision.', code: 'PENDING_EXISTS' });
+  const exp = (() => { const d = new Date(Date.now() + LOCATION_CHANGE_EXPIRY_DAYS * 86400000); const p2 = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`; })();
+  const info = db.prepare(`INSERT INTO location_change_requests (employee_id, from_location_id, to_location_id, reason, status, expires_at)
+    VALUES (?,?,?,?, 'pending', ?)`).run(me.id, me.company_location_id != null ? Number(me.company_location_id) : null, toLocId, reason || null, exp);
+  // Notify destination admins (those with company_location_id = dest, plus any
+  // company-wide admins of the same company).
+  const destAdmins = db.prepare(`SELECT id FROM users WHERE role='admin' AND company_id=? AND (company_location_id IS NULL OR company_location_id=?)`).all(cid, toLocId);
+  for (const a of destAdmins) {
+    notify(a.id, 'Location change request', `${me.name} (${me.emp_id}) requested to move to ${dest.name}. Reason: ${reason || '—'}`);
+  }
+  // Read-only notification to the origin location's admin.
+  if (me.company_location_id != null) {
+    const originAdmins = db.prepare(`SELECT id FROM users WHERE role='admin' AND company_id=? AND company_location_id=?`).all(cid, Number(me.company_location_id));
+    for (const a of originAdmins) {
+      notify(a.id, 'Location change pending (read-only)', `${me.name} (${me.emp_id}) requested to move from your location to ${dest.name}.`);
+    }
+  }
+  try { require('./v3/core').audit({ company_id: cid, actor_id: me.id, actor_role: me.role, action: 'location-change:request', category: 'access', entity_type: 'location_change_request', entity_id: String(info.lastInsertRowid), new_value: { to: toLocId, reason }, result: 'ok' }); } catch (e) {}
+  res.json({ ok: true, id: Number(info.lastInsertRowid), expires_at: exp });
+});
+app.get('/api/employee/location-change-requests/me', auth, role('employee'), (req, res) => {
+  const rows = db.prepare('SELECT * FROM location_change_requests WHERE employee_id=? ORDER BY id DESC LIMIT 50').all(req.user.id);
+  res.json(rows.map(locationChangeRequestRow));
+});
+app.post('/api/employee/location-change-requests/:id/cancel', auth, role('employee'), (req, res) => {
+  const row = db.prepare('SELECT * FROM location_change_requests WHERE id=?').get(Number(req.params.id));
+  if (!row) return res.status(404).json({ error: 'Request not found.' });
+  if (row.employee_id !== req.user.id) return res.status(403).json({ error: 'Not your request.' });
+  if (row.status !== 'pending') return res.status(400).json({ error: `Request is already ${row.status}.` });
+  db.prepare("UPDATE location_change_requests SET status='cancelled', decided_at=?, decided_by=?, decision_reason='cancelled by employee' WHERE id=?").run(ts(), req.user.id, row.id);
+  res.json({ ok: true });
+});
+app.get('/api/admin/location-change-requests', auth, role('admin'), (req, res) => {
+  const isOwner = req.user.emp_id === 'ADMIN';
+  const cid = req.user.company_id != null ? Number(req.user.company_id) : (isOwner ? null : Number(req.user.id));
+  if (cid == null && !isOwner) return res.json([]);
+  const status = String(req.query.status || 'pending');
+  let where = "r.status = ?";
+  const params = [status];
+  if (!isOwner) {
+    // A company-wide admin (no company_location_id) sees all requests for the
+    // company. A location-scoped admin sees requests targeting THEIR location
+    // only. Both scopes are enforced server-side.
+    if (req.user.company_location_id == null) {
+      where += ' AND u.company_id = ?';
+      params.push(cid);
+    } else {
+      where += ' AND u.company_id = ? AND r.to_location_id = ?';
+      params.push(cid, Number(req.user.company_location_id));
+    }
+  }
+  const rows = db.prepare(`SELECT r.* FROM location_change_requests r
+    JOIN users u ON u.id = r.employee_id
+    WHERE ${where}
+    ORDER BY r.id DESC LIMIT 200`).all(...params);
+  res.json(rows.map(locationChangeRequestRow));
+});
+function adminCanDecide(req, row) {
+  // Owner can always decide. Company-wide admin (no location) for the same
+  // company can decide. Location-scoped admin can only decide for THEIR
+  // location and only if it matches the destination.
+  if (req.user.emp_id === 'ADMIN') return true;
+  const cid = req.user.company_id != null ? Number(req.user.company_id) : Number(req.user.id);
+  if (Number(row.to_company_id) !== cid) return false;
+  if (req.user.company_location_id == null) return true;
+  return Number(req.user.company_location_id) === Number(row.to_location_id);
+}
+app.post('/api/admin/location-change-requests/:id/approve', auth, role('admin'), (req, res) => {
+  const row = db.prepare(`SELECT r.*, u.company_id AS to_company_id
+    FROM location_change_requests r
+    JOIN users u ON u.id = r.employee_id
+    WHERE r.id=?`).get(Number(req.params.id));
+  if (!row) return res.status(404).json({ error: 'Request not found.' });
+  if (row.status !== 'pending') return res.status(400).json({ error: `Request is already ${row.status}.` });
+  if (!adminCanDecide(req, row)) return res.status(403).json({ error: 'You are not the approver for this request.' });
+  const emp = db.prepare('SELECT * FROM users WHERE id=?').get(row.employee_id);
+  if (!emp) return res.status(404).json({ error: 'Employee not found.' });
+  try {
+    db.exec('BEGIN');
+    db.prepare("UPDATE location_change_requests SET status='approved', decided_at=?, decided_by=?, decision_reason=? WHERE id=?")
+      .run(ts(), req.user.id, String((req.body || {}).reason || '').slice(0, 500) || null, row.id);
+    // Move the employee to the destination location. History is preserved on
+    // every prior row (bookings, trips, check-ins) by leaving their
+    // company_location_id column untouched historically — the new value
+    // applies from this moment on.
+    db.prepare('UPDATE users SET company_location_id=? WHERE id=?').run(row.to_location_id, emp.id);
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (e2) {}
+    return res.status(500).json({ error: 'Could not approve request.' });
+  }
+  // Notify the employee that the move is effective.
+  notify(emp.id, 'Location change approved', `You are now at the new location. All future bookings and trips will go there.`);
+  // Notify the origin admin read-only.
+  if (row.from_location_id != null) {
+    const originAdmins = db.prepare(`SELECT id FROM users WHERE role='admin' AND company_id=? AND (company_location_id IS NULL OR company_location_id=?)`).all(Number(row.to_company_id), Number(row.from_location_id));
+    for (const a of originAdmins) {
+      notify(a.id, 'Location change approved (read-only)', `${emp.name} (${emp.emp_id}) moved from your location. They remain visible in your history.`);
+    }
+  }
+  try { require('./v3/core').audit({ company_id: Number(row.to_company_id), actor_id: req.user.id, actor_role: req.user.role, action: 'location-change:approve', category: 'access', entity_type: 'location_change_request', entity_id: String(row.id), new_value: { employee_id: emp.id, to: row.to_location_id }, result: 'ok' }); } catch (e) {}
+  res.json({ ok: true });
+});
+app.post('/api/admin/location-change-requests/:id/reject', auth, role('admin'), (req, res) => {
+  const row = db.prepare(`SELECT r.*, u.company_id AS to_company_id
+    FROM location_change_requests r
+    JOIN users u ON u.id = r.employee_id
+    WHERE r.id=?`).get(Number(req.params.id));
+  if (!row) return res.status(404).json({ error: 'Request not found.' });
+  if (row.status !== 'pending') return res.status(400).json({ error: `Request is already ${row.status}.` });
+  if (!adminCanDecide(req, row)) return res.status(403).json({ error: 'You are not the approver for this request.' });
+  const reason = String((req.body || {}).reason || '').slice(0, 500);
+  db.prepare("UPDATE location_change_requests SET status='rejected', decided_at=?, decided_by=?, decision_reason=? WHERE id=?")
+    .run(ts(), req.user.id, reason || null, row.id);
+  const emp = db.prepare('SELECT id, name, emp_id FROM users WHERE id=?').get(row.employee_id);
+  if (emp) notify(emp.id, 'Location change rejected', reason ? `Reason: ${reason}` : 'Your location-change request was rejected. You stay at your current location.');
+  try { require('./v3/core').audit({ company_id: Number(row.to_company_id), actor_id: req.user.id, actor_role: req.user.role, action: 'location-change:reject', category: 'access', entity_type: 'location_change_request', entity_id: String(row.id), result: 'ok' }); } catch (e) {}
+  res.json({ ok: true });
+});
+// Cron-style expiry endpoint. Anyone with the role('admin') header can call it
+// for a single company. In production this would run on a timer; for the
+// test/UI it is also exposed so a tester can deterministically force expiry.
+app.post('/api/admin/location-change-requests/expire', auth, role('admin'), (req, res) => {
+  const now = ts();
+  const isOwner = req.user.emp_id === 'ADMIN';
+  let where = "status='pending' AND expires_at IS NOT NULL AND expires_at < ?";
+  const params = [now];
+  if (!isOwner) {
+    const cid = req.user.company_id != null ? Number(req.user.company_id) : Number(req.user.id);
+    where += ' AND employee_id IN (SELECT id FROM users WHERE company_id=?)';
+    params.push(cid);
+  }
+  const info = db.prepare(`UPDATE location_change_requests SET status='expired', decided_at=?, decision_reason='expired' WHERE ${where}`).run(...params);
+  res.json({ ok: true, expired: info.changes });
+});
+
+// Trips visible to the driver for the ACTIVE duty location only.
+app.get('/api/driver/duty/trips', auth, role('driver'), (req, res) => {
+  const duty = activeDutyOf(req.user.id);
+  if (!duty) return res.json([]);
+  const rows = db.prepare(`SELECT s.id, s.date, s.status, s.direction, s.sequence, v.vehicle_name, v.company_location_id
+    FROM schedules s JOIN vehicles v ON v.id = s.vehicle_id
+    WHERE v.company_location_id = ? AND s.status IN ('scheduled','confirmed','in_progress')
+    ORDER BY s.date DESC, s.sequence`).all(duty.company_location_id);
+  res.json(rows);
+});
+// Duty-location history for the driver (Profile tab) — self only.
+app.get('/api/driver/duty/locations', auth, role('driver'), (req, res) => {
+  const rows = db.prepare(`SELECT d.id, d.company_id, d.company_location_id, d.vendor_id, d.active, d.started_at, d.ended_at,
+      cl.name AS location_name, cs.name AS state_name, cc.name AS city_name
+    FROM driver_duty_sessions d
+    LEFT JOIN company_locations cl ON cl.id = d.company_location_id
+    LEFT JOIN company_states cs ON cs.id = cl.state_id
+    LEFT JOIN company_cities cc ON cc.id = cl.city_id
+    WHERE d.driver_id = ? ORDER BY d.id DESC LIMIT 50`).all(req.user.id);
+  res.json(rows);
+});
+// Driver self summary (Profile tab): identity, vehicle, documents with expiry.
+app.get('/api/driver/me/summary', auth, role('driver'), (req, res) => {
+  const veh = req.user.vehicle_id ? db.prepare('SELECT id, vehicle_name, plate, type, capacity, line, stand, company_location_id FROM vehicles WHERE id=?').get(req.user.vehicle_id) : null;
+  const docs = [];
+  const dd = db.prepare('SELECT doc_type, doc_number, expiry_date, status FROM driver_documents WHERE driver_id=?').all(req.user.id);
+  const vd = veh ? db.prepare('SELECT doc_type, doc_number, expiry_date, status FROM vehicle_documents WHERE vehicle_id=?').all(veh.id) : [];
+  const today = dateOnly();
+  for (const d of dd) docs.push({ scope: 'driver', ...d, expired: !!(d.expiry_date && String(d.expiry_date).slice(0, 10) < today) });
+  for (const d of vd) docs.push({ scope: 'vehicle', ...d, expired: !!(d.expiry_date && String(d.expiry_date).slice(0, 10) < today) });
+  res.json({
+    driver: { id: req.user.id, name: req.user.name, emp_id: req.user.emp_id, phone: req.user.phone, company_id: req.user.company_id ?? null, company_location_id: req.user.company_location_id ?? null },
+    vehicle: veh, documents: docs, active_duty: activeDutyOf(req.user.id)
+  });
+});
+// Driver reports an operational issue -> creates a support ticket scoped to the
+// driver's company/location (breakdown, delay, accident, other).
+const DRIVER_ISSUE_CATEGORIES = { breakdown: 'route-issue', delay: 'schedule-change', accident: 'safety-concern', other: 'general' };
+app.post('/api/driver/report-issue', auth, role('driver'), guard(30, 60 * 1000), (req, res) => {
+  const b = req.body || {};
+  const kind = String(b.kind || 'other').toLowerCase();
+  const category = DRIVER_ISSUE_CATEGORIES[kind] || 'general';
+  const desc = String(b.description || '').trim().slice(0, 1000);
+  if (!desc) return res.status(400).json({ error: 'Describe the issue.' });
+  const subject = `Driver ${req.user.name} (${req.user.emp_id}) reported: ${kind}`;
+  const escLevel = 'admin';
+  const info = db.prepare('INSERT INTO tickets (created_by, escalation_level, status, priority, category, subject, description) VALUES (?,?,?,?,?,?,?)')
+    .run(req.user.id, escLevel, 'open', kind === 'accident' ? 'high' : 'medium', category, subject, `${desc}${req.user.company_location_id ? ` [loc ${req.user.company_location_id}]` : ''}`);
+  const tid = Number(info.lastInsertRowid);
+  try { db.prepare('INSERT INTO ticket_history (ticket_id, user_id, user_name, action, old_value, new_value) VALUES (?,?,?,?,?,?)').run(tid, req.user.id, req.user.name, 'created', null, `driver issue: ${kind}`); } catch (e) {}
+  const admins = db.prepare("SELECT id FROM users WHERE role='admin'").all();
+  for (const a of admins) notify(a.id, 'Driver Issue Reported', `#${tid} ${subject}`);
+  res.json({ ok: true, ticket_id: tid, kind, category });
 });
 
 const tripRouteFor = (sched, stops) => (Array.isArray(stops) ? stops : []).map((st, i) => ({
@@ -6305,7 +7712,7 @@ app.get('/api/schedules/allotments/driver', auth, role('driver'), (req, res) => 
         vehicleNumber: vehicle?.vehicle_name || vehicle?.plate || '',
         vehicleType: vehicle?.type || 'Cab',
         seatCapacity: vehicle?.capacity || 4,
-        line: vehicle?.line || 1
+        line: vehicle?.line ?? null
       },
       driver: null,
       vendorName: '',
@@ -6879,7 +8286,7 @@ app.post('/api/parent/child/:id/drop-confirm', auth, schoolParent, (req, res) =>
   }
   db.prepare('UPDATE schedules SET drop_confirmed=1, drop_confirmed_by=? WHERE id=?').run(req.user.id, sched.id);
   const student = db.prepare('SELECT name FROM users WHERE id=?').get(req.user.id);
-  emitToAdmins('school:dropConfirmed', { schedule_id: sched.id, student_id: req.params.id, vehicle_id: sched.vehicle_id });
+  emitToSchoolAdmins('school:dropConfirmed', { schedule_id: sched.id, student_id: req.params.id, vehicle_id: sched.vehicle_id });
   const driver = sched.vehicle_id ? db.prepare("SELECT id FROM users WHERE role='driver' AND vehicle_id=?").get(sched.vehicle_id) : null;
   if (driver) notify(driver.id, 'Drop Confirmed ✔', `Parent confirmed this student reached home safely.`);
   res.json({ ok: true, message: 'Drop confirmed. Have a great day!' });
@@ -6904,7 +8311,7 @@ app.post('/api/parent/sos', auth, schoolParent, (req, res) => {
     if (a.phone) sendSms({ to: a.phone, body: `[GetinRoute] ${body}` }).catch(() => {});
   }
   notify(adminId(), title, body);
-  emitToAdmins('sos:new', { id: Number(info.lastInsertRowid) });
+  emitToSchoolAdmins('sos:new', { id: Number(info.lastInsertRowid) });
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 
@@ -6962,7 +8369,7 @@ app.post('/api/school/routes', auth, schoolAdmin, (req, res) => {
       start_lat == null ? (stops[0].lat ?? null) : Number(start_lat), start_lng == null ? (stops[0].lng ?? null) : Number(start_lng),
       end_lat == null ? (stops[stops.length - 1].lat ?? null) : Number(end_lat), end_lng == null ? (stops[stops.length - 1].lng ?? null) : Number(end_lng),
       'school', sid, sc);
-  emitToAdmins('school:routesChanged', { school_id: sid });
+  emitToSchoolAdmins('school:routesChanged', { school_id: sid });
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 app.put('/api/school/routes/:id', auth, schoolAdmin, (req, res) => {
@@ -7248,12 +8655,12 @@ app.post('/api/driver/student/:scheduleId/:action', auth, role('driver'), (req, 
       notify(firstParent.id, 'Dropped 🔵 Confirm needed', `${student?.name || 'Student'} was dropped. Confirm with OTP ${otp} in the Parent app.`);
       if (firstParent.phone) sendSms({ to: firstParent.phone, body: `[GetinRoute] ${student?.name || 'Student'} dropped safely. Confirm OTP: ${otp}` }).catch(() => {});
     }
-    emitToAdmins('school:dropAwaitingOtp', { schedule_id: s.id });
+    emitToSchoolAdmins('school:dropAwaitingOtp', { schedule_id: s.id });
     return res.json({ ok: true, message: 'Dropped. Awaiting parent OTP confirmation.', otp_required: true });
   }
   db.prepare('UPDATE schedules SET dropped_at=?, drop_confirmed=1, drop_otp=NULL WHERE id=?').run(ts(), s.id);
   notifyParents('Dropped 🔵', `${student?.name || 'Student'} was dropped safely.`);
-  emitToAdmins('school:dropConfirmed', { schedule_id: s.id, student_id: s.employee_id, vehicle_id: veh.id });
+  emitToSchoolAdmins('school:dropConfirmed', { schedule_id: s.id, student_id: s.employee_id, vehicle_id: veh.id });
   res.json({ ok: true, message: 'Marked dropped' });
 });
 
@@ -7710,7 +9117,7 @@ function backupNow() {
     console.log(`[backup] snapshot -> ${dest}`);
   } catch (e) { console.error('[backup] failed:', e.message); }
 }
-const backupTimer = setInterval(backupNow, 24 * 60 * 60 * 1000);
+const backupTimer = setInterval(() => { backupNow(); fullBackupNow('daily'); }, 24 * 60 * 60 * 1000);
 if (backupTimer.unref) backupTimer.unref();
 
 /* ---------------- GRACEFUL SHUTDOWN ---------------- */
@@ -7723,6 +9130,8 @@ function shutdown(signal) {
   shuttingDown = true;
   console.log(`\n[shutdown] ${signal} received — stopping gracefully...`);
   setTimeout(() => { console.log('[shutdown] forced exit'); process.exit(0); }, 8000).unref?.();
+  try { recordServerStop(); } catch (e) { console.error('[shutdown] monitor stop failed:', e.message); }
+  try { fullBackupNow('shutdown'); } catch (e) { console.error('[shutdown] full backup failed:', e.message); }
   try { backupNow(); } catch (e) { console.error('[shutdown] backup failed:', e.message); }
   try { db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get(); } catch (e) { console.error('[shutdown] checkpoint failed:', e.message); }
   server.close(() => {
@@ -7745,9 +9154,15 @@ initMailer().then(() => {
     console.log('[sim] GPS simulation disabled. Set SIMULATE_GPS=1 for demo movement.');
     console.log('[sim] Real GPS from the Driver app works normally either way.');
   }
+  recordServerStart();
+  metrics.startAlerts();
   backupNow();
   server.listen(PORT, HOST, () => {
     console.log(`\n🚗 GetinRoute API + WebSocket running → http://${HOST}:${PORT}`);
     console.log(`   Reset-password links will open the frontend at ${FRONTEND_URL}\n`);
+    // Full logical backup runs shortly AFTER the healthcheck can pass, so a large
+    // dump can never delay or block startup.
+    const bootBackup = setTimeout(() => { try { fullBackupNow('boot'); } catch (e) { console.error('[backup] boot failed:', e.message); } }, 8000);
+    if (bootBackup.unref) bootBackup.unref();
   });
 });

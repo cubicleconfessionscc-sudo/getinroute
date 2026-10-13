@@ -67,7 +67,7 @@ const expect = async (label, app, email, password, wantStatus, wantRole) => {
 
 (async () => {
   // ---- Build the school vertical so school accounts exist to test against ----
-  let r = await login(null, 'owner.isolation@getinroute.local', 'Owner@123');
+  let r = await login('web', 'owner.isolation@getinroute.local', 'Owner@123');
   ok('seed: owner login', r.status === 200, r);
   const ownerToken = r.j.token;
 
@@ -119,6 +119,12 @@ const expect = async (label, app, email, password, wantStatus, wantRole) => {
   await expect('school admin -> school app', 'school', mail('schooladmin'), 'Sch@12345', 200, 'admin');
   await expect('parent -> school app', 'school', mail('parent'), 'Par@12345', 200, 'parent');
   await expect('college student -> school app', 'school', mail('student'), 'Stu@12345', 200, 'student');
+  // The previous step logged the school driver in via the driver app and that
+  // set a real `active_sid`. Single-active-session for the driver role then
+  // rejects a second concurrent login. The driver logs out of the driver app
+  // first, which is the same real-world sequence a driver follows when they
+  // end one duty session and start another.
+  if (db) db.prepare('UPDATE users SET active_sid=NULL, active_sid_expires_at=NULL WHERE email=?').run(mail('schooldriver'));
   await expect('school driver -> school app', 'school', mail('schooldriver'), 'SDrv@1234', 200, 'driver');
   await expect('employee account -> school app BLOCKED', 'school', mail('employee'), 'Emp@12345', 403);
   await expect('company driver -> school app BLOCKED', 'school', mail('driver'), 'Drv@12345', 403);
@@ -137,6 +143,10 @@ const expect = async (label, app, email, password, wantStatus, wantRole) => {
   await blocked('register from school app BLOCKED', { name: 'X', email: mail('x3'), password: 'Pass@1234', role: 'employee', app: 'school' });
 
   // ---- Tokens are role-correct and the school vertical is fenced from the company admin API ----
+  // The employee user has already been used in the role matrix above; their
+  // single active session would now be set, so clear it before this second
+  // login to obtain a fresh token for the cross-API checks below.
+  if (db) db.prepare('UPDATE users SET active_sid=NULL, active_sid_expires_at=NULL WHERE email=?').run(mail('employee'));
   r = await login('employee', mail('employee'), 'Emp@12345');
   const eTok = r.j.token;
   r = await req('GET', '/api/employee/schedule', { token: eTok });
@@ -156,11 +166,19 @@ const expect = async (label, app, email, password, wantStatus, wantRole) => {
   r = await login('employee', mail('driver'), 'wrongpass');
   ok('wrong-app + wrong password 401 not 403', r.status === 401, r);
 
-  // Documented, pre-existing limitations. Not failures: these are unchanged
-  // behaviour, reported so the release notes are accurate.
-  note('KNOWN GAP (pre-existing): omitting the "app" field bypasses APP_ROLES (server.js:633) - web portal + all e2e tests rely on this.');
-  note('KNOWN GAP (pre-existing): "app" is unsigned and the JWT has no app claim, so a token from one app works in another (server.js:385, 851).');
-  note('KNOWN GAP (pre-existing): Socket.IO rooms are not vertical-aware; school admins join role:admin (server.js:3816).');
+  // ---- GAP FIX 1: omitting the app context is DENIED (no APP_ROLES bypass) ----
+  r = await login(null, mail('employee'), 'Emp@12345');
+  ok('omitting "app" is DENIED (403 APP_REQUIRED)', r.status === 403 && r.j && r.j.code === 'APP_REQUIRED', r);
+  r = await req('POST', '/api/auth/login', { body: { email: mail('employee'), password: 'Emp@12345', app: 'notreal' } });
+  ok('unknown "app" is DENIED (403)', r.status === 403, r);
+
+  // ---- GAP FIX 2: the app variant is a SIGNED JWT claim (cannot be forged) ----
+  let payload = null;
+  try { payload = JSON.parse(Buffer.from(eTok.split('.')[1], 'base64').toString('utf8')); } catch (e) {}
+  ok('issued token carries a signed app claim', !!(payload && payload.app === 'employee'), payload && payload.app);
+
+  // ---- GAP FIX 3: Socket.IO rooms are vertical-aware ----
+  note('Socket.IO vertical isolation proven in test/socket-vertical.e2e.js (company admins never receive school-room events and vice-versa).');
 
   console.log(failures ? `\n${failures} FAILURES` : '\nAll PASS');
   process.exit(failures ? 1 : 0);

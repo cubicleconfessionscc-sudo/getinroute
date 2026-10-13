@@ -63,6 +63,8 @@ if (USE_PG) {
   try { pgdb.exec("ALTER TABLE trip_events ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS heading DOUBLE PRECISION;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE location_history ADD COLUMN IF NOT EXISTS accuracy DOUBLE PRECISION;"); } catch (e) {}
   // Authoritative no-show log soft-delete columns (admin delete/clear is archive-only).
   try { pgdb.exec("ALTER TABLE employee_no_show_log ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE employee_no_show_log ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
@@ -75,6 +77,12 @@ if (USE_PG) {
   // Operational location a user belongs to (nullable; additive).
   try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE routes ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE nodal_points ADD COLUMN IF NOT EXISTS place_id TEXT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE nodal_points ADD COLUMN IF NOT EXISTS company_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE nodal_points ADD COLUMN IF NOT EXISTS company_location_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("ALTER TABLE nodal_points ADD COLUMN IF NOT EXISTS vendor_id BIGINT;"); } catch (e) {}
+  try { pgdb.exec("CREATE INDEX IF NOT EXISTS idx_nodal_points_tenant_location ON nodal_points(company_id, company_location_id, vendor_id);"); } catch (e) {}
   const existing = pgdb.prepare('SELECT data FROM settings WHERE id = 1').get();
   if (!existing) {
     pgdb.prepare('INSERT INTO settings (id, data) VALUES (1, ?)').run(JSON.stringify(FRESH_SETTINGS));
@@ -274,6 +282,11 @@ CREATE TABLE IF NOT EXISTS sms_log (
 CREATE INDEX IF NOT EXISTS idx_schedules_emp ON schedules(employee_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_vehicle ON schedules(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_checkins_sched ON checkins(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(date);
+CREATE INDEX IF NOT EXISTS idx_schedules_vehicle_date ON schedules(vehicle_id, date);
+CREATE INDEX IF NOT EXISTS idx_schedules_emp_date ON schedules(employee_id, date);
+CREATE INDEX IF NOT EXISTS idx_checkins_sched_type ON checkins(schedule_id, type);
+CREATE INDEX IF NOT EXISTS idx_speed_events_vehicle_time ON speed_events(vehicle_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_veh_line_trip ON vehicles(line, trip);
 CREATE INDEX IF NOT EXISTS idx_chat_sender ON chat_messages(sender_id, receiver_id);
 CREATE INDEX IF NOT EXISTS idx_chat_receiver ON chat_messages(receiver_id, sender_id);
@@ -307,6 +320,77 @@ try { db.exec(`ALTER TABLE users ADD COLUMN pending_lng REAL;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN vendor_id INTEGER;`); } catch (e) {}
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN stand TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE vehicles ADD COLUMN vendor_id INTEGER;`); } catch (e) {}
+
+// Platform monitoring + per-company feature overrides (additive; safe on live DBs).
+db.exec(`
+CREATE TABLE IF NOT EXISTS server_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  at TEXT NOT NULL,
+  downtime_seconds INTEGER,
+  note TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS server_status (
+  id INTEGER PRIMARY KEY,
+  last_seen_at TEXT,
+  started_at TEXT
+);
+CREATE TABLE IF NOT EXISTS company_feature_flags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL,
+  flag_key TEXT NOT NULL,
+  enabled INTEGER DEFAULT 0,
+  updated_by INTEGER,
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_company_feature_flags ON company_feature_flags(company_id, flag_key);
+CREATE TABLE IF NOT EXISTS driver_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER,
+  company_location_id INTEGER,
+  vendor_id INTEGER,
+  code TEXT NOT NULL UNIQUE,
+  status TEXT DEFAULT 'active',
+  max_uses INTEGER DEFAULT 1,
+  used_count INTEGER DEFAULT 0,
+  expires_at TEXT,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_driver_invites_code ON driver_invites(code);
+CREATE INDEX IF NOT EXISTS idx_driver_invites_scope ON driver_invites(company_id, company_location_id, vendor_id);
+CREATE TABLE IF NOT EXISTS driver_duty_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  driver_id INTEGER NOT NULL,
+  invite_id INTEGER,
+  company_id INTEGER,
+  company_location_id INTEGER,
+  vendor_id INTEGER,
+  active INTEGER DEFAULT 1,
+  started_at TEXT DEFAULT (datetime('now','localtime')),
+  ended_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_duty_driver_active ON driver_duty_sessions(driver_id, active);
+CREATE INDEX IF NOT EXISTS idx_duty_location ON driver_duty_sessions(company_location_id, active);
+-- Append-only history for each confirmed Driver End-Trip assignment.
+CREATE TABLE IF NOT EXISTS driver_assignment_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  driver_id INTEGER NOT NULL,
+  vehicle_id INTEGER,
+  run_id TEXT,
+  trip_name TEXT NOT NULL,
+  line TEXT NOT NULL,
+  stand TEXT NOT NULL,
+  company_id INTEGER,
+  vendor_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_driver_assignment_events_driver_time ON driver_assignment_events(driver_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_driver_assignment_events_company ON driver_assignment_events(company_id, vendor_id, id DESC);
+`);
+try { db.exec(`ALTER TABLE vehicles ADD COLUMN company_location_id INTEGER;`); } catch (e) {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_vehicles_company_location ON vehicles(company_location_id);`); } catch (e) {}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS vendors (
@@ -350,6 +434,10 @@ CREATE TABLE IF NOT EXISTS nodal_points (
   lng REAL,
   type TEXT DEFAULT 'office',
   radius_meters INTEGER DEFAULT 1000,
+  place_id TEXT,
+  company_id INTEGER,
+  company_location_id INTEGER,
+  vendor_id INTEGER,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
@@ -674,6 +762,11 @@ try { db.exec(`CREATE INDEX IF NOT EXISTS idx_users_company_location ON users(co
 // Operational location a route belongs to (set from the creating admin's location).
 try { db.exec(`ALTER TABLE routes ADD COLUMN company_location_id INTEGER;`); } catch (e) {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_routes_company_location ON routes(company_location_id);`); } catch (e) {}
+try { db.exec(`ALTER TABLE nodal_points ADD COLUMN place_id TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE nodal_points ADD COLUMN company_id INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE nodal_points ADD COLUMN company_location_id INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE nodal_points ADD COLUMN vendor_id INTEGER;`); } catch (e) {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_nodal_points_tenant_location ON nodal_points(company_id, company_location_id, vendor_id);`); } catch (e) {}
 // Employee home pickup radius (metres) set by admin on address approval; governs
 // whether pickup defaults to the home address vs a shared pickup point.
 try { db.exec(`ALTER TABLE users ADD COLUMN pickup_radius REAL;`); } catch (e) {}
@@ -700,6 +793,8 @@ try { db.exec(`ALTER TABLE trip_events ADD COLUMN archived_at TEXT;`); } catch (
 try { db.exec(`ALTER TABLE trip_events ADD COLUMN archived_by INTEGER;`); } catch (e) {}
 try { db.exec(`ALTER TABLE location_history ADD COLUMN archived_at TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE location_history ADD COLUMN archived_by INTEGER;`); } catch (e) {}
+try { db.exec(`ALTER TABLE location_history ADD COLUMN heading REAL;`); } catch (e) {}
+try { db.exec(`ALTER TABLE location_history ADD COLUMN accuracy REAL;`); } catch (e) {}
 
 // Realtime GPS usage + health monitoring (adaptive ping, stale detection, and
 // usage counter vs the free-tier message budget). All added additively.
@@ -878,4 +973,97 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_trip_events_schedule ON trip_events(schedule_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_trip_events_kind ON trip_events(kind, created_at);
+`);
+
+/* -------------------------------------------------------------------
+ * Multi-location address book (Part 2 / Part 3)
+ *
+ * Each address belongs to exactly one company_location (one State > City >
+ * Location). A location may own many addresses (e.g. "Bangalore Location 1"
+ * has 3 office addresses). The address carries a human label, the full
+ * address text, and the lat/lng returned by the Google Maps picker so the
+ * Employee app can re-render it on the map. We never use names (city /
+ * location / label) as authorization keys; only company_id and
+ * company_location_id are checked server-side.
+ * ------------------------------------------------------------------- */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS company_addresses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    company_location_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    address TEXT,
+    lat REAL,
+    lng REAL,
+    place_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_company_addresses_loc ON company_addresses(company_location_id, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_company_addresses_label
+    ON company_addresses(company_location_id, label);
+`);
+
+/* -------------------------------------------------------------------
+ * Location codes (Part 3)
+ *
+ * Each company_location may have ONE active code at a time. Regenerating
+ * the code marks the old one as 'revoked' and issues a fresh, cryptographically
+ * random value. The code is what a location-scoped admin types during login
+ * to bind their session to that specific location. The code itself is the
+ * credential; the backend never trusts the chosen location_id on login
+ * without first verifying the code.
+ *
+ * Codes are not role-bound on their own: any admin who can prove
+ * credentials + matching code becomes the location-scoped admin for that
+ * location. Tampered requests (e.g. an admin of Location 1 trying to act on
+ * Location 2) are rejected by the locationScope() helper at request time.
+ * ------------------------------------------------------------------- */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS location_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    company_location_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+    issued_at TEXT DEFAULT (datetime('now','localtime')),
+    issued_by INTEGER,
+    revoked_at TEXT,
+    revoked_by INTEGER,
+    notes TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_location_codes_active
+    ON location_codes(company_location_id) WHERE status = 'active';
+  CREATE INDEX IF NOT EXISTS idx_location_codes_company ON location_codes(company_id);
+  CREATE INDEX IF NOT EXISTS idx_location_codes_lookup ON location_codes(code);
+`);
+
+/* -------------------------------------------------------------------
+ * Location-change requests (Part 4.3)
+ *
+ * An employee can be at most one row in 'pending' state at a time. Approving
+ * the request is the ONLY path that mutates users.company_location_id; the
+ * /api/auth/profile path intentionally ignores any client-supplied
+ * company_location_id and will be hardened in the next commit to reject it
+ * outright. History (bookings / trips / check-ins) is never rewritten: the
+ * destination admin sees the employee from the moment of approval, the
+ * origin admin keeps full history forever.
+ * ------------------------------------------------------------------- */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS location_change_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    from_location_id INTEGER,
+    to_location_id INTEGER NOT NULL,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','cancelled','expired')),
+    requested_at TEXT DEFAULT (datetime('now','localtime')),
+    decided_at TEXT,
+    decided_by INTEGER,
+    decision_reason TEXT,
+    expires_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_lcr_employee ON location_change_requests(employee_id, status);
+  CREATE INDEX IF NOT EXISTS idx_lcr_dest ON location_change_requests(to_location_id, status);
 `);
