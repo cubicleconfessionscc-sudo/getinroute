@@ -31,6 +31,7 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('he
 // broken by a silent session takeover (which returned 401 SESSION_REPLACED).
 // Set EMPLOYEE_SINGLE_SESSION=1 to enforce one device per employee.
 const EMPLOYEE_SINGLE_SESSION = String(process.env.EMPLOYEE_SINGLE_SESSION || '0') === '1';
+if (process.env.AUTO_APPROVE_COMPANIES === '1') console.log('[boot] AUTO_APPROVE_COMPANIES=1');
 const MAX_EMPLOYEES = 10000;
 const MAX_VEHICLES = 750;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -1379,7 +1380,19 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
       }
     }
     db.exec('COMMIT');
-    result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated };
+      result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated };
+      // Test-only: AUTO_APPROVE_COMPANIES=1 marks the new admin user as
+      // approved immediately. The web Playwright suite uses this so it can
+      // log in as the just-created company admin without first going through
+      // the owner approval step. Never set in production.
+      if (process.env.AUTO_APPROVE_COMPANIES === '1') {
+        try { db.prepare("UPDATE users SET approved=1 WHERE id=?").run(userId); } catch (e) {}
+        // Echo the password and email back so the test harness can log in
+        // without round-tripping through the owner approval flow.
+        result.testEmail = adminEmail;
+        result.testPassword = adminPassword;
+        console.log('[onboard:test] AUTO_APPROVE active, userId=' + userId + ' email=' + adminEmail);
+      }
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch (e2) {}
     if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate state, city or location name in the registration form.' });
@@ -1396,7 +1409,9 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
     inviteCode,
     statesCreated: result.statesCreated,
     locationsCreated: result.locationsCreated,
-    addressesCreated: result.addressesCreated
+    addressesCreated: result.addressesCreated,
+    // Test-only fields (only present when AUTO_APPROVE_COMPANIES=1).
+    ...(result.testEmail ? { testEmail: result.testEmail, testPassword: result.testPassword } : {})
   });
 }));
 
