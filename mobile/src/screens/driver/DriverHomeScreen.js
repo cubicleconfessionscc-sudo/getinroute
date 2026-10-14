@@ -16,7 +16,7 @@ import { notifyTripAssigned, notifyChatMessage } from "../../services/notificati
 import { scheduleAlarmBefore } from "../../services/alarms";
 import { colors, spacing, radius } from "../../theme";
 import client from "../../api/client";
-import { getDuty, redeemInvite, endDuty } from "../../api/duty";
+import { getDuty, redeemInvite, endDuty } from "../../api/driver";
 
 function pad(n) {
   return String(n).padStart(2, "0");
