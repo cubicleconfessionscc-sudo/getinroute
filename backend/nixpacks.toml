@@ -1,0 +1,5 @@
+# Nixpacks config for the backend service. Pins the provider to nodejs
+# and explicitly tells Nixpacks where the app lives. Without this, Railpack
+# auto-detection was picking up the Caddyfile at the repo root.
+[providers]
+node = "22"
