@@ -1,0 +1,20 @@
+# GetInRoute production Caddyfile
+# - Fronts the Node backend on port 3000
+# - HTTP -> HTTPS redirect on the bare domain
+# - Serves the new admin SPA at /admin
+# - All other traffic proxied to the backend
+
+www.getinroute.in, getinroute.in {
+    encode gzip zstd
+    reverse_proxy backend:3000 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "no-referrer"
+    }
+}
