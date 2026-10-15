@@ -14,7 +14,7 @@ export const RELEASE_VERSION = appsConfig.releaseVersion;
 export const ANDROID_MIN = appsConfig.androidMinVersion;
 export const DISTRIBUTION_EMAIL = appsConfig.distributionEmail;
 
-export const APP_KEYS = ['employee', 'driver', 'school', 'parent'];
+export const APP_KEYS = ['employee', 'driver', 'school', 'admin', 'parent'];
 
 /** Raw config, in a stable order. */
 export const APP_CONFIG = APP_KEYS

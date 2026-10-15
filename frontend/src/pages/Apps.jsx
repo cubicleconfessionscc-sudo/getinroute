@@ -1,13 +1,14 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Smartphone, School, Navigation, Users, Download, Apple, Check, QrCode } from 'lucide-react';
+import { Smartphone, School, Navigation, Users, Download, Apple, Check, QrCode, ShieldCheck } from 'lucide-react';
 import { APP_CONFIG, APP_STATUS_LABEL, androidOf, iosOf, RELEASE_VERSION, ANDROID_MIN } from '../config/apps';
 
 const ICONS = {
   employee: Smartphone,
   driver: Navigation,
   parent: Users,
-  school: School
+  school: School,
+  admin: ShieldCheck
 };
 
 export default function Apps() {

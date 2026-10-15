@@ -112,6 +112,34 @@
       "showOnSite": true,
       "pwaPath": null
     },
+    "admin": {
+      "name": "GetInRoute Admin",
+      "shortName": "Admin",
+      "blurb": "Manage routes, vendors, drivers and day-to-day operations.",
+      "features": [
+        "route management",
+        "vendor management",
+        "driver management",
+        "trip oversight",
+        "attendance",
+        "incident review",
+        "notifications",
+        "reports"
+      ],
+      "status": "available",
+      "downloadPage": "/apps/admin",
+      "androidUrl": "/download/GetInRoute-Admin-1.1.7.apk",
+      "androidPackage": "com.getinroute.adminvendor",
+      "playUrl": null,
+      "iosUrl": null,
+      "iosBundleId": "com.getinroute.adminvendor",
+      "version": "1.1.7",
+      "versionCode": 11,
+      "webUrl": "/admin/login",
+      "webLabel": "Sign in on Web",
+      "showOnSite": true,
+      "pwaPath": null
+    },
     "parent": {
       "name": "GetInRoute Parent",
       "shortName": "Parent",
