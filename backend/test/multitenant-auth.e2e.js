@@ -44,7 +44,22 @@ async function raw(method, p, { token, body } = {}) {
 }
 const post = (p, body, token) => raw('POST', p, { body, token });
 const get = (p, token) => raw('GET', p, { token });
-const ldap = async (identifier, password) => post('/api/auth/login', { identifier, password });
+// Employees/drivers now have a single active session. This helper releases any
+// prior session for the same identifier first, so repeated logins stay valid.
+const _sessions = {};
+const ldap = async (identifier, password) => {
+  const prev = _sessions[identifier];
+  if (prev) { try { await post('/api/auth/logout', {}, prev); } catch (e) {} }
+  let r = await post('/api/auth/login', { app: 'web', identifier, password });
+  // The same account may be addressed by email OR emp_id; release any known
+  // employee/driver session (single-session) and retry once on 409.
+  if (r && r.status === 409) {
+    for (const k of Object.keys(_sessions)) { try { await post('/api/auth/logout', {}, _sessions[k]); } catch (e) {} }
+    r = await post('/api/auth/login', { app: 'web', identifier, password });
+  }
+  if (r && r.status === 200 && r.json && r.json.token) _sessions[identifier] = r.json.token;
+  return r;
+};
 
 async function main() {
   process.env.DB_PATH = DB_FILE;
@@ -115,9 +130,9 @@ async function main() {
   const tokA = admA.json?.token, tokB = admB.json?.token;
 
   // ---- 2. employees register with company-domain emails ----
-  const regA = await post('/api/auth/register', { role: 'employee', emp_id: 'SAG-1001', email: 'anita.rai@sagilityhealth.com', password: 'EmpPass#123', name: 'Anita Rai', department: 'Engineering', designation: 'Software Engineer' });
+  const regA = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'SAG-1001', email: 'anita.rai@sagilityhealth.com', password: 'EmpPass#123', name: 'Anita Rai', department: 'Engineering', designation: 'Software Engineer' });
   check('employee A registers under Sagility domain', regA.status === 200, regA);
-  const regB = await post('/api/auth/register', { role: 'employee', emp_id: 'ACME-1001', email: 'rahul.sharma@acme.com', password: 'EmpPass#456', name: 'Rahul Sharma', department: 'Sales' });
+  const regB = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'ACME-1001', email: 'rahul.sharma@acme.com', password: 'EmpPass#456', name: 'Rahul Sharma', department: 'Sales' });
   check('employee B registers under Acme domain', regB.status === 200, regB);
   // capture employee ids from the approvals list (there is no id in the register response)
   let listABefore = await get('/api/admin/approvals', ownerTok);
@@ -158,15 +173,15 @@ async function main() {
   check('legacy shadow resolves by its own emp_id after fix', shadowEmpId.status === 200, shadowEmpId);
 
   // ---- 7. multi-tenant identifier constraints (documented behavior) ----
-  const empIdColl = await post('/api/auth/register', { role: 'employee', emp_id: 'SAG-1001', email: 'other.person@acme.com', password: 'EmpPass#789', name: 'Other Person' });
+  const empIdColl = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'SAG-1001', email: 'other.person@acme.com', password: 'EmpPass#789', name: 'Other Person' });
   check('cross-company duplicate emp_id is blocked (global uniqueness)', empIdColl.status === 400, empIdColl);
-  const emailColl = await post('/api/auth/register', { role: 'employee', emp_id: 'ACME-1', email: 'anita.rai@sagilityhealth.com', password: 'EmpPass#789', name: 'Impostor' });
+  const emailColl = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'ACME-1', email: 'anita.rai@sagilityhealth.com', password: 'EmpPass#789', name: 'Impostor' });
   check('cross-company duplicate email is blocked (global uniqueness)', emailColl.status === 400, emailColl);
 
   // ---- 8. invite-code company binding (employees attach to a company) ----
-  const regBoundA = await post('/api/auth/register', { role: 'employee', emp_id: 'SAG-2002', email: 'vaibhav.t@acme.com', password: 'EmpPass#901', name: 'Vaibhav T', inviteCode: inviteA });
+  const regBoundA = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'SAG-2002', email: 'vaibhav.t@acme.com', password: 'EmpPass#901', name: 'Vaibhav T', inviteCode: inviteA });
   check('employee can attach to company A via its invite code', regBoundA.status === 200, regBoundA);
-  const regBadInvite = await post('/api/auth/register', { role: 'employee', emp_id: 'SAG-2003', email: 'no.invite@acme.com', password: 'EmpPass#901', name: 'N I', inviteCode: 'NOPE-INVALID' });
+  const regBadInvite = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'SAG-2003', email: 'no.invite@acme.com', password: 'EmpPass#901', name: 'N I', inviteCode: 'NOPE-INVALID' });
   check('bogus invite code is rejected', regBadInvite.status === 400, regBadInvite);
 
   let listA2 = await get('/api/admin/approvals', tokA);

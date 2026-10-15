@@ -235,7 +235,7 @@ export default function MapLibreMap({
     <div>
       {status === 'loading' && (
         <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', borderRadius: 12, border: '1.5px solid var(--line)' }}>
-          Loading map\u2026
+          Loading map…
         </div>
       )}
       {status === 'error' && <MapError detail={errMsg} onRetry={() => { mapRef.current = null; initMap(); }} />}

@@ -1,0 +1,48 @@
+★ eas-cli@23.2.0 is now available.
+To upgrade, run:
+npm install -g eas-cli
+Proceeding with outdated version.
+
+Resolved "preview" environment for the build. Learn more: https://docs.expo.dev/eas/environment-variables/#setting-the-environment-for-your-builds
+No environment variables with visibility "Plain text" and "Sensitive" found for the "preview" environment on EAS.
+
+
+
+√ Using remote Android credentials (Expo server)
+√ Using Keystore from configuration: Build Credentials FIdWZWB1Bi (default)
+
+Compressing project files and uploading to EAS Build. Learn more: https://expo.fyi/eas-build-archive
+- Compressing project files
+- Uploading to EAS Build (0 / 29.0 MB)
+√ Uploaded to EAS 7s
+
+See logs: https://expo.dev/accounts/clementedwins-team/projects/clement/builds/6fd06459-a463-4f96-84d8-bb4072724ef1
+
+Waiting for build to complete. You can press Ctrl+C to exit.
+- Waiting for build to complete.
+√ Build finished
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  █ ▄▄▄▄▄ █▄▄▄ ▄▀▄█▀▄ ▄█ █ ▀█▄█▄█ ▄▄▄▄▄ █
+  █ █   █ █ ▀█▄  ██ ▀ █▀█▀█  ▀▄██ █   █ █
+  █ █▄▄▄█ █▄ ██   ▄▀   ██▄█▄▀ ▄▄█ █▄▄▄█ █
+  █▄▄▄▄▄▄▄█▄▀▄▀ █▄▀ ▀▄█▄█▄█▄█▄█ █▄▄▄▄▄▄▄█
+  █   ▄▀▀▄█ ██▀█▀▀█ ▄  ▀ ▀ ██▄█ ▄█▀▄  ▀▄█
+  █▀▀█▄▀▄▄▀█▄█▄▀▀▄███▄▀ ▄█  ▀██▄ ▀ ▄█  ▀█
+  ███▀█ ▄▄▀█▀▄██▄█ ▄ █ █▀█▄ ▄▄▀▀  ▀   █ █
+  ██▄▀▀█▄▄ ▄ ▄▀▀▄▄▀▀█ ▄▄ ▀▀▀█ ▀▀▀█▀  █▄▀█
+  █▄  ▀▄█▄██▀▄ ▄ █ ▀█▀▄ ▄   ▄█▀██▀▀█▀▄ ▀█
+  █ █▀█▀ ▄▄ █▀█▀█  ▄▀▄█▄█▀▀▄██▄▀▄▀▀ ▀▄ ▄█
+  █ ▀▀▀  ▄▄██▄▀ ▀▀██▄█  ▄█▀▄▀▄▄  █▀▄██ ██
+  █▄█  ▄▀▄█ ▀█ █▀▄▀██▄█▄█    █▀ ▀█▄▄ ▀███
+  ██ ▄▀█▄▄█ █ ██ ▀ ▄  ▀██▄▄▄▄▄ ▀  ▀ █ ▄ █
+  █▀▄▀  ▄▄▄█▀▄▀▄▄ ▀ █   ▀▀█▄█▀█▀▄▄ ██▄▄▀█
+  ███▄██▄▄█▀ ▄ ▄ █▀ █▀▄▄  ▀▀▄▄▄ ▄▄▄ ▄ ▄ █
+  █ ▄▄▄▄▄ ██▄▄▀▄▄▀▄▄▀▀██▄ ▀██▄█ █▄█  █▄▄█
+  █ █   █ █▀██▀ █▄█  █   █▀██ █   ▄ █▀█▄█
+  █ █▄▄▄█ █ ██▄▀ ▄█▄▄▀█ █▄▄ ▀█▀█▀▄  ▄ ███
+  █▄▄▄▄▄▄▄█▄████▄███▄▄▄██▄█▄▄▄███▄▄▄▄▄▄▄█
+
+
+🤖 Open this link on your Android devices (or scan the QR code) to install the app:
+https://expo.dev/accounts/clementedwins-team/projects/clement/builds/6fd06459-a463-4f96-84d8-bb4072724ef1

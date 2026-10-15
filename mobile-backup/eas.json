@@ -1,0 +1,125 @@
+{
+  "cli": {
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "company"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "driver": {
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "driver"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "ios-testflight": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "employee",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-employee": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "employee",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-driver": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "driver",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-school": {
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "school",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-archive-employee": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "employee",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-archive-driver": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "driver",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
+    "ios-archive-school": {
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "APP_VARIANT": "school",
+        "NODE_ENV": "production"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      }
+    },
+    "school": {
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "school"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "channel": "production"
+    }
+  }
+}

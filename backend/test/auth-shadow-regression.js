@@ -26,7 +26,7 @@ let failures = 0;
 const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + '  ' + name + (cond ? '' : '  ' + JSON.stringify(extra))); if (!cond) failures++; };
 
 (async () => {
-  let r = await req('POST', '/api/auth/login', { body: { email: 'owner.regression@getinroute.local', password: 'Owner@123' } });
+  let r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'owner.regression@getinroute.local', password: 'Owner@123' } });
   ok('owner login', r.status === 200, r);
   const ownerToken = r.j.token;
 
@@ -36,21 +36,21 @@ const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + 
   const emp_id = 'REG' + suffix;
 
   // 1) Register -> approve -> login (the happy path that regressed).
-  r = await req('POST', '/api/auth/register', { body: { role: 'employee', emp_id, email: empMail, password: 'Pass#123', name: 'Reg Employee', department: 'Ops', designation: 'Assistant' } });
+  r = await req('POST', '/api/auth/register', { body: { app: 'web', role: 'employee', emp_id, email: empMail, password: 'Pass#123', name: 'Reg Employee', department: 'Ops', designation: 'Assistant' } });
   ok('employee registers', r.status === 200, r);
   const u = db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)').get(empMail);
   ok('user row created', !!u, r);
   r = await req('POST', `/api/admin/approvals/${u.id}`, { token: ownerToken, body: { action: 'accept' } });
   ok('admin approves', r.status === 200, r);
-  r = await req('POST', '/api/auth/login', { body: { email: empMail.toUpperCase(), password: 'Pass#123' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: empMail.toUpperCase(), password: 'Pass#123' } });
   ok('employee login (uppercase email) after approval', r.status === 200, r);
-  r = await req('POST', '/api/auth/login', { body: { identifier: '  ' + emp_id + '  ', password: 'Pass#123' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', identifier: '  ' + emp_id + '  ', password: 'Pass#123' } });
   ok('employee login (padded emo id)', r.status === 200, r);
 
   // 2) Duplicate register with different case must be blocked.
-  r = await req('POST', '/api/auth/register', { body: { role: 'employee', emp_id: emp_id + 'DUP', email: empMail.toUpperCase(), password: 'Other#456', name: 'Dup Person' } });
+  r = await req('POST', '/api/auth/register', { body: { app: 'web', role: 'employee', emp_id: emp_id + 'DUP', email: empMail.toUpperCase(), password: 'Other#456', name: 'Dup Person' } });
   ok('dup-case register blocked', r.status === 400, r);
-  r = await req('POST', '/api/auth/register', { body: { role: 'employee', emp_id: emp_id, email: 'other' + suffix + '@regression.local', password: 'Other#456', name: 'Dup Person' } });
+  r = await req('POST', '/api/auth/register', { body: { app: 'web', role: 'employee', emp_id: emp_id, email: 'other' + suffix + '@regression.local', password: 'Other#456', name: 'Dup Person' } });
   ok('dup-emp_id register blocked', r.status === 400, r);
 
   // 3) Pre-existing shadow (rejected rowid lower than approved rowid) must log in as approved.
@@ -61,11 +61,11 @@ const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + 
     .run(sha + 'R', 'ShadowRej@' + suffix + '.local', bcrypt.hashSync('oldpass', 10));
   db.prepare("INSERT INTO users (role, emp_id, email, name, password_hash, approved, status) VALUES ('employee', ?, ?, 'Real Approved', ?, 1, 'active')")
     .run(sha + 'A', 'shadowrej@' + suffix + '.local', bcrypt.hashSync('newpass', 10));
-  r = await req('POST', '/api/auth/login', { body: { email: 'shadowrej@' + suffix + '.local', password: 'newpass' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'shadowrej@' + suffix + '.local', password: 'newpass' } });
   ok('legacy shadow resolved to approved account', r.status === 200 && r.j.user.name === 'Real Approved', r);
 
   // 4) Wrong password still 401.
-  r = await req('POST', '/api/auth/login', { body: { email: empMail, password: 'wrong' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: empMail, password: 'wrong' } });
   ok('wrong password still 401', r.status === 401, r);
 
   console.log(failures ? `\n${failures} FAILURES` : '\nAll PASS');

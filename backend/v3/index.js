@@ -134,7 +134,20 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   });
 
   /* ---- DOCUMENTS ---- */
-  R.get('/documents/:kind/:ownerId', auth, (req, res) => res.json(ops.listDocuments(req.params.kind, req.params.ownerId)));
+  R.get('/documents/:kind/:ownerId', auth, (req, res) => {
+    const kind = String(req.params.kind);
+    const ownerId = Number(req.params.ownerId);
+    const u = req.user;
+    if (u.role === 'driver') {
+      // A driver may only read their OWN documents or their OWN vehicle's.
+      const isSelf = kind === 'driver' && ownerId === Number(u.id);
+      const isOwnVehicle = kind === 'vehicle' && u.vehicle_id != null && ownerId === Number(u.vehicle_id);
+      if (!isSelf && !isOwnVehicle) return res.status(403).json({ error: 'Access denied' });
+    } else if (u.role === 'employee') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    res.json(ops.listDocuments(kind, ownerId));
+  });
   R.get('/documents/expiring', auth, (req, res) => res.json({ vehicle: ops.expiringDocs('vehicle', Number(req.query.days) || 30), driver: ops.expiringDocs('driver', Number(req.query.days) || 30) }));
   R.post('/documents/:kind/:ownerId', auth, (req, res) => res.json(ops.addDocument(req.params.kind, req.params.ownerId, req.body || {})));
   R.post('/documents/:kind/:docId/verify', auth, (req, res) => res.json(ops.verifyDocument(req.params.kind, req.params.docId, req.user.id, req.body.decision, req.body.reason)));

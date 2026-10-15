@@ -72,10 +72,10 @@ async function main() {
   console.log('Server up on port', PORT);
 
   // ---- login as owner ----
-  const lg = await req('POST', '/api/auth/login', { body: { email: ownerEmail, password: ownerPwd } });
+  const lg = await req('POST', '/api/auth/login', { body: { app: 'web', email: ownerEmail, password: ownerPwd } });
   check('owner logs in', lg.status === 200 && !!lg.json?.token, lg);
   const owner = lg.json?.token;
-  const guest = await req('POST', '/api/auth/login', { body: { email: ownerEmail, password: 'wrong' } });
+  const guest = await req('POST', '/api/auth/login', { body: { app: 'web', email: ownerEmail, password: 'wrong' } });
   check('wrong password rejected', guest.status === 401);
 
   // ---- non-owner is blocked ----

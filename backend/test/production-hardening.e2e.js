@@ -64,18 +64,24 @@ async function main() {
 
   const dt = today();
   const sfx = Date.now();
-  let r = await post('/api/auth/login', { email: 'admin@getinroute.com', password: 'Owner@123' });
+  let r = await post('/api/auth/login', { app: 'web', email: 'admin@getinroute.com', password: 'Owner@123' });
   check('owner login', r.status === 200, r);
   const owner = r.json.token;
+
+  // Admin now creates routes by assigning a managing Vendor, so the test must
+  // create one first (route creation rejects a missing vendor_id).
+  const vres = await post('/api/admin/vendors', { name: 'Harden Vendor ' + sfx }, owner);
+  check('vendor created', vres.status === 200 && !!vres.json.id, vres);
+  const vendorId = vres.json.id;
 
   async function regUser(tag, role) {
     const emp_id = (role === 'driver' ? 'DRV-' : '') + tag + sfx;
     const email = `${emp_id}@co.test`;
-    await post('/api/auth/register', { role, emp_id, email, password: 'Pass#123', name: tag + ' ' + role, department: 'Ops', designation: role === 'driver' ? 'Driver' : 'Analyst' });
+    await post('/api/auth/register', { app: 'web', role, emp_id, email, password: 'Pass#123', name: tag + ' ' + role, department: 'Ops', designation: role === 'driver' ? 'Driver' : 'Analyst' });
     const id = db.prepare('SELECT id FROM users WHERE emp_id=?').get(emp_id).id;
     const ar = await post(`/api/admin/approvals/${id}`, { action: 'accept' }, owner);
     if (ar.status !== 200) throw new Error('approve failed for ' + tag);
-    const lr = await post('/api/auth/login', { email, password: 'Pass#123' });
+    const lr = await post('/api/auth/login', { app: 'web', email, password: 'Pass#123' });
     return { id, email, token: lr.json.token };
   }
   const empA = await regUser('A', 'employee');
@@ -85,7 +91,7 @@ async function main() {
 
   // Route + vehicle
   r = await post('/api/admin/routes', {
-    name: 'Harden Line ' + sfx, start_point: 'Terminal', end_point: 'Terminal',
+    name: 'Harden Line ' + sfx, vendor_id: vendorId, start_point: 'Terminal', end_point: 'Terminal',
     stops: [{ sequence: 1, name: 'Stop A', lat: 12.96, lng: 77.58 }, { sequence: 2, name: 'Stop B', lat: 13.0, lng: 77.6 }, { sequence: 3, name: 'Stop C', lat: 13.01, lng: 77.61 }],
     speed_limit: 40
   }, owner);

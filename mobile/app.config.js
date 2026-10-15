@@ -11,7 +11,7 @@ const VARIANT = (process.env.APP_VARIANT || 'company').toLowerCase();
 // both spellings. A typo must never silently fall through to the employee
 // build, because that would publish the wrong app to the App Store under the
 // employee bundle id. Validate before anything is generated.
-const KNOWN_VARIANTS = ['company', 'employee', 'driver', 'school'];
+const KNOWN_VARIANTS = ['company', 'employee', 'driver', 'school', 'adminvendor'];
 if (process.env.EAS_BUILD_PROFILE === 'production' && !KNOWN_VARIANTS.includes(VARIANT)) {
   throw new Error(
     `Unknown APP_VARIANT "${process.env.APP_VARIANT}". Expected one of: ` +
@@ -20,6 +20,7 @@ if (process.env.EAS_BUILD_PROFILE === 'production' && !KNOWN_VARIANTS.includes(V
 }
 const IS_SCHOOL = VARIANT === 'school';
 const IS_DRIVER = VARIANT === 'driver';
+const IS_ADMINVENDOR = VARIANT === 'adminvendor';
 const VERSION = '1.1.7';
 
 // Google Maps is genuinely required on mobile: DriverHomeScreen and
@@ -54,7 +55,9 @@ const identity = IS_SCHOOL
   ? { name: 'GetInRoute School', pkg: 'com.getinroute.school', vc: 3, iosb: 1, bg: '#0F766E' }
   : IS_DRIVER
     ? { name: 'GetInRoute Driver', pkg: 'com.getinroute.driver', vc: 15, iosb: 1, bg: '#F4F6FA' }
-    : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 36, iosb: 1, bg: '#F4F6FA' };
+    : IS_ADMINVENDOR
+      ? { name: 'GetInRoute Admin', pkg: 'com.getinroute.adminvendor', vc: 1, iosb: 1, bg: '#0F172A' }
+      : { name: 'GetInRoute', pkg: 'com.getinroute.employee', vc: 36, iosb: 1, bg: '#F4F6FA' };
 
 // Splash image support is opt-in: it activates only when an approved asset is
 // actually present, so nothing breaks today and no branding is invented. Drop a

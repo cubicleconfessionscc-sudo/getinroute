@@ -43,6 +43,9 @@ export default function VendorLogin() {
         <p style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginTop: 14 }}>
           Vendors cannot self-register. Contact your company admin for access.
         </p>
+        <p style={{ fontSize: 12, textAlign: 'center', marginTop: 8 }}>
+          <a href="/login" style={{ color: '#7c3aed', fontWeight: 600 }}>All sign-in portals</a>
+        </p>
       </form>
     </div>
   );

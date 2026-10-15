@@ -118,7 +118,7 @@ export default function AddressPicker({ value, onChange }) {
         <input
           value={query}
           onChange={(e) => onInputChange(e.target.value)}
-          placeholder="Type an address and pick from dropdown\u2026"
+          placeholder="Type an address and pick from dropdown…"
           style={{ paddingLeft: 32, width: '100%' }}
         />
         {loading && <Loader2 size={15} style={{ position: 'absolute', right: 10, top: 11, color: 'var(--muted)', animation: 'spin 1s linear infinite' }} />}
@@ -130,7 +130,7 @@ export default function AddressPicker({ value, onChange }) {
       {selected && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
           <MapPin size={13} color="#22c55e" />
-          <span>Selected: {selected.address?.slice(0, 80)}{selected.address?.length > 80 ? '\u2026' : ''}{selected.lat != null ? ` (${Number(selected.lat).toFixed(5)}, ${Number(selected.lng).toFixed(5)})` : ''}</span>
+          <span>Selected: {selected.address?.slice(0, 80)}{selected.address?.length > 80 ? '…' : ''}{selected.lat != null ? ` (${Number(selected.lat).toFixed(5)}, ${Number(selected.lng).toFixed(5)})` : ''}</span>
         </div>
       )}
     </div>

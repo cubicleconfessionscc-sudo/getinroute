@@ -9,7 +9,10 @@ import client from "./client";
 // app=employee, so the server rejected driver sign-ups and driver logins with
 // "This app is for employees...". Derive the identifier from the variant.
 const VARIANT = (Constants.expoConfig?.extra?.appVariant || "company").toLowerCase();
-const APP = VARIANT === "driver" ? "driver" : VARIANT === "school" ? "school" : "employee";
+const APP = VARIANT === "driver" ? "driver"
+  : VARIANT === "school" ? "school"
+    : VARIANT === "adminvendor" ? "adminvendor"
+      : "employee";
 
 export function register(payload) {
   return client.post("/auth/register", { ...payload, app: APP }).then((r) => r.data);

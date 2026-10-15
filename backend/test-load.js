@@ -72,7 +72,7 @@ async function main() {
     }
     if (!up) { console.error('Server did not start:\n' + out); process.exit(1); }
 
-    const login = await rawReq('POST', '/api/auth/login', { body: { email: adminEmail, password: adminPwd } });
+    const login = await rawReq('POST', '/api/auth/login', { body: { app: 'web', email: adminEmail, password: adminPwd } });
     if (login.status !== 200 || !login.json?.token) { console.error('Login failed:', login.status, login.json); process.exit(1); }
     const token = login.json.token;
 

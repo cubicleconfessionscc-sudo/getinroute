@@ -116,10 +116,10 @@ export default function MapsDiagPage() {
         Verifies the MapLibre rendering engine, tile provider, backend geo proxy, and geocoding/routing.
       </p>
       <button className="btn btn-primary" onClick={run} disabled={running}>
-        {running ? 'Running tests\u2026' : 'Run tests'}
+        {running ? 'Running tests…' : 'Run tests'}
       </button>
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
-        {rows.length === 0 && <div style={{ padding: 20, fontSize: 13, color: 'var(--muted)' }}>Running tests\u2026</div>}
+        {rows.length === 0 && <div style={{ padding: 20, fontSize: 13, color: 'var(--muted)' }}>Running tests…</div>}
         {rows.map((r, i) => r && <Row key={i} {...r} />)}
       </div>
 

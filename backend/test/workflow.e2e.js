@@ -67,7 +67,7 @@ async function main() {
   console.log('Server up on port', PORT);
 
   // --- owner login ---
-  let r = await post('/api/auth/login', { email: 'admin@getinroute.com', password: 'Owner@123' });
+  let r = await post('/api/auth/login', { app: 'web', email: 'admin@getinroute.com', password: 'Owner@123' });
   check('owner login', r.status === 200, r);
   const owner = r.json.token;
 
@@ -77,14 +77,14 @@ async function main() {
 
   // --- employee registers (unapproved) and gets approved ---
   const suffix = Date.now();
-  r = await post('/api/auth/register', { role: 'employee', emp_id: 'WF' + suffix, email: `wf${suffix}@company.co`, password: 'Pass#123', name: 'Workflow Employee', department: 'Ops', designation: 'Analyst' });
+  r = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: 'WF' + suffix, email: `wf${suffix}@company.co`, password: 'Pass#123', name: 'Workflow Employee', department: 'Ops', designation: 'Analyst' });
   check('employee registers', r.status === 200, r);
   const empId = db.prepare('SELECT id FROM users WHERE emp_id=?').get('WF' + suffix).id;
   r = await post(`/api/admin/approvals/${empId}`, { action: 'accept' }, owner);
   check('employee approved', r.status === 200, r);
 
   // --- Step-1 gate: booking before address approval is blocked ---
-  r = await post('/api/auth/login', { email: `wf${suffix}@company.co`, password: 'Pass#123' });
+  r = await post('/api/auth/login', { app: 'web', email: `wf${suffix}@company.co`, password: 'Pass#123' });
   check('employee login', r.status === 200, r);
   const emp = r.json.token;
   r = await post('/api/schedules', { dates: [today()], direction: 'toOffice', startTime: '09:00', slotLabel: 'Morning' }, emp);

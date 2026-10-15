@@ -78,7 +78,7 @@ async function main() {
   console.log('PG smoke: server up on port', PORT);
 
   // read path (bcrypt compare, named-param login query)
-  let r = await post('/api/auth/login', { email: loginEmail, password: 'Owner@123' });
+  let r = await post('/api/auth/login', { app: 'web', email: loginEmail, password: 'Owner@123' });
   check('owner login (PG)', r.status === 200, r);
   const owner = r.json && r.json.token;
 
@@ -94,7 +94,7 @@ async function main() {
   const suffix = Date.now();
   const empIdLiteral = 'PG' + suffix;
   const email = `pgwf${suffix}@company.co`;
-  r = await post('/api/auth/register', { role: 'employee', emp_id: empIdLiteral, email, password: 'Pass#123', name: 'PG Smoke Emp', department: 'Ops', designation: 'Analyst' });
+  r = await post('/api/auth/register', { app: 'web', role: 'employee', emp_id: empIdLiteral, email, password: 'Pass#123', name: 'PG Smoke Emp', department: 'Ops', designation: 'Analyst' });
   check('employee register', r.status === 200, r);
   r = await get('/api/admin/approvals', owner);
   const pending = (r.json && (r.json.length || r.json.approvals?.length)) || 0;
@@ -103,7 +103,7 @@ async function main() {
   r = await post(`/api/admin/approvals/${empId}`, { action: 'accept' }, owner);
   check('employee approved', r.status === 200, r);
 
-  r = await post('/api/auth/login', { email, password: 'Pass#123' });
+  r = await post('/api/auth/login', { app: 'web', email, password: 'Pass#123' });
   check('employee login after approval', r.status === 200, r);
   const empTok = r.json.token;
   r = await put('/api/location/profile', {

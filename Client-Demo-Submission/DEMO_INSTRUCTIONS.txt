@@ -1,0 +1,81 @@
+================================================================
+ GETINROUTE — CLIENT DEMO INSTRUCTIONS
+================================================================
+
+WEBSITE
+  Production : https://www.getinroute.in
+  Local dev  : http://localhost:5173   (Vite)  -> API http://localhost:4000
+
+  Download buttons on the website:
+    "Download Employee App"  ->  /download/GetInRoute.apk
+    "Download Driver App"    ->  /download/GetInRouteDriver.apk
+
+----------------------------------------------------------------
+ APPS IN THIS PACKAGE  (REBUILT - blank-screen fix applied)
+----------------------------------------------------------------
+  GetInRoute.apk        Employee app   package com.getinroute.employee  v1.0.0 (code 1)
+  GetInRouteDriver.apk  Driver app     package com.getinroute.driver    v1.0.0 (code 1)
+
+  These are FRESHLY BUILT release APKs (arm64-v8a) with:
+    - BLANK-SCREEN FIX #1 (startup): the JS bundle required the expo-asset
+      native module ("Cannot find native module 'ExpoAsset'") which the build
+      had failed to autolink. expo-asset, expo-font and expo-keep-awake are now
+      hoisted and linked.
+    - BLANK-SCREEN FIX #2 (after login / reopen): the employee home was loaded
+      through React.lazy + Suspense around a map-bearing screen, which left the
+      body blank. Screens are now imported directly, and the home screen is a
+      robust, content-first dashboard.
+    - expo-updates DISABLED, New Architecture DISABLED, release-signed.
+  Verified on a real device (Samsung SM-G781B): launches, logs in, and reopens
+  (session restore) to a fully rendered home screen - no blank screen.
+
+  Install: copy the APK to an Android phone (Android 7.0+, arm64) and tap it,
+  or run:  adb install -r GetInRoute.apk
+
+  NOTE: if a previous version is installed, UNINSTALL it first
+  (the signing key differs from the old EAS build).
+
+----------------------------------------------------------------
+ DEMO LOGINS  (verified against the running backend)
+----------------------------------------------------------------
+  EMPLOYEE
+    Employee ID : E1001
+    Password    : Emp@123
+    Name        : Priya Sharma
+
+    Driver app / admin (optional)
+    ADMIN       : ADMIN / Admin@123
+
+  DRIVER
+    Driver ID   : D2001
+    Password    : Drive@123
+    Name        : Ramesh Kumar
+
+  OTP (demo)    : 4827
+
+  NOTE: The accounts "Edwin / EMP001" and "Rajesh Kumar / DRV001" are NOT
+  present in the current database. The verified working demo accounts are
+  E1001 (employee) and D2001 (driver) above. Do not reseed the database.
+
+----------------------------------------------------------------
+ DEMO FLOW
+----------------------------------------------------------------
+  1. Open https://www.getinroute.in — show the public site.
+  2. Show the Employee download button and the Driver download button.
+  3. Install and open the Employee app. Login with E1001 / Emp@123.
+  4. Home shows the employee's trip: vehicle, driver, pickup, trip status.
+  5. Perform Check-in (and Check-out / Safe-drop).
+  6. Install and open the Driver app. Login with D2001 / Drive@123.
+  7. Home shows the assigned trip and passengers.
+  8. Enter OTP 4827 for boarding / check-in.
+  9. Progress the trip and Complete the trip.
+ 10. Logout.
+
+----------------------------------------------------------------
+ NOTES
+----------------------------------------------------------------
+  - Apps connect to https://www.getinroute.in/api (production backend).
+  - Apps are designed to open even if the network / backend / GPS / map
+    is unavailable (no black screen).
+  - Socket.IO live location and GPS location sharing remain enabled.
+================================================================

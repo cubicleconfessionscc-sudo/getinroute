@@ -1,10 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
-import MapPicker from '../../components/MapPicker';
-import AddressPicker from '../../components/AddressPicker';
 import { Plus, Pencil, MapPin, Building2, Clock, Bus, Shield, Bell, MapPinned, X, Lock, Key, Copy, Smartphone, AlertTriangle, MessageCircle, ShieldAlert, HelpCircle, Trash2, Search, Palette } from 'lucide-react';
 import ThemePicker from '../../components/ThemePicker';
 
@@ -13,12 +11,13 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export default function SettingsPage() {
   const toast = useToast();
   const { user } = useAuth();
+  const mapReturnToken = useRef(null);
   const [s, setS] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [npModal, setNpModal] = useState(false);
   const [npEdit, setNpEdit] = useState(null);
-  const [npForm, setNpForm] = useState({ label: '', address: '', lat: 12.9716, lng: 77.5946, type: 'office', radiusMeters: 1000 });
+  const [npForm, setNpForm] = useState({ label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000 });
   const [pwdForm, setPwdForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [inviteDraft, setInviteDraft] = useState('');
   useEffect(() => {
@@ -51,9 +50,62 @@ export default function SettingsPage() {
 
   const load = () => {
     setLoading(true);
-    api.get('/api/admin/settings').then((data) => { setS({ ...DEFAULT_S, ...data }); setLoading(false); }).catch(() => { setS(DEFAULT_S); setLoading(false); });
+    const loadSettings = user?.role === 'vendor'
+      ? api.get('/api/company/me/nodal-points').then((points) => ({ ...DEFAULT_S, company: { ...DEFAULT_S.company, nodalPoints: Array.isArray(points) ? points : [] } }))
+      : api.get('/api/admin/settings');
+    loadSettings.then((data) => { setS({ ...DEFAULT_S, ...data }); setLoading(false); }).catch(() => { setS(DEFAULT_S); setLoading(false); });
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return;
+      const m = event.data;
+      if (!m || m.type !== 'GETINROUTE_MAP_LOCATION' || m.returnToken !== mapReturnToken.current) return;
+      setNpForm((prev) => ({ ...prev, address: m.address, lat: m.lat, lng: m.lng, place_id: m.place_id || '' }));
+      setNpModal(true);
+    };
+    window.addEventListener('message', onMessage);
+    // Same-tab fallback used by embedded/mobile webviews when window.open is blocked.
+    try {
+      const raw = sessionStorage.getItem('nodal-map-result');
+      if (raw) {
+        const result = JSON.parse(raw);
+        const draft = JSON.parse(sessionStorage.getItem('nodal-map-draft') || '{}');
+        if (result && draft.returnToken === result.returnToken) {
+          mapReturnToken.current = result.returnToken;
+          setNpEdit(draft.npEdit || null);
+          setNpForm({ ...draft.npForm, address: result.address, lat: result.lat, lng: result.lng, place_id: result.place_id || '' });
+          setNpModal(true);
+          sessionStorage.removeItem('nodal-map-result');
+          sessionStorage.removeItem('nodal-map-draft');
+        }
+      }
+    } catch (e) {}
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  const openMapPicker = () => {
+    const token = (window.crypto?.randomUUID && window.crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    mapReturnToken.current = token;
+    const q = new URLSearchParams({ returnToken: token, radius: String(npForm.radiusMeters || 1000) });
+    if (npForm.lat != null) q.set('lat', String(npForm.lat));
+    if (npForm.lng != null) q.set('lng', String(npForm.lng));
+    if (npForm.address) q.set('address', npForm.address);
+    if (npForm.place_id) q.set('place_id', npForm.place_id);
+    const url = `/admin/map-picker?${q.toString()}`;
+    // Web opens a separate tab; embedded webviews fall back to same-tab routing.
+    if (window.ReactNativeWebView) {
+      sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: token, npEdit, npForm }));
+      window.location.assign(url);
+      return;
+    }
+    const popup = window.open(url, '_blank');
+    if (!popup) {
+      sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: token, npEdit, npForm }));
+      window.location.assign(url);
+    }
+  };
 
   const copyInviteCode = () => {
     const code = s.account?.inviteCode || user?.invite_code || '';
@@ -90,17 +142,46 @@ export default function SettingsPage() {
   const wo = Array.isArray(s.weeklyOff) ? s.weeklyOff : [];
 
   const saveNodalPoint = async () => {
+    if (npForm.lat == null || npForm.lng == null || !npForm.address) return toast('Select an address on Google Maps first.', 'err');
+    const payload = { ...npForm, company_location_id: npForm.company_location_id ?? user?.company_location_id ?? null };
     try {
       if (npEdit) {
-        await api.put(`/api/company/me/nodal-points/${npEdit}`, npForm);
+        await api.put(`/api/company/me/nodal-points/${npEdit}`, payload);
       } else {
-        await api.post('/api/company/me/nodal-points', npForm);
+        await api.post('/api/company/me/nodal-points', payload);
       }
       toast(npEdit ? 'Nodal point updated' : 'Nodal point added', 'ok');
       setNpModal(false);
       load();
     } catch (e) { toast(e.message, 'err'); }
   };
+
+  // Vendor portal uses this shared Settings component but only owns its scoped
+  // address points (not the company's platform-wide settings).
+  if (user?.role === 'vendor') {
+    const resetPoint = (np = null) => {
+      setNpEdit(np?._id || null);
+      setNpForm(np
+        ? { label: np.label, address: np.address || '', lat: np.lat, lng: np.lng, place_id: np.place_id || '', type: np.type || 'office', radiusMeters: np.radiusMeters || 1000, company_id: np.company_id, company_location_id: np.company_location_id }
+        : { label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000, company_location_id: user.company_location_id ?? null });
+      setNpModal(true);
+    };
+    return (
+      <div className="page settings-page" style={{ maxWidth: 860 }}>
+        <div className="page-head"><div><div className="page-title">Vendor Settings</div><div className="page-sub">Manage address points for your authorized vendor locations.</div></div></div>
+        <Section icon={<MapPinned size={16} />} title={`Company Address (${nodalPoints.length})`} action={<button className="btn btn-sm btn-primary" onClick={() => resetPoint()}><Plus size={14} /> Add Point</button>}>
+          {!nodalPoints.length ? <div style={{ color: 'var(--muted)', padding: 12 }}>No vendor addresses configured.</div> : <div style={{ display: 'grid', gap: 10 }}>
+            {nodalPoints.map((np) => <div key={np._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--line)' }}>
+              <MapPin size={16} color="var(--primary)" /><div style={{ flex: 1, minWidth: 0 }}><b>{np.label}</b><div style={{ fontSize: 12, color: 'var(--muted)' }}>{np.address} · {np.radiusMeters}m</div></div>
+              <button className="btn btn-sm btn-ghost" onClick={() => resetPoint(np)}><Pencil size={14} /></button>
+              <button className="btn btn-sm btn-ghost" onClick={async () => { try { await api.del(`/api/company/me/nodal-points/${np._id}`); load(); } catch (e) { toast(e.message, 'err'); } }}><Trash2 size={14} /></button>
+            </div>)}
+          </div>}
+        </Section>
+        <NodalPointModal open={npModal} onClose={() => setNpModal(false)} npEdit={npEdit} npForm={npForm} setNpForm={setNpForm} onMap={openMapPicker} onSave={saveNodalPoint} />
+      </div>
+    );
+  }
 
   const changeSlot = (key, list) => (i, field, value) => {
     const next = list.map((t, idx) => (idx === i ? { ...t, [field]: value } : t));
@@ -350,7 +431,7 @@ export default function SettingsPage() {
 
       <Section icon={<MapPinned size={16} />} title={`Company Address (${nodalPoints.length})`}
         action={
-          <button className="btn btn-sm btn-primary" onClick={() => { setNpEdit(null); setNpForm({ label: '', address: '', lat: 12.9716, lng: 77.5946, type: 'office', radiusMeters: 1000 }); setNpModal(true); }}>
+          <button className="btn btn-sm btn-primary" onClick={() => { setNpEdit(null); setNpForm({ label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000, company_location_id: user?.company_location_id ?? null }); setNpModal(true); }}>
             <Plus size={14} /> Add Point
           </button>
         }>
@@ -370,7 +451,7 @@ export default function SettingsPage() {
                 </div>
                 <button className="btn btn-sm btn-ghost" onClick={() => {
                   setNpEdit(np._id);
-                  setNpForm({ label: np.label, address: np.address || '', lat: np.lat, lng: np.lng, type: np.type || 'office', radiusMeters: np.radiusMeters || 1000 });
+                  setNpForm({ label: np.label, address: np.address || '', lat: np.lat, lng: np.lng, place_id: np.place_id || '', type: np.type || 'office', radiusMeters: np.radiusMeters || 1000, company_id: np.company_id, company_location_id: np.company_location_id });
                   setNpModal(true);
                 }}><Pencil size={14} /></button>
               </div>
@@ -446,46 +527,42 @@ export default function SettingsPage() {
         </Section>
       )}
 
-      <Modal open={npModal} onClose={() => setNpModal(false)} title={npEdit ? 'Edit Company Address' : 'Add Company Address'} wide>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Label">
-              <input value={npForm.label} onChange={(e) => setNpForm({ ...npForm, label: e.target.value })} placeholder="Head Office / Main Gate" />
-            </Field>
-            <Field label="Radius (meters)">
-              <input type="number" min={100} max={10000} value={npForm.radiusMeters} onChange={(e) => setNpForm({ ...npForm, radiusMeters: Number(e.target.value) })} />
-            </Field>
-          </div>
-          <Field label="Search address (pick from dropdown)">
-            <AddressPicker value={npForm.address ? { address: npForm.address, lat: npForm.lat, lng: npForm.lng } : null}
-              onChange={(item) => setNpForm((prev) => ({ ...prev, address: item.address, lat: item.lat, lng: item.lng }))} />
-          </Field>
-          <Field label="Or click on the map to set location">
-            <MapPicker lat={npForm.lat} lng={npForm.lng} height={280}
-              onPick={(la, ln) => setNpForm((prev) => ({ ...prev, lat: la, lng: ln, address: prev.address || `${Number(la).toFixed(5)}, ${Number(ln).toFixed(5)}` }))} />
-          </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Latitude">
-              <input type="number" step="0.000001" value={npForm.lat} onChange={(e) => setNpForm({ ...npForm, lat: Number(e.target.value) })} />
-            </Field>
-            <Field label="Longitude">
-              <input type="number" step="0.000001" value={npForm.lng} onChange={(e) => setNpForm({ ...npForm, lng: Number(e.target.value) })} />
-            </Field>
-          </div>
-          {npForm.address && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 8 }}>
-              📍 {npForm.address}
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-ghost" onClick={() => setNpModal(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={saveNodalPoint} disabled={!npForm.label}>
-            <MapPin size={16} /> {npEdit ? 'Save changes' : 'Add point'}
-          </button>
-        </div>
-      </Modal>
+      <NodalPointModal open={npModal} onClose={() => setNpModal(false)} npEdit={npEdit} npForm={npForm} setNpForm={setNpForm} onMap={openMapPicker} onSave={saveNodalPoint} />
     </div>
+  );
+}
+
+function NodalPointModal({ open, onClose, npEdit, npForm, setNpForm, onMap, onSave }) {
+  return (
+    <Modal open={open} onClose={onClose} title={npEdit ? 'Edit Company Address' : 'Add Company Address'} wide>
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Label">
+            <input data-testid="address-label" value={npForm.label} onChange={(e) => setNpForm({ ...npForm, label: e.target.value })} placeholder="Head Office / Main Gate" />
+          </Field>
+          <Field label="Radius (meters)">
+            <input data-testid="address-radius" type="number" min={1} max={100000} value={npForm.radiusMeters} onChange={(e) => setNpForm({ ...npForm, radiusMeters: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <button type="button" data-testid="select-google-address" className="btn btn-outline" onClick={onMap}>
+          <MapPin size={16} /> Select address on Google Maps
+        </button>
+        <Field label="Formatted address">
+          <input data-testid="address-formatted" value={npForm.address || ''} readOnly placeholder="Choose an address on Google Maps" />
+        </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Latitude"><input data-testid="address-lat" type="number" value={npForm.lat ?? ''} readOnly /></Field>
+          <Field label="Longitude"><input data-testid="address-lng" type="number" value={npForm.lng ?? ''} readOnly /></Field>
+        </div>
+        {npForm.place_id ? <div data-testid="address-place-id" style={{ fontSize: 12, color: 'var(--muted)' }}>Place ID: {npForm.place_id}</div> : null}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button data-testid="save-address-point" className="btn btn-primary" onClick={onSave} disabled={!npForm.label || !npForm.address || npForm.lat == null || npForm.lng == null}>
+          <MapPin size={16} /> {npEdit ? 'Save changes' : 'Add point'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

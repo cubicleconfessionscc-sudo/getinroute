@@ -18,7 +18,7 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (identifier, password) => {
+  const login = async (identifier, password, companyLocationId) => {
     let lat = null, lng = null;
     try {
       const pos = await new Promise((resolve, reject) => {
@@ -28,7 +28,7 @@ export function AuthProvider({ children }) {
       lat = pos.coords.latitude;
       lng = pos.coords.longitude;
     } catch {}
-    const r = await api.post('/api/auth/login', { identifier, password, lat, lng });
+    const r = await api.post('/api/auth/login', { identifier, password, lat, lng, app: 'web', ...(companyLocationId != null && companyLocationId !== '' ? { company_location_id: companyLocationId } : {}) });
     setToken(r.token);
     setUser(r.user);
     return r.user;

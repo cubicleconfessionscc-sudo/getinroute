@@ -8,6 +8,7 @@ import ErrorBoundary from "./src/components/ErrorBoundary";
 import StartupGate from "./src/components/StartupGate";
 import RootNavigator from "./src/navigation/RootNavigator";
 import SchoolApp from "./src/school/SchoolApp";
+import AdminVendorRoot from "./src/screens/adminvendor/AdminVendorRoot";
 import { registerGlobalErrorHandlers } from "./src/services/globalErrors";
 import { startSyncLoop } from "./src/services/offlineQueue";
 
@@ -70,6 +71,18 @@ export default function App() {
     // the system status area.
     if (VARIANT === "school") {
       return <SafeAreaProvider><SchoolAppRoot /></SafeAreaProvider>;
+    }
+    if (VARIANT === "adminvendor") {
+      // New, separate Admin/Vendor app: its own root (login selection first),
+      // no Employee/Driver/School navigation and no Owner login.
+      return (
+        <SafeAreaProvider>
+          <ErrorBoundary>
+            <StatusBar style="dark" />
+            <AdminVendorRoot />
+          </ErrorBoundary>
+        </SafeAreaProvider>
+      );
     }
     return <SafeAreaProvider><CompanyApp /></SafeAreaProvider>;
   } catch (e) {

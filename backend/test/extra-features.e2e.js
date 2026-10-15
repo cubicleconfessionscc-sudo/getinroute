@@ -68,19 +68,24 @@ async function main() {
   if (!up) { console.log('SERVER FAILED TO START'); console.log(out.join('').split('\n').slice(-20).join('\n')); process.exit(1); }
   console.log('Server up on port', PORT);
 
-  let r = await post('/api/auth/login', { email: 'admin@getinroute.com', password: 'Owner@123' });
+  let r = await post('/api/auth/login', { app: 'web', email: 'admin@getinroute.com', password: 'Owner@123' });
   check('owner login', r.status === 200, r);
   const owner = r.json.token;
   const suffix = Date.now();
 
+  // Route creation requires a managing Vendor now (Admin assigns Vendor).
+  const vres = await post('/api/admin/vendors', { name: 'Custom Vendor ' + suffix }, owner);
+  check('vendor created', vres.status === 200 && !!vres.json.id, vres);
+  const vendorId = vres.json.id;
+
   async function regEmp(tag) {
     const emp_id = tag + suffix;
     const email = `${emp_id}@company.co`;
-    await post('/api/auth/register', { role: 'employee', emp_id, email, password: 'Pass#123', name: tag + ' Employee', department: 'Ops', designation: 'Analyst' });
+    await post('/api/auth/register', { app: 'web', role: 'employee', emp_id, email, password: 'Pass#123', name: tag + ' Employee', department: 'Ops', designation: 'Analyst' });
     const id = db.prepare('SELECT id FROM users WHERE emp_id=?').get(emp_id).id;
     const ar = await post(`/api/admin/approvals/${id}`, { action: 'accept' }, owner);
     if (ar.status !== 200) throw new Error('approve failed for ' + tag);
-    const lr = await post('/api/auth/login', { email, password: 'Pass#123' });
+    const lr = await post('/api/auth/login', { app: 'web', email, password: 'Pass#123' });
     return { id, email, token: lr.json.token };
   }
   const empA = await regEmp('A');
@@ -89,7 +94,7 @@ async function main() {
 
   // --- route roster (item 3) ---
   r = await post('/api/admin/routes', {
-    name: 'Custom Line X' + suffix, start_point: 'Terminal A', end_point: 'Terminal Z',
+    name: 'Custom Line X' + suffix, vendor_id: vendorId, start_point: 'Terminal A', end_point: 'Terminal Z',
     stops: [{ sequence: 1, name: 'Stop One', lat: 12.96, lng: 77.58 }, { sequence: 2, name: 'Stop Two', lat: 13.0, lng: 77.6 }],
     speed_limit: 40
   }, owner);
@@ -173,7 +178,7 @@ async function main() {
   db.prepare("INSERT INTO users (role, emp_id, email, name, password_hash, approved, status, vehicle_id) VALUES ('driver','DRV" + suffix + "','drv" + suffix + "@company.co','Cab Driver',?,1,'active',?)")
     .run(bcrypt.hashSync('Pass#123', 10), vid);
   const drvId = db.prepare("SELECT id FROM users WHERE emp_id='DRV" + suffix + "'").get().id;
-  const drvLogin = await post('/api/auth/login', { email: 'drv' + suffix + '@company.co', password: 'Pass#123' });
+  const drvLogin = await post('/api/auth/login', { app: 'web', email: 'drv' + suffix + '@company.co', password: 'Pass#123' });
   check('driver login', drvLogin.status === 200, drvLogin);
   r = await get(`/api/chat/trip/${runId}`, drvLogin.json.token);
   check('driver (linked cab) is chat member', r.status === 200, r);

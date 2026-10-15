@@ -27,7 +27,7 @@ let failures = 0;
 const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + '  ' + name + (cond ? '' : '  ' + JSON.stringify(extra))); if (!cond) failures++; };
 
 (async () => {
-  let r = await req('POST', '/api/auth/login', { body: { email: 'owner.test@getinroute.local', password: 'Owner@123' } });
+  let r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'owner.test@getinroute.local', password: 'Owner@123' } });
   ok('company admin login', r.status === 200, r);
   const ownerToken = r.j.token;
 
@@ -39,13 +39,13 @@ const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + 
   const schoolId = r.j.id;
   ok('owner create school id', !!schoolId, r);
 
-  r = await req('POST', '/api/auth/login', { body: { email: 'schooladmin@test.com', password: 'Pass@123' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'schooladmin@test.com', password: 'Pass@123' } });
   ok('school admin blocked before approval', r.status === 403, r);
 
   r = await req('POST', `/api/owner/schools/${schoolId}/approve`, { token: ownerToken });
   ok('owner approve school', r.status === 200, r);
 
-  r = await req('POST', '/api/auth/login', { body: { email: 'schooladmin@test.com', password: 'Pass@123' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'schooladmin@test.com', password: 'Pass@123' } });
   ok('school admin login after approval', r.status === 200, r);
   const sTok = r.j.token;
 
@@ -100,7 +100,7 @@ const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + 
   ok('parent SOS', r.status === 200, r);
   const sosId = r.j.id;
 
-  r = await req('POST', '/api/auth/login', { body: { email: 'kiran@school.test', password: 'Drive@456' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'kiran@school.test', password: 'Drive@456' } });
   ok('school driver login', r.status === 200, r);
   const dTok = r.j.token;
 
@@ -129,10 +129,10 @@ const ok = (name, cond, extra = '') => { console.log((cond ? 'PASS' : 'FAIL') + 
 
   r = await req('POST', '/api/school/students/' + meera.id + '/password', { token: sTok, body: { password: 'Meera@123' } });
   ok('set student password', r.status === 200, r);
-  r = await req('POST', '/api/auth/login', { body: { email: 'meera@test.com', password: 'Meera@123' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'meera@test.com', password: 'Meera@123' } });
   ok('college student with can_login logs in', r.status === 200, r);
 
-  r = await req('POST', '/api/auth/login', { body: { email: 'ravi.parent@test.com', password: 'wrong' } });
+  r = await req('POST', '/api/auth/login', { body: { app: 'web', email: 'ravi.parent@test.com', password: 'wrong' } });
   ok('parent wrong password -> 401', r.status === 401, r);
 
   r = await req('POST', `/api/driver/student/${sched2}/boarded`, { token: dTok });

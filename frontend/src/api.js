@@ -1,8 +1,12 @@
 const LEGACY_KEY = 'getinroute_token';
 const roleKey = (role) => `getinroute_token_${role || 'admin'}`;
-// Resolve which portal the current URL belongs to so each role keeps its own
-// session token in localStorage (P1.18). Without this, logging into the vendor
-// portal would overwrite the admin token and break the admin tab.
+// Session tokens live in sessionStorage, which is scoped to a single browser TAB.
+// That means opening the app URL in a new tab (e.g. copy/paste the link) starts
+// with NO token and requires a fresh login, while a normal refresh inside the same
+// tab keeps the session. localStorage is deliberately NOT used for auth tokens,
+// because it is shared across every tab of the origin and would auto-login a new
+// tab. Each role keeps its own key so logging into the vendor portal never
+// overwrites the admin session in another tab.
 const PATH_ROLES = [
   ['/admin', 'admin'], ['/vendor', 'vendor'], ['/parent', 'parent'],
   ['/school', 'school'], ['/driver', 'driver'], ['/employee', 'employee'],
@@ -15,6 +19,10 @@ function pathRole() {
   }
   return null;
 }
+// sessionStorage can throw in locked-down/private modes; never let auth crash the app.
+function ssGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } }
+function ssDel(k) { try { sessionStorage.removeItem(k); } catch { /* ignore */ } }
 export function tokenRole(t) {
   try { return JSON.parse(atob(String(t || getToken()).split('.')[1])).role || null; }
   catch { return null; }
@@ -22,29 +30,29 @@ export function tokenRole(t) {
 export function getToken() {
   const pr = pathRole();
   if (pr) {
-    const direct = localStorage.getItem(roleKey(pr));
+    const direct = ssGet(roleKey(pr));
     if (direct) return direct;
     // /admin hosts both admin and vendor sessions; use whichever exists.
     if (pr === 'admin') {
-      const alt = localStorage.getItem(roleKey('vendor')) || localStorage.getItem(roleKey('admin'));
+      const alt = ssGet(roleKey('vendor')) || ssGet(roleKey('admin'));
       if (alt) return alt;
     }
-    const legacy = localStorage.getItem(LEGACY_KEY);
+    const legacy = ssGet(LEGACY_KEY);
     if (legacy) return legacy;
   }
-  const last = localStorage.getItem('getinroute_last_role');
-  return localStorage.getItem(roleKey(last)) || localStorage.getItem(LEGACY_KEY) || '';
+  const last = ssGet('getinroute_last_role');
+  return ssGet(roleKey(last)) || ssGet(LEGACY_KEY) || '';
 }
 export function setToken(t) {
   const role = tokenRole(t) || 'admin';
-  localStorage.setItem(roleKey(role), t);
-  localStorage.setItem('getinroute_last_role', role);
-  localStorage.removeItem(LEGACY_KEY);
+  ssSet(roleKey(role), t);
+  ssSet('getinroute_last_role', role);
+  ssDel(LEGACY_KEY);
 }
 export function clearToken() {
   const pr = pathRole();
-  if (pr) localStorage.removeItem(roleKey(pr));
-  localStorage.removeItem(LEGACY_KEY);
+  if (pr) ssDel(roleKey(pr));
+  ssDel(LEGACY_KEY);
 }
 
 const REQUEST_TIMEOUT_MS = 20000;

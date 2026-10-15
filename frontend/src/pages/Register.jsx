@@ -17,7 +17,7 @@ export default function Register() {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.post('/api/auth/register', { ...form, role });
+      await api.post('/api/auth/register', { ...form, role, app: 'web' });
       setDone(true);
     } catch (err) {
       toast(err.message, 'err');
