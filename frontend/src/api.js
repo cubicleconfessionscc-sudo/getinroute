@@ -87,8 +87,13 @@ async function request(path, { method = 'GET', body, params, timeout = REQUEST_T
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
     if (res.status === 401) {
+      // Only a genuinely expired/invalid session should bounce the visitor to
+      // /login. If we were never signed in (public pages such as
+      // /register-company), redirecting would destroy whatever the visitor was
+      // mid-way through typing — so surface the error and let the caller show it.
+      const hadToken = !!token;
       clearToken();
-      window.location.href = '/login';
+      if (hadToken) window.location.href = '/login';
     }
     throw new Error(data.error || 'Request failed');
   }

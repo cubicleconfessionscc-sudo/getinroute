@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useToast } from '../components/ui';
 import { Building2, Eye, EyeOff, Clock, ShieldCheck, ChevronLeft, ChevronRight, Sparkles, CheckCircle2, MapPin, Plus, Trash2, X } from 'lucide-react';
 import AddressPicker from '../components/AddressPicker';
+import { searchAddress } from '../lib/geo';
 
 // Total steps: 6 to match the previous flow (Company Information, Locations,
 // Administrator Information, Review, Pending Approval, Trial Activated).
@@ -510,11 +511,40 @@ function StateBlock({ stateName, state, addCity, removeCity, addLocation, remove
 function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
   const [locName, setLocName] = useState('');
   const [pendingAddress, setPendingAddress] = useState(null);
-  function add() {
-    if (!locName.trim() || !pendingAddress || pendingAddress.lat == null || pendingAddress.lng == null) return;
-    addLocation(stateName, cityName, { name: locName.trim(), address: pendingAddress.address, lat: pendingAddress.lat, lng: pendingAddress.lng });
-    setLocName('');
-    setPendingAddress(null);
+  const [saving, setSaving] = useState(false);
+
+  // A location is valid as soon as it has a name. Picking an address from the
+  // autocomplete dropdown is optional enrichment (adds lat/lng for maps and
+  // navigation) — it must never be a prerequisite, otherwise a typo-free typed
+  // name could not reach the portal or the APKs.
+  async function add() {
+    const name = locName.trim();
+    if (!name || saving) return;
+    setSaving(true);
+    try {
+      let address = (pendingAddress && pendingAddress.address) || name;
+      let lat = pendingAddress ? pendingAddress.lat : null;
+      let lng = pendingAddress ? pendingAddress.lng : null;
+      if (lat == null || lng == null) {
+        try {
+          const hits = await Promise.race([
+            searchAddress(name, { limit: 1 }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('geocode timeout')), 5000))
+          ]);
+          const hit = Array.isArray(hits) ? hits[0] : null;
+          if (hit && hit.lat != null && hit.lng != null) {
+            if (!pendingAddress) address = hit.address || hit.display_name || name;
+            lat = hit.lat;
+            lng = hit.lng;
+          }
+        } catch { /* offline / rate-limited / no match — save with the typed name */ }
+      }
+      addLocation(stateName, cityName, { name, address, lat, lng });
+      setLocName('');
+      setPendingAddress(null);
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <div style={{ border: '1px dashed #cbd5e1', borderRadius: 10, padding: 10, background: '#f8fafc' }}>
@@ -529,9 +559,12 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
       <div style={{ marginBottom: 8 }}>
         <AddressPicker value={pendingAddress} onChange={setPendingAddress} />
       </div>
-      <button type="button" className="btn btn-primary" disabled={!locName.trim() || !pendingAddress || pendingAddress.lat == null} onClick={add} style={{ width: '100%', justifyContent: 'center' }}>
-        <Plus size={14} /> Add
+      <button type="button" className="btn btn-primary" disabled={!locName.trim() || saving} onClick={add} style={{ width: '100%', justifyContent: 'center' }}>
+        <Plus size={14} /> {saving ? 'Saving…' : 'Add'}
       </button>
+      <p style={{ fontSize: 11.5, color: '#94a3b8', margin: '6px 0 0' }}>
+        Typing a name is enough — the address below is optional and only pins the location on the map.
+      </p>
       {city.locations.length > 0 && (
         <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
           {city.locations.map((l) => (

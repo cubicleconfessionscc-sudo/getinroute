@@ -326,7 +326,12 @@ app.get('/api/config/public', (req, res) => {
  * configurable via GEOCODING_URL / ROUTING_URL env vars. */
 const { geocodeSearch, geocodeReverse, calculateRoute } = require('./geo');
 
-app.get('/api/geo/search', auth, guard(60, 60 * 1000), (req, res) => {
+/* Address autocomplete. This MUST stay pre-auth: the public company-onboarding
+ * wizard (/register-company) types into it before any account exists. Requiring
+ * `auth` here made every keystroke return 401, which the web client turned into a
+ * hard redirect to /login — wiping the wizard mid-flow. Rate-limit per IP instead
+ * so the external geocoder cannot be used as an open proxy. */
+app.get('/api/geo/search', guard(30, 60 * 1000), (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json([]);
   const limit = Math.min(Number(req.query.limit) || 8, 12);
