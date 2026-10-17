@@ -122,7 +122,7 @@ const QUICK_ACCESS = [
   { icon: <School size={24} />, title: 'Manage School Transport', sub: 'For Schools', to: '/register-company' },
   { icon: <Truck size={24} />, title: 'Manage Fleet', sub: 'For Vendors', to: '/vendor/login' },
   { icon: <Users size={24} />, title: 'Track My Ride', sub: 'For Employees', to: '/employee-login' },
-  { icon: <Navigation size={24} />, title: 'Manage My Trip', sub: 'For Drivers', to: '/login' },
+  { icon: <Navigation size={24} />, title: 'Manage My Trip', sub: 'For Drivers', to: '/driver-login' },
   { icon: <School size={24} />, title: 'Track My Child', sub: 'For Parents', to: '/parent/register' }
 ];
 
@@ -656,7 +656,7 @@ export default function Landing() {
             <Link to="/register-company">Schools</Link>
             <Link to="/vendor/login">Vendors</Link>
             <Link to="/employee-login">Employees</Link>
-            <Link to="/login">Drivers</Link>
+            <Link to="/driver-login">Drivers</Link>
             <Link to="/parent/register">Parents</Link>
           </div>
           <div className="pub-footer-col">
