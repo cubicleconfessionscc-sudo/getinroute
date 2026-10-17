@@ -78,12 +78,15 @@ import ETrack from './pages/employee/ETrack';
 import EHistory from './pages/employee/EHistory';
 import EFeedback from './pages/employee/EFeedback';
 import AddressSettings from './pages/employee/AddressSettings';
+import ELocation from './pages/employee/ELocation';
 
 import DriverApp from './pages/driver/DriverApp';
 import DHome from './pages/driver/DHome';
 import DRoute from './pages/driver/DRoute';
 import DFeedback from './pages/driver/DFeedback';
+import DDuty from './pages/driver/DDuty';
 import MobileChat from './pages/MobileChat';
+import NotificationsPage from './pages/NotificationsPage';
 
 import SchoolLayout from './pages/school/SchoolLayout';
 import SchoolDashboard from './pages/school/SchoolDashboard';
@@ -143,11 +146,15 @@ export default function App() {
 
           <Route path="/login" element={<PortalLogin />} />
           <Route path="/driver/login" element={<RoleLogin role="driver" />} />
+          <Route path="/driver-login" element={<RoleLogin role="driver" />} />
           <Route path="/parent/login" element={<RoleLogin role="parent" />} />
+          <Route path="/parent-login" element={<RoleLogin role="parent" />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/company/login" element={<CompanyLogin />} />
+          <Route path="/company-login" element={<CompanyLogin />} />
           <Route path="/vendor/login" element={<VendorLogin />} />
           <Route path="/school/login" element={<SchoolLogin />} />
+          <Route path="/school-login" element={<SchoolLogin />} />
           <Route path="/apps" element={<Apps />} />
           <Route path="/apps/:appKey" element={<AppDownload />} />
           <Route path="/get-started" element={<Navigate to="/register-company" replace />} />
@@ -243,9 +250,11 @@ export default function App() {
             <Route path="schedule" element={<ESchedule />} />
             <Route path="track" element={<ETrack />} />
             <Route path="address" element={<AddressSettings />} />
+            <Route path="location" element={<ELocation />} />
             <Route path="history" element={<EHistory />} />
             <Route path="chat" element={<MobileChat />} />
             <Route path="feedback" element={<EFeedback />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="tickets" element={<TicketListPage />} />
             <Route path="tickets/new" element={<TicketCreatePage />} />
             <Route path="tickets/:id" element={<TicketDetailPage />} />
@@ -254,8 +263,10 @@ export default function App() {
           <Route path="/driver" element={<Require role="driver"><DriverApp /></Require>}>
             <Route index element={<DHome />} />
             <Route path="route" element={<DRoute />} />
+            <Route path="duty" element={<DDuty />} />
             <Route path="chat" element={<MobileChat />} />
             <Route path="feedback" element={<DFeedback />} />
+            <Route path="notifications" element={<NotificationsPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

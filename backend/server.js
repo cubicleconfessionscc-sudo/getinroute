@@ -557,6 +557,10 @@ const SINGLE_SESSION_ROLES = new Set(['employee', 'driver']);
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 function sessionIsActive(user, payload) {
   if (!user || !SINGLE_SESSION_ROLES.has(user.role)) return true;
+  // Single-device enforcement is OPT-IN (see EMPLOYEE_SINGLE_SESSION above). When
+  // it is off, every issued token stays valid for its full life — a web tab that
+  // was closed without logging out must never lock the account out.
+  if (!EMPLOYEE_SINGLE_SESSION) return true;
   const exp = Number(user.active_sid_expires_at);
   return !!(payload && payload.sid && user.active_sid && payload.sid === user.active_sid && Number.isFinite(exp) && exp > Date.now());
 }
@@ -564,6 +568,13 @@ function startUserSession(user) {
   if (!user || !SINGLE_SESSION_ROLES.has(user.role)) return { sid: null, conflict: false };
   const sid = crypto.randomBytes(24).toString('hex');
   const expiresAt = String(Date.now() + SESSION_TTL_MS);
+  // Single-device enforcement is OPT-IN. Off (the default) means a new sign-in
+  // simply takes over the stored slot instead of rejecting the user with a 409
+  // they have no way to clear from a browser tab.
+  if (!EMPLOYEE_SINGLE_SESSION) {
+    db.prepare('UPDATE users SET active_sid=?, active_sid_expires_at=? WHERE id=?').run(sid, expiresAt, user.id);
+    return { sid, conflict: false };
+  }
   // Conditional update closes the simultaneous-login race: only one request can
   // claim an empty/expired session slot.
   const updated = db.prepare(`UPDATE users SET active_sid=?, active_sid_expires_at=?
@@ -8868,7 +8879,12 @@ const ADMIN_DIR = path.join(PUBLIC_DIR, 'admin');
 const SPA_INDEX = path.join(ADMIN_DIR, 'index.html');
 const WEBSITE_INDEX = path.join(WEBSITE_DIR, 'index.html');
 
-const SPA_ROUTES = ['/', '/admin', '/login', '/admin/login', '/company/login', '/vendor/login', '/school/login', '/apps', '/get-started', '/platform', '/solutions', '/about', '/contact', '/employee-login', '/owner', '/register', '/register-company', '/forgot-password', '/reset-password', '/app', '/driver', '/employee', '/cs', '/vendor-login', '/vendor-portal', '/school', '/parent'];
+/* Every public entry point the SPA itself routes. Anything NOT in this list falls
+ * through to the marketing page — which is why /driver-login, /parent-login and
+ * /school-login (the URLs printed under "Sign in on Web" on the download cards)
+ * used to serve the brochure instead of the sign-in form. Keep in sync with
+ * frontend/src/App.jsx. */
+const SPA_ROUTES = ['/', '/admin', '/login', '/admin/login', '/company/login', '/vendor/login', '/school/login', '/apps', '/get-started', '/platform', '/solutions', '/about', '/contact', '/employee-login', '/driver-login', '/parent-login', '/school-login', '/company-login', '/owner', '/register', '/register-company', '/forgot-password', '/reset-password', '/app', '/driver', '/employee', '/cs', '/vendor-login', '/vendor-portal', '/school', '/parent'];
 
 /* App binary downloads (APK / IPA) for the landing page "Download the App" section.
    Binaries too large for `railway up` (>100 MB cap) are staged one-per-deploy into

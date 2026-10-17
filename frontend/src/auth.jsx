@@ -34,6 +34,15 @@ export function AuthProvider({ children }) {
     return r.user;
   };
   const logout = () => {
+    // Tell the server first so the employee/driver single-device slot (and any
+    // live socket) is released — otherwise the next sign-in can be rejected.
+    // Fire-and-forget: a failed logout must never trap the user signed in.
+    const t = getToken();
+    if (t) {
+      try {
+        fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
+      } catch {}
+    }
     clearToken();
     localStorage.removeItem('gir_user');
     setUser(null);

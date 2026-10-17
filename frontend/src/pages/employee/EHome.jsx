@@ -215,7 +215,7 @@ export default function EHome() {
           <h2 className="eh-greet">{greet}, {firstName} 👋</h2>
           <div className="eh-sub">Employee ID {empId} · Here's your transport overview.</div>
         </div>
-        <Link to="/app/history" className="eh-bell" aria-label="Notifications"><Bell size={18} /></Link>
+        <Link to="/app/notifications" className="eh-bell" aria-label="Notifications" title="Notifications"><Bell size={18} /></Link>
       </div>
 
       {/* Summary cards */}
