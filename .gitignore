@@ -35,7 +35,14 @@ node_modules/
 # Deploy artifacts (generated update bundles)
 deploy/*.zip
 deliverables/
-backend/binaries/
+# Keep the three gate APKs packable by `railway up`: a directory-level
+# backend/binaries/ rule would defeat the ! negations below (CLI packers use
+# gitignore semantics, and files inside an excluded directory cannot be
+# re-included). The other binaries stay out of the archive.
+backend/binaries/*
+!backend/binaries/GetInRoute.apk
+!backend/binaries/GetInRouteDriver.apk
+!backend/binaries/GetInRouteSchool.apk
 .railway/
 
 # Build output lives only under backend/public/admin (served); don't track dev duplicates or source maps
