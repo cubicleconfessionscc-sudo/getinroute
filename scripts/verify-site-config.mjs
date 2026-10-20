@@ -54,8 +54,10 @@ for (const [key, app] of entries) {
 }
 
 const androidApps = entries.filter(([, a]) => a.androidUrl);
-if (androidApps.length !== 3) {
-  fail(`expected 3 Android apps, found ${androidApps.length}`);
+// Employee, Driver, School, Admin — adding an app here is deliberate: bump the
+// count consciously (the site app block regenerates via sync-site-apps.mjs).
+if (androidApps.length !== 4) {
+  fail(`expected 4 Android apps, found ${androidApps.length}`);
 }
 
 // Bundle ids must be unique within each platform. They are intentionally the
