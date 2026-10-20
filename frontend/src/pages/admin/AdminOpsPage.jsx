@@ -4,6 +4,7 @@ import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
 import { Plus, MapPin, Key, RefreshCw, X, Copy, Check, Building2, MapPinned, Trash2 } from 'lucide-react';
 import AddressPicker from '../../components/AddressPicker';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
 
 // Admin Operations page (Part 3.1 / Part 3.2 / Part 3.3 / Part 4.3).
 //
@@ -128,8 +129,9 @@ export default function AdminOpsPage() {
                           <MapPin size={12} color="var(--primary)" />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 600 }}>{a.label}</div>
-                            <div style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {a.address || '—'}{a.lat != null ? ` (${Number(a.lat).toFixed(4)}, ${Number(a.lng).toFixed(4)})` : ''}
+                            <div style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.address || (a.lat != null ? 'Location saved' : '—')}</span>
+                              {a.lat != null && <ViewOnMapLink lat={a.lat} lng={a.lng} address={a.address} label="Map" />}
                             </div>
                           </div>
                           <button className="btn btn-sm btn-ghost" onClick={() => openEdit(a)}><Pencil size={12} /></button>

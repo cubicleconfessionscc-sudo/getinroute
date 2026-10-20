@@ -66,7 +66,15 @@ export function LiveMap({ center, zoom = 12, stops, vehicles, employees, polylin
       markers.push({
         id: `s${i}`, lat: Number(s.lat), lng: Number(s.lng), label: String(i + 1), color: 'amber',
         title: `${i + 1}. ${s.name || ''}`,
-        info: { title: `${i + 1}. ${s.name || 'Stop'}`, body: `${Number(s.lat).toFixed(5)}, ${Number(s.lng).toFixed(5)}` }
+        // Popups show the address name; raw coordinates only as a last resort,
+        // plus a Google Maps deep link (no key needed) to open the stop.
+        info: {
+          title: `${i + 1}. ${s.name || 'Stop'}`,
+          body: [
+            s.address || `${Number(s.lat).toFixed(5)}, ${Number(s.lng).toFixed(5)}`,
+            `<a href="https://www.google.com/maps/search/?api=1&query=${Number(s.lat)},${Number(s.lng)}" target="_blank" rel="noreferrer">View on Google Maps</a>`
+          ].join('<br/>')
+        }
       });
     }
   });

@@ -38,9 +38,34 @@ function createMarkerEl(label, colorHex) {
   return el;
 }
 
+/* Approximate geodesic circle as a GeoJSON polygon ring (WGS84, [lng, lat]).
+   Used for pickup/service-radius visualisation without a Google Maps key. */
+function circleRing(lat, lng, radiusMeters, points = 64) {
+  const R = 6371008.8;
+  const rad = Math.PI / 180;
+  const lat0 = Number(lat);
+  const lng0 = Number(lng);
+  const angular = Number(radiusMeters) / R;
+  const ring = [];
+  for (let i = 0; i < points; i += 1) {
+    const brg = (i / points) * 2 * Math.PI;
+    const lat1 = Math.asin(
+      Math.sin(lat0 * rad) * Math.cos(angular) + Math.cos(lat0 * rad) * Math.sin(angular) * Math.cos(brg)
+    );
+    const lng1 = lng0 * rad + Math.atan2(
+      Math.sin(brg) * Math.sin(angular) * Math.cos(lat0 * rad),
+      Math.cos(angular) - Math.sin(lat0 * rad) * Math.sin(lat1)
+    );
+    ring.push([lng1 / rad, lat1 / rad]);
+  }
+  ring.push(ring[0]);
+  return ring;
+}
+
 export default function MapLibreMap({
   markers = [],
   lines = [],
+  circles = [],
   center,
   zoom = MAP_DEFAULTS.zoom,
   height = '420px',
@@ -205,8 +230,37 @@ export default function MapLibreMap({
         });
       }
     } else {
-      if (map.getLayer('route-lines')) map.removeLayer('route-lines');
-      if (map.getSource('route-lines')) map.removeSource('route-lines');
+      if (map.getLayer('pick-circles')) map.removeLayer('pick-circles');
+      if (map.getSource('pick-circles')) map.removeSource('pick-circles');
+    }
+
+    const circleFeatures = (circles || [])
+      .filter((c) => c && c.lat != null && c.lng != null && Number(c.radius) > 0 && !Number.isNaN(Number(c.lat)) && !Number.isNaN(Number(c.lng)))
+      .map((c) => ({
+        type: 'Feature',
+        properties: { color: c.color || '#2563eb' },
+        geometry: { type: 'Polygon', coordinates: [circleRing(c.lat, c.lng, Number(c.radius))] }
+      }));
+    if (circleFeatures.length) {
+      if (map.getLayer('pick-circles')) map.removeLayer('pick-circles');
+      if (map.getSource('pick-circles')) map.removeSource('pick-circles');
+      map.addSource('pick-circles', { type: 'geojson', data: { type: 'FeatureCollection', features: circleFeatures } });
+      map.addLayer({
+        id: 'pick-circles',
+        type: 'fill',
+        source: 'pick-circles',
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.12 }
+      });
+      map.addLayer({
+        id: 'pick-circles-outline',
+        type: 'line',
+        source: 'pick-circles',
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.75 }
+      });
+    } else {
+      if (map.getLayer('pick-circles-outline')) map.removeLayer('pick-circles-outline');
+      if (map.getLayer('pick-circles')) map.removeLayer('pick-circles');
+      if (map.getSource('pick-circles')) map.removeSource('pick-circles');
     }
 
     if (fit && markerInstances.current.length) {
@@ -224,7 +278,7 @@ export default function MapLibreMap({
   useEffect(() => {
     if (status !== 'ready' || !mapRef.current) return;
     applyData(mapRef.current);
-  }, [JSON.stringify(markers), JSON.stringify(lines)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(markers), JSON.stringify(lines), JSON.stringify(circles)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (status !== 'ready' || !mapRef.current || !focus || !focus.lat) return;

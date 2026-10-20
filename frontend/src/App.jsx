@@ -54,7 +54,7 @@ import VendorLogin from './pages/VendorLogin';
 import SubscriptionCommandCenter from './pages/admin/SubscriptionCommandCenter';
 import FeatureFlags from './pages/admin/FeatureFlags';
 import SystemHealth from './pages/admin/SystemHealth';
-import GoogleLocationPickerPage from './pages/admin/GoogleLocationPickerPage';
+import LocationPickerPage from './pages/shared/LocationPickerPage';
 import PolicyEngine from './pages/admin/PolicyEngine';
 import IntelligenceCenter from './pages/admin/IntelligenceCenter';
 import AITransportManager from './pages/admin/AITransportManager';
@@ -171,7 +171,9 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/parent/register" element={<ParentRegister />} />
 
-          <Route path="/admin/map-picker" element={<Require role="admin" roles={['admin', 'vendor']} vertical="company"><GoogleLocationPickerPage /></Require>} />
+          {/* Shared full-screen location picker (MapLibre + OSM, no key). Kept at the
+              legacy /admin/map-picker URL so existing admin/vendor flows are unchanged. */}
+          <Route path="/admin/map-picker" element={<Require role="admin" roles={['admin', 'vendor']} vertical="company"><LocationPickerPage /></Require>} />
           <Route path="/admin" element={<Require role="admin" roles={['admin', 'vendor']} vertical="company"><AdminLayout /></Require>}>
             <Route index element={<Dashboard />} />
             <Route path="tracking" element={<LiveTracking />} />
@@ -250,6 +252,7 @@ export default function App() {
             <Route path="schedule" element={<ESchedule />} />
             <Route path="track" element={<ETrack />} />
             <Route path="address" element={<AddressSettings />} />
+            <Route path="map-picker" element={<LocationPickerPage />} />
             <Route path="location" element={<ELocation />} />
             <Route path="history" element={<EHistory />} />
             <Route path="chat" element={<MobileChat />} />

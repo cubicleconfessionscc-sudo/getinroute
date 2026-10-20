@@ -3,6 +3,7 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { useToast } from '../../components/ui';
 import { Building2, Clock, X, ChevronRight, RefreshCw } from 'lucide-react';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
 
 /* Web twin of mobile EmployeeLocationPickerScreen.
  *
@@ -149,6 +150,9 @@ export default function ELocation() {
                     {loc.address ? (
                       <div style={{ fontSize: 12.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {loc.address}
+                        {loc.lat != null && loc.lng != null && (
+                          <> · <ViewOnMapLink lat={loc.lat} lng={loc.lng} address={loc.address} label="View on Google Maps" /></>
+                        )}
                       </div>
                     ) : null}
                   </div>

@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useToast } from '../components/ui';
 import { Building2, Eye, EyeOff, Clock, ShieldCheck, ChevronLeft, ChevronRight, Sparkles, CheckCircle2, MapPin, Plus, Trash2, X } from 'lucide-react';
 import AddressPicker from '../components/AddressPicker';
+import ViewOnMapLink from '../components/ViewOnMapLink';
 import { searchAddress } from '../lib/geo';
 
 // Total steps: 6 to match the previous flow (Company Information, Locations,
@@ -572,8 +573,9 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
               <MapPin size={12} color="#7c3aed" />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{l.name}</div>
-                <div style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {l.address || '—'}{l.lat != null ? ` (${Number(l.lat).toFixed(4)}, ${Number(l.lng).toFixed(4)})` : ''}
+                <div style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.address || '—'}</span>
+                  {l.lat != null && <ViewOnMapLink lat={l.lat} lng={l.lng} address={l.address} label="Map" />}
                 </div>
               </div>
               <button type="button" onClick={() => removeLocation(stateName, cityName, l.name)} aria-label={`Remove ${l.name}`} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', display: 'flex' }}>

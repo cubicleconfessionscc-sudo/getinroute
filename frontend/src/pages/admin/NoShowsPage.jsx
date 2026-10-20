@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { api, todayStr, downloadCsv, downloadFile } from '../../api';
 import { Modal, useToast } from '../../components/ui';
+import LocationText from '../../components/LocationText';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
 import { Download, FileSpreadsheet, ShieldAlert, History, UserCheck, RefreshCw, Trash2 } from 'lucide-react';
 
 const TABS = [
@@ -169,9 +171,10 @@ export default function NoShowsPage() {
                   <td>{r.pickup_address || '—'}</td>
                   <td>
                     {r.lat != null && r.lng != null ? (
-                      <a href={`https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}`} target="_blank" rel="noreferrer">
-                        {Number(r.lat).toFixed(5)}, {Number(r.lng).toFixed(5)}
-                      </a>
+                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', minWidth: 0 }}>
+                        <LocationText lat={r.lat} lng={r.lng} address={r.pickup_address || r.address || ''} max={60} />
+                        <ViewOnMapLink lat={r.lat} lng={r.lng} address={r.pickup_address || r.address || ''} label="Map" />
+                      </span>
                     ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td>{r.reason || '—'}</td>

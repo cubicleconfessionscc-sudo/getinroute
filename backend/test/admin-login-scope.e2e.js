@@ -87,8 +87,24 @@ async function main() {
     // Tampering: location-scoped admin selecting a location they are not authorized for.
     const xscope = await post('/api/auth/login', { email: 'adml1@als.test', password: 'Als@12345', app: 'web', company_location_id: loc2 });
     check('scoped admin selecting an unauthorized location is DENIED', xscope.status === 403 && xscope.json.code === 'LOCATION_FORBIDDEN', xscope);
-    const okScope = await post('/api/auth/login', { email: 'adml1@als.test', password: 'Als@12345', app: 'web', company_location_id: loc1 });
-    check('scoped admin selecting their own location succeeds', okScope.status === 200, okScope);
+    // Part 3.2: a location-scoped admin MUST present the location's active code
+    // (issued by a company-wide admin) — without it the login is rejected, and
+    // with it the login succeeds. See tenant-isolation PART 3.
+    const noCode = await post('/api/auth/login', { email: 'adml1@als.test', password: 'Als@12345', app: 'web', company_location_id: loc1 });
+    check('scoped admin selecting their own location without a code is DENIED', noCode.status === 403 && noCode.json.code === 'LOCATION_CODE_REQUIRED', noCode);
+    const issued = await post('/api/admin/location-codes', { company_location_id: loc1 }, loginL1.json.token);
+    check('company-wide admin can issue a location code for Loc1', issued.status === 200 && !!issued.json.code, issued);
+    const okScope = await post('/api/auth/login', { email: 'adml1@als.test', password: 'Als@12345', app: 'web', company_location_id: loc1, locationCode: issued.json.code });
+    check('scoped admin selecting their own location succeeds with the active code', okScope.status === 200 && !!okScope.json.token, okScope);
+    // The web login UI has no location-code field yet, so the supported path is
+    // to sign in WITHOUT selecting a location; scope still comes from the admin's
+    // own company_location_id (locationScope()).
+    const noLoc = await post('/api/auth/login', { email: 'adml1@als.test', password: 'Als@12345', app: 'web' });
+    check('scoped admin can sign in without picking a location (no code needed)', noLoc.status === 200 && !!noLoc.json.token, noLoc);
+    if (noLoc.status === 200) {
+      const stats = await get('/api/admin/stats', noLoc.json.token);
+      check('...and is still scoped to their own location (1 employee)', stats.json.employees === 1, stats.json);
+    }
   } finally {
     server.kill();
     await new Promise((r) => setTimeout(r, 300));

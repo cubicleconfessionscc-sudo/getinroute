@@ -198,9 +198,9 @@ table.tbl .actions { display: flex; gap: 6px; }
 
 /* ---- AddressPicker dropdown (portaled to body) ---- */
 /* Pinned to a light, high-contrast palette on purpose: the dropdown floats
-   above the modal (z --z-dropdown 150 > modal 110) and must stay readable in
-   both light and dark themes. */
-.addr-dd { position: fixed; z-index: var(--z-dropdown); background: #ffffff; color: #1a1a1a;
+   above modals AND the full-screen map picker (z 100000) and must stay
+   readable in both light and dark themes. */
+  .addr-dd { position: fixed; z-index: 100000; background: #ffffff; color: #1a1a1a;
   border: 1px solid rgba(0,0,0,.16); border-radius: 12px; max-height: 240px; overflow-y: auto;
   box-shadow: 0 12px 32px rgba(0,0,0,.45); }
 .addr-dd-item { display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left;

@@ -23,6 +23,7 @@ import EmployeeHistoryScreen from "../screens/employee/EmployeeHistoryScreen";
 import EmployeeScheduleScreen from "../screens/employee/EmployeeScheduleScreen";
 import EmployeeLocationsScreen from "../screens/employee/EmployeeLocationsScreen";
 import EmployeeLocationPickerScreen from "../screens/employee/EmployeeLocationPickerScreen";
+import EmployeeAddressMapScreen from "../screens/employee/EmployeeAddressMapScreen";
 import EmployeeProfileScreen from "../screens/employee/EmployeeProfileScreen";
 import DriverHomeScreen from "../screens/driver/DriverHomeScreen";
 import DriverEndTripScreen from "../screens/driver/DriverEndTripScreen";
@@ -102,6 +103,7 @@ function EmployeeStack() {
       <Stack.Screen name="EmployeeSchedule" component={withScreenHeader(EmployeeScheduleScreen, "Book cab")} />
       <Stack.Screen name="EmployeeHistory" component={withScreenHeader(EmployeeHistoryScreen, "Trip history")} />
       <Stack.Screen name="EmployeeLocations" component={withScreenHeader(EmployeeLocationsScreen, "My Address")} />
+      <Stack.Screen name="EmployeeAddressMap" component={withScreenHeader(EmployeeAddressMapScreen, "Pick on map")} />
       <Stack.Screen name="EmployeeLocationPicker" component={withScreenHeader(EmployeeLocationPickerScreen, "Company location")} />
       <Stack.Screen name="EmployeeProfile" component={withScreenHeader(EmployeeProfileScreen, "Profile")} />
       <Stack.Screen name="Notifications" component={withScreenHeader(NotificationsScreen, "Notifications")} />

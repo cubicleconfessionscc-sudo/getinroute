@@ -17,6 +17,24 @@ const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const MEM_MAX = 400;
 
+/* Google is only tried while it still looks usable. A referrer-restricted key,
+   disabled billing, or a disabled API comes back as REQUEST_DENIED / a billing
+   error on EVERY call — so the first such failure flips a circuit for the
+   process lifetime and every later request goes straight to the free
+   Photon/OSRM provider. This keeps /api/geo/* fast and makes the provider
+   reported by /api/config/public the one actually being used. */
+const googleHealth = { geocode: true, routing: true };
+function isGoogleAuthFailure(e) {
+  const msg = String((e && e.message) || e || '');
+  return /REQUEST_DENIED|BillingNotEnabled|must enable Billing|API keys with referer restrictions/i.test(msg);
+}
+function effectiveProviders() {
+  return {
+    geocoding: (GOOGLE_KEY && googleHealth.geocode) ? 'google' : (process.env.GEOCODING_PROVIDER || 'photon'),
+    routing: (GOOGLE_KEY && googleHealth.routing) ? 'google' : (process.env.ROUTING_PROVIDER || 'osrm')
+  };
+}
+
 /* ---------- Google providers (used when GOOGLE_MAPS_API_KEY is set) ---------- */
 function gComp(components, type) {
   const c = (components || []).find((x) => (x.types || []).includes(type));
@@ -41,7 +59,9 @@ async function googleGeocodeSearch(query, { limit = 8 } = {}) {
   const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, { signal: AbortSignal.timeout(9000) });
   if (!r.ok) throw new Error(`Google geocode ${r.status}`);
   const data = await r.json();
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') throw new Error(`Google geocode ${data.status}`);
+  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+    throw new Error(`Google geocode ${data.status}${data.error_message ? `: ${data.error_message}` : ''}`);
+  }
   return (data.results || []).slice(0, limit).map((x) => ({
     label: x.formatted_address,
     address: x.formatted_address,
@@ -60,7 +80,10 @@ async function googleGeocodeReverse(lat, lng) {
   const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, { signal: AbortSignal.timeout(9000) });
   if (!r.ok) throw new Error(`Google reverse ${r.status}`);
   const data = await r.json();
-  if (data.status !== 'OK' || !data.results || !data.results.length) return null;
+  if (data.status === 'ZERO_RESULTS') return null;
+  if (data.status !== 'OK' || !data.results || !data.results.length) {
+    throw new Error(`Google reverse ${data.status}${data.error_message ? `: ${data.error_message}` : ''}`);
+  }
   const x = data.results[0];
   return {
     label: x.formatted_address, address: x.formatted_address, lat: Number(lat), lng: Number(lng),
@@ -167,12 +190,15 @@ async function geocodeSearch(query, { limit = 8, lang = 'en', bbox } = {}) {
   const cached = cacheGetByKind('search', key) || dbCacheGet('search', key);
   if (cached) return cached;
 
-  if (GOOGLE_KEY) {
+  if (GOOGLE_KEY && googleHealth.geocode) {
     try {
       const rows = await googleGeocodeSearch(query, { limit });
       cacheSetByKind('search', key, rows); dbCacheSet('search', key, rows);
       return rows;
-    } catch (e) { console.warn('[geo] Google search failed, using Photon:', e.message || e); }
+    } catch (e) {
+      console.warn('[geo] Google search failed, using Photon:', e.message || e);
+      if (isGoogleAuthFailure(e)) { googleHealth.geocode = false; console.warn('[geo] Google geocoding disabled for this process (auth/billing) — using Photon from now on.'); }
+    }
   }
 
   const params = new URLSearchParams({ q: String(query).trim(), lang, limit: String(limit) });
@@ -195,12 +221,15 @@ async function geocodeReverse(lat, lng) {
   const cached = cacheGetByKind('reverse', key) || dbCacheGet('reverse', key);
   if (cached) return cached;
 
-  if (GOOGLE_KEY) {
+  if (GOOGLE_KEY && googleHealth.geocode) {
     try {
       const row = await googleGeocodeReverse(lat, lng);
       if (row) { cacheSetByKind('reverse', key, row); dbCacheSet('reverse', key, row); }
       return row;
-    } catch (e) { console.warn('[geo] Google reverse failed, using Photon:', e.message || e); }
+    } catch (e) {
+      console.warn('[geo] Google reverse failed, using Photon:', e.message || e);
+      if (isGoogleAuthFailure(e)) { googleHealth.geocode = false; console.warn('[geo] Google geocoding disabled for this process (auth/billing) — using Photon from now on.'); }
+    }
   }
 
   const params = new URLSearchParams({ lat: String(Number(lat)), lon: String(Number(lng)) });
@@ -220,12 +249,15 @@ async function calculateRoute(points, { profile = 'driving', useCache = true } =
     if (cached) return cached;
   }
 
-  if (GOOGLE_KEY) {
+  if (GOOGLE_KEY && googleHealth.routing) {
     try {
       const result = await googleRoute(points);
       if (useCache) { cacheSetByKind('route', key, result); dbCacheSet('route', key, result); }
       return result;
-    } catch (e) { console.warn('[geo] Google routing failed, using OSRM:', e.message || e); }
+    } catch (e) {
+      console.warn('[geo] Google routing failed, using OSRM:', e.message || e);
+      if (isGoogleAuthFailure(e)) { googleHealth.routing = false; console.warn('[geo] Google routing disabled for this process (auth/billing) — using OSRM from now on.'); }
+    }
   }
 
   try {
@@ -292,4 +324,4 @@ function bjKey(bbox) {
   return Array.isArray(bbox) ? bbox.join(',') : '';
 }
 
-module.exports = { geocodeSearch, geocodeReverse, calculateRoute };
+module.exports = { geocodeSearch, geocodeReverse, calculateRoute, effectiveProviders };

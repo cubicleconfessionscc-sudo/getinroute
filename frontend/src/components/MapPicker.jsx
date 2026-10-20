@@ -2,10 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { LocateFixed } from 'lucide-react';
 import MapLibreMap from './MapLibreMap';
 import AddressPicker from './AddressPicker';
+import LocationText from './LocationText';
+import { resolveAddress } from '../lib/geo';
 
 export default function MapPicker({ lat, lng, onPick, height = '260px', label }) {
-  const valid = lat != null && lng != null && !isNaN(lat) && !isNaN(lng);
   const [cur, setCur] = useState({ lat: lat ?? null, lng: lng ?? null });
+  const valid = cur.lat != null && cur.lng != null && !isNaN(cur.lat) && !isNaN(cur.lng);
+  const [addr, setAddr] = useState('');
   const [geoLocating, setGeoLocating] = useState(false);
   const [geoErr, setGeoErr] = useState('');
 
@@ -15,8 +18,14 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
 
   const emit = (la, ln) => {
     if (la == null || ln == null) return;
-    setCur({ lat: Number(la), lng: Number(ln) });
-    if (onPick) onPick(Number(la), Number(ln));
+    const point = { lat: Number(la), lng: Number(ln) };
+    setCur(point);
+    // Name the point so users never have to read raw coordinates.
+    setAddr('');
+    resolveAddress(point.lat, point.lng)
+      .then((a) => { if (a) setAddr(a); })
+      .catch(() => {});
+    if (onPick) onPick(point.lat, point.lng);
   };
 
   const useMyLocation = () => {
@@ -38,8 +47,8 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <AddressPicker
-            value={valid ? { address: '', lat, lng } : null}
-            onChange={(item) => { if (item && item.lat != null && item.lng != null) emit(item.lat, item.lng); }}
+            value={valid ? { address: addr, lat: cur.lat, lng: cur.lng } : null}
+            onChange={(item) => { if (item && item.lat != null && item.lng != null) { emit(item.lat, item.lng); } }}
           />
         </div>
       </div>
@@ -47,7 +56,7 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
       <MapLibreMap
         center={cur.lat != null ? { lat: Number(cur.lat), lng: Number(cur.lng) } : null}
         zoom={valid ? 14 : 11}
-        markers={valid ? [{ lat: Number(lat), lng: Number(lng), color: 'indigo' }] : []}
+        markers={valid ? [{ id: 'pick', lat: Number(cur.lat), lng: Number(cur.lng), color: 'indigo' }] : []}
         onPick={(la, ln) => emit(la, ln)}
         onMarkerDrag={(id, la, ln) => emit(la, ln)}
         height={height}
@@ -55,7 +64,9 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
       />
       <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
         {label || 'Tap the map or drag the pin to set the location.'}{' '}
-        {valid ? `Lat ${Number(lat).toFixed(5)}, Lng ${Number(lng).toFixed(5)}` : 'No point selected yet.'}
+        {valid
+          ? <LocationText lat={cur.lat} lng={cur.lng} address={addr} max={120} />
+          : 'No point selected yet.'}
       </div>
     </div>
   );

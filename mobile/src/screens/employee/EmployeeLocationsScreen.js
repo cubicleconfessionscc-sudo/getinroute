@@ -29,12 +29,13 @@ import { colors, spacing, radius } from "../../theme";
 
 const hasCoords = (l) => Boolean(l && l.address && typeof l.lat === "number" && typeof l.lng === "number");
 
-export default function EmployeeLocationsScreen() {
+export default function EmployeeLocationsScreen({ navigation, route }) {
   const { user } = useAuth();
   const [profile, setProfile] = useState(null);
   const [company, setCompany] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const lastMapTs = useRef(null);
 
   const [tab, setTab] = useState("login"); // "login" | "logout"
 
@@ -91,6 +92,24 @@ export default function EmployeeLocationsScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Result handed back by the full-screen map picker. Applied once per pick
+  // (timestamp guard), then cleared so a remount never re-applies a stale one.
+  useEffect(() => {
+    const r = route?.params?.mapResult;
+    if (!r || r.ts == null || lastMapTs.current === r.ts) return;
+    lastMapTs.current = r.ts;
+    const point = { address: r.address || "", lat: r.lat ?? null, lng: r.lng ?? null };
+    if (r.target === "home") {
+      setHome((h) => ({ ...h, ...point, picking: false }));
+      setHomeSugg([]); setHomeErr("");
+    } else {
+      setPickup((prev) => ({ ...prev, ...point, nodalPointId: null, picking: false }));
+      setPickupMode("exact");
+      setPickupSugg([]); setPickupErr("");
+    }
+    if (navigation && navigation.setParams) navigation.setParams({ mapResult: undefined });
+  }, [route?.params?.mapResult, navigation]);
 
   // Live feedback when the admin approves/rejects this submission.
   useEffect(() => {
@@ -380,9 +399,17 @@ export default function EmployeeLocationsScreen() {
 
             {pickupMode === "exact" ? (
               <>
-                <TouchableOpacity style={styles.locateButton} onPress={useCurrentLocationForPickup} disabled={pickup.picking}>
-                  <Text style={styles.locateText}>{pickup.picking ? "Locating…" : "Set to my location"}</Text>
-                </TouchableOpacity>
+                <View style={styles.locateRow}>
+                  <TouchableOpacity style={styles.locateButton} onPress={useCurrentLocationForPickup} disabled={pickup.picking}>
+                    <Text style={styles.locateText}>{pickup.picking ? "Locating…" : "Set to my location"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.mapButton}
+                    onPress={() => navigation.navigate("EmployeeAddressMap", { target: "pickup", address: pickup.address, lat: pickup.lat, lng: pickup.lng })}
+                  >
+                    <Text style={styles.mapButtonText}>Pick on map</Text>
+                  </TouchableOpacity>
+                </View>
                 <TextInput
                   style={[styles.input, { marginTop: spacing.sm }]}
                   value={pickup.address}
@@ -436,9 +463,17 @@ export default function EmployeeLocationsScreen() {
               <Text style={styles.sectionHint}>Where the evening cab drops you when you leave</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.locateButton} onPress={useCurrentLocationForHome} disabled={home.picking}>
-            <Text style={styles.locateText}>{home.picking ? "Locating…" : "Set my home location"}</Text>
-          </TouchableOpacity>
+          <View style={styles.locateRow}>
+            <TouchableOpacity style={styles.locateButton} onPress={useCurrentLocationForHome} disabled={home.picking}>
+              <Text style={styles.locateText}>{home.picking ? "Locating…" : "Set my home location"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.mapButton}
+              onPress={() => navigation.navigate("EmployeeAddressMap", { target: "home", address: home.address, lat: home.lat, lng: home.lng })}
+            >
+              <Text style={styles.mapButtonText}>Pick on map</Text>
+            </TouchableOpacity>
+          </View>
           <TextInput
             style={[styles.input, { marginTop: spacing.sm }]}
             value={home.address}
@@ -552,11 +587,18 @@ const styles = StyleSheet.create({
   modeChipActive: { borderColor: colors.violet, backgroundColor: "rgba(139,124,246,0.12)" },
   modeChipText: { color: colors.textDim, fontSize: 13, fontWeight: "600" },
   modeChipTextActive: { color: colors.violet, fontWeight: "700" },
+  locateRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, alignItems: "center" },
   locateButton: {
     borderWidth: 1, borderColor: colors.teal, borderRadius: radius.sm,
     paddingVertical: 10, paddingHorizontal: 12, alignItems: "center", alignSelf: "flex-start"
   },
   locateText: { color: colors.teal, fontSize: 13, fontWeight: "700" },
+  mapButton: {
+    borderWidth: 1, borderColor: colors.violet, borderRadius: radius.sm,
+    paddingVertical: 10, paddingHorizontal: 12, alignItems: "center", alignSelf: "flex-start",
+    backgroundColor: "rgba(139,124,246,0.10)"
+  },
+  mapButtonText: { color: colors.violet, fontSize: 13, fontWeight: "700" },
   input: {
     backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line,
     borderRadius: radius.md, padding: 14, color: colors.text, fontSize: 15

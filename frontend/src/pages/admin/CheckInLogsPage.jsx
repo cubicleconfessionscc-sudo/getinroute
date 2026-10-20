@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { api, todayStr, downloadFile } from '../../api';
 import { Badge } from '../../components/ui';
+import LocationText from '../../components/LocationText';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
 import { Download, FileSpreadsheet } from 'lucide-react';
 
 const METHOD_COLORS = { swipe: 'slate', otp: 'indigo', missed: 'red' };
@@ -90,9 +92,10 @@ export default function CheckInLogsPage() {
                   </td>
                   <td>
                     {l.hasGps ? (
-                      <a href={`https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`} target="_blank" rel="noreferrer">
-                        {Number(l.lat).toFixed(5)}, {Number(l.lng).toFixed(5)}
-                      </a>
+                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', minWidth: 0 }}>
+                        <LocationText lat={l.lat} lng={l.lng} address={l.address || l.location_address || ''} max={60} />
+                        <ViewOnMapLink lat={l.lat} lng={l.lng} address={l.address || l.location_address || ''} label="Map" />
+                      </span>
                     ) : <span style={{ color: 'var(--muted)' }}>Not captured</span>}
                   </td>
                   <td>{l.tripDate || '—'}</td>

@@ -6,7 +6,7 @@
     "employee": {
       "file": "GetInRoute.apk",
       "url": "/download/GetInRoute.apk",
-      "bytes": 28738170,
+      "bytes": 28718242,
       "sizeLabel": "27 MB",
       "version": "1.0.9",
       "versionCode": 29,
@@ -15,7 +15,7 @@
     "driver": {
       "file": "GetInRouteDriver.apk",
       "url": "/download/GetInRouteDriver.apk",
-      "bytes": 28738178,
+      "bytes": 28718254,
       "sizeLabel": "27 MB",
       "version": "1.0.9",
       "versionCode": 7,
@@ -29,6 +29,15 @@
       "version": "1.0.5",
       "versionCode": 3,
       "packageName": "com.getinroute.school"
+    },
+    "admin": {
+      "file": "GetInRoute-Admin-1.1.7.apk",
+      "url": "/download/GetInRoute-Admin-1.1.7.apk",
+      "bytes": null,
+      "sizeLabel": null,
+      "version": "1.1.7",
+      "versionCode": 11,
+      "packageName": "com.getinroute.adminvendor"
     }
   }
 }

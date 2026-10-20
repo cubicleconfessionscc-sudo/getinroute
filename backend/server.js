@@ -307,15 +307,20 @@ app.get(['/health', '/api/health'], (req, res) => {
 // Public, unauthenticated runtime config for the web frontends (P2 maps).
 // The web map is rendered with MapLibre GL JS. Tile/geocoding/routing providers
 // are isolated server-side and exposed only as names here — never secrets.
+// Geocoding/routing come from ./geo, which reports the provider ACTUALLY in
+// use (a configured-but-rejected Google key — e.g. billing disabled — is
+// reported as photon/osrm, not google).
+const { geocodeSearch, geocodeReverse, calculateRoute, effectiveProviders } = require('./geo');
 app.get('/api/config/public', (req, res) => {
+  const eff = effectiveProviders();
   res.json({
     mapsProvider: 'maplibre',
-    // Report the provider actually used: Google when its key is configured.
-    geocodingProvider: process.env.GOOGLE_MAPS_API_KEY ? 'google' : (process.env.GEOCODING_PROVIDER || 'photon'),
-    routingProvider: process.env.GOOGLE_MAPS_API_KEY ? 'google' : (process.env.ROUTING_PROVIDER || 'osrm'),
-    // Browser key for the Google Maps JS API on Admin/Vendor ROUTE planning only.
-    // It is a browser key (referrer-restricted) so exposing it here is safe; the
-    // dashboard/live-tracking maps stay on MapLibre/OSM.
+    geocodingProvider: eff.geocoding,
+    routingProvider: eff.routing,
+    // Browser key for the Google Maps JS API (legacy). The admin/vendor picker
+    // no longer loads Google Maps at all, but the key is still exposed for the
+    // diagnostics page and any future browser Maps JS use. It is a
+    // referrer-restricted browser key, so exposing it here is safe.
     googleMapsKey: process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_BROWSER_KEY || null
   });
 });
@@ -324,7 +329,6 @@ app.get('/api/config/public', (req, res) => {
  * Geocoding (search + reverse) and routing are proxied server-side and
  * normalized, so the frontend never binds to one vendor. Providers are
  * configurable via GEOCODING_URL / ROUTING_URL env vars. */
-const { geocodeSearch, geocodeReverse, calculateRoute } = require('./geo');
 
 /* Address autocomplete. This MUST stay pre-auth: the public company-onboarding
  * wizard (/register-company) types into it before any account exists. Requiring

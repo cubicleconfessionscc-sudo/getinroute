@@ -5,6 +5,8 @@ import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
 import { Plus, Pencil, MapPin, Building2, Clock, Bus, Shield, Bell, MapPinned, X, Lock, Key, Copy, Smartphone, AlertTriangle, MessageCircle, ShieldAlert, HelpCircle, Trash2, Search, Palette } from 'lucide-react';
 import ThemePicker from '../../components/ThemePicker';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
+import { MAP_LOCATION_RESULT_KEY } from '../shared/LocationPickerPage';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -68,7 +70,7 @@ export default function SettingsPage() {
     window.addEventListener('message', onMessage);
     // Same-tab fallback used by embedded/mobile webviews when window.open is blocked.
     try {
-      const raw = sessionStorage.getItem('nodal-map-result');
+      const raw = sessionStorage.getItem(MAP_LOCATION_RESULT_KEY);
       if (raw) {
         const result = JSON.parse(raw);
         const draft = JSON.parse(sessionStorage.getItem('nodal-map-draft') || '{}');
@@ -77,7 +79,7 @@ export default function SettingsPage() {
           setNpEdit(draft.npEdit || null);
           setNpForm({ ...draft.npForm, address: result.address, lat: result.lat, lng: result.lng, place_id: result.place_id || '' });
           setNpModal(true);
-          sessionStorage.removeItem('nodal-map-result');
+          sessionStorage.removeItem(MAP_LOCATION_RESULT_KEY);
           sessionStorage.removeItem('nodal-map-draft');
         }
       }
@@ -88,7 +90,7 @@ export default function SettingsPage() {
   const openMapPicker = () => {
     const token = (window.crypto?.randomUUID && window.crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     mapReturnToken.current = token;
-    const q = new URLSearchParams({ returnToken: token, radius: String(npForm.radiusMeters || 1000) });
+    const q = new URLSearchParams({ returnToken: token, radius: String(npForm.radiusMeters || 1000), returnTo: '/admin/settings', title: 'Select company address on the map' });
     if (npForm.lat != null) q.set('lat', String(npForm.lat));
     if (npForm.lng != null) q.set('lng', String(npForm.lng));
     if (npForm.address) q.set('address', npForm.address);
@@ -545,15 +547,19 @@ function NodalPointModal({ open, onClose, npEdit, npForm, setNpForm, onMap, onSa
           </Field>
         </div>
         <button type="button" data-testid="select-google-address" className="btn btn-outline" onClick={onMap}>
-          <MapPin size={16} /> Select address on Google Maps
+          <MapPin size={16} /> Select address on map
         </button>
-        <Field label="Formatted address">
-          <input data-testid="address-formatted" value={npForm.address || ''} readOnly placeholder="Choose an address on Google Maps" />
+        <Field label="Address">
+          <input data-testid="address-formatted" value={npForm.address || ''} readOnly placeholder="Search, or drop a pin on the map" />
         </Field>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Field label="Latitude"><input data-testid="address-lat" type="number" value={npForm.lat ?? ''} readOnly /></Field>
-          <Field label="Longitude"><input data-testid="address-lng" type="number" value={npForm.lng ?? ''} readOnly /></Field>
-        </div>
+        {npForm.lat != null && npForm.lng != null && (
+          <div data-testid="address-view-map" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <ViewOnMapLink lat={npForm.lat} lng={npForm.lng} address={npForm.address} label="View on Google Maps" />
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+              Location is stored as coordinates internally for routing and tracking.
+            </span>
+          </div>
+        )}
         {npForm.place_id ? <div data-testid="address-place-id" style={{ fontSize: 12, color: 'var(--muted)' }}>Place ID: {npForm.place_id}</div> : null}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>

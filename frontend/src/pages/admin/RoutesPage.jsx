@@ -3,9 +3,10 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { Modal, Badge, useToast } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
-import GoogleMapPicker from '../../components/GoogleMapPicker';
-import GoogleRouteMap from '../../components/GoogleRouteMap';
-import { calculateRoute } from '../../lib/geo';
+import MapPicker from '../../components/MapPicker';
+import LocationText from '../../components/LocationText';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
+import { calculateRoute, pickLocation } from '../../lib/geo';
 import { Plus, Pencil, Trash2, Route as RouteIcon, GripVertical, MapPin, MapPinned, User, Navigation, Loader2, Wand2, Play, CalendarClock } from 'lucide-react';
 
 // A route is built from a Route Type (LOGIN / LOGOUT) + an office + an editable
@@ -550,9 +551,21 @@ export default function RoutesPage() {
 
           <div style={{ margin: '10px 0 4px', padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2)', fontSize: 13 }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{form.route_type} route summary</div>
-            <div>📍 <b>Start:</b> {effStart().name || '—'} {hasXY(effStart()) ? `(${Number(effStart().lat).toFixed(4)}, ${Number(effStart().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing</span>}</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+              <span>📍 <b>Start:</b> {effStart().name || '—'}</span>
+              {hasXY(effStart())
+                ? <LocationText lat={effStart().lat} lng={effStart().lng} address={effStart().address} max={90} />
+                : <span style={{ color: '#ef4444' }}>· missing</span>}
+              {hasXY(effStart()) && <ViewOnMapLink lat={effStart().lat} lng={effStart().lng} address={effStart().address} label="Map" />}
+            </div>
             <div style={{ color: 'var(--muted)', margin: '4px 0' }}>↓ {form.stops.map((s, i) => `${i + 1}. ${s.employee_name || s.name || '—'}`).join('  →  ') || '—'}</div>
-            <div>🏢 <b>End:</b> {effEnd().name || '—'} {hasXY(effEnd()) ? `(${Number(effEnd().lat).toFixed(4)}, ${Number(effEnd().lng).toFixed(4)})` : <span style={{ color: '#ef4444' }}>· missing</span>}</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+              <span>🏢 <b>End:</b> {effEnd().name || '—'}</span>
+              {hasXY(effEnd())
+                ? <LocationText lat={effEnd().lat} lng={effEnd().lng} address={effEnd().address} max={90} />
+                : <span style={{ color: '#ef4444' }}>· missing</span>}
+              {hasXY(effEnd()) && <ViewOnMapLink lat={effEnd().lat} lng={effEnd().lng} address={effEnd().address} label="Map" />}
+            </div>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
@@ -652,11 +665,14 @@ export default function RoutesPage() {
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Type the address and pick from the dropdown, tap anywhere on the map, drag the pin, or use your current location.</p>
         <AddressPicker onChange={(item) => applyAddress(mapFor, item)} />
         <div style={{ marginTop: 12 }}>
-          <GoogleMapPicker
+          <MapPicker
             lat={(mapCenterFor(mapFor) || {}).lat ?? null}
             lng={(mapCenterFor(mapFor) || {}).lng ?? null}
             height={300}
-            onPick={(la, ln) => applyAddress(mapFor, { lat: la, lng: ln, address: `${Number(la).toFixed(5)}, ${Number(ln).toFixed(5)}` })}
+            onPick={(la, ln) => {
+              applyAddress(mapFor, { lat: la, lng: ln, address: '' });
+              pickLocation(la, ln).then((p) => { if (p) applyAddress(mapFor, { lat: la, lng: ln, address: p.address }); });
+            }}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>

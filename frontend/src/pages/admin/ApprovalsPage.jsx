@@ -3,7 +3,9 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { Badge, useToast, Modal } from '../../components/ui';
 import AddressPicker from '../../components/AddressPicker';
-import GoogleMapPicker from '../../components/GoogleMapPicker';
+import MapPicker from '../../components/MapPicker';
+import ViewOnMapLink from '../../components/ViewOnMapLink';
+import { pickLocation } from '../../lib/geo';
 import { Check, X, ClipboardCheck, Building2, Users, Truck, Mail, Phone, Search, Trash2, MapPin, Home } from 'lucide-react';
 
 export default function ApprovalsPage() {
@@ -247,7 +249,11 @@ export default function ApprovalsPage() {
                   {au.current_address && <div style={{ marginBottom: 4 }}><b>Current:</b> {au.current_address}</div>}
                   <div style={{ background: '#fffbeb', padding: 8, borderRadius: 8, border: '1px dashed #f59e0b', marginBottom: au.reviewed_at ? 4 : 0 }}>
                     <b>Requested:</b> {au.new_address}
-                    {au.new_lat && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>({Number(au.new_lat).toFixed(5)}, {Number(au.new_lng).toFixed(5)})</div>}
+                    {au.new_lat != null && (
+                      <div style={{ marginTop: 4 }}>
+                        <ViewOnMapLink lat={au.new_lat} lng={au.new_lng} address={au.new_address} label="View requested location on Google Maps" />
+                      </div>
+                    )}
                   </div>
                   {au.reviewed_at && <div style={{ fontSize: 11, color: 'var(--muted)' }}>Reviewed {au.reviewed_at}</div>}
                 </div>
@@ -348,12 +354,19 @@ export default function ApprovalsPage() {
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Search and select the correct address from the map dropdown, then save. This replaces the employee's requested address and keeps their access active (status: corrected, not rejected).</p>
         <AddressPicker value={null} onChange={(item) => setFixAddr(item)} />
         <div style={{ marginTop: 12 }}>
-          <GoogleMapPicker
+          <MapPicker
             lat={fixAddr?.lat ?? null}
             lng={fixAddr?.lng ?? null}
             height={300}
-            label="Tap the Google map or drag the pin to set the exact corrected location."
-            onPick={(la, ln) => setFixAddr((prev) => ({ ...(prev || {}), lat: la, lng: ln, address: prev?.address || `${Number(la).toFixed(5)}, ${Number(ln).toFixed(5)}` }))}
+            label="Tap the map or drag the pin to set the exact corrected location."
+            onPick={(la, ln) => {
+              setFixAddr((prev) => ({ ...(prev || {}), lat: la, lng: ln, address: '' }));
+              // Name the point so the correction shows an address, not coordinates.
+              pickLocation(la, ln).then((p) => {
+                if (!p) return;
+                setFixAddr((prev) => (prev && prev.lat === la && prev.lng === ln ? { ...prev, address: p.address } : prev));
+              });
+            }}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
