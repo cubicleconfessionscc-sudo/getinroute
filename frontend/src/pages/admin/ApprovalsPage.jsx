@@ -352,7 +352,7 @@ export default function ApprovalsPage() {
 
       <Modal open={!!fixModal} onClose={() => { setFixModal(null); setFixAddr(null); }} title={`Set correct address for ${fixModal?.user_name || ''}`} wide>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Search and select the correct address from the map dropdown, then save. This replaces the employee's requested address and keeps their access active (status: corrected, not rejected).</p>
-        <AddressPicker value={null} onChange={(item) => setFixAddr(item)} />
+        <AddressPicker mapButton={false} value={null} onChange={(item) => setFixAddr(item)} />
         <div style={{ marginTop: 12 }}>
           <MapPicker
             lat={fixAddr?.lat ?? null}

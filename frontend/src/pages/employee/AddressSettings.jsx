@@ -1,30 +1,29 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, todayStr } from '../../api';
 import { useAuth } from '../../auth';
 import { useToast } from '../../components/ui';
-import AddressPicker from '../../components/AddressPicker';
+import AddressPicker, { MapPickerModal } from '../../components/AddressPicker';
 import ViewOnMapLink from '../../components/ViewOnMapLink';
 import { pickLocation } from '../../lib/geo';
-import { MAP_LOCATION_RESULT_KEY } from '../shared/LocationPickerPage';
 import { MapPin, Loader2, Send, Map, Search, LocateFixed } from 'lucide-react';
 
 /* Employee "My Address".
-   Three ways to set a pickup point — full-screen map picker, address search,
-   or current location — all of which end with a Confirm on a named address.
-   Latitude/longitude keep being submitted with the address (unchanged API),
-   so routing and tracking are unaffected; only the display is human-readable. */
+   Three ways to set a pickup point — an inline map picker that opens right on
+   this page, address search, or current location — all of which end with a
+   Confirm on a named address. Latitude/longitude keep being submitted with the
+   address (unchanged API), so routing and tracking are unaffected; only the
+   display is human-readable. */
 
 const METHOD = { MAP: 'map', SEARCH: 'search', CURRENT: 'current' };
-const DRAFT_KEY = 'address-map-draft';
 
 export default function AddressSettings() {
   const { user } = useAuth();
   const toast = useToast();
-  const mapReturnToken = useRef(null);
   const [updates, setUpdates] = useState([]);
   const [pick, setPick] = useState(null);
   const [manual, setManual] = useState('');
   const [method, setMethod] = useState(METHOD.MAP);
+  const [mapOpen, setMapOpen] = useState(false);
   const [locating, setLocating] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -34,60 +33,13 @@ export default function AddressSettings() {
   useEffect(() => { load(); }, []);
   useEffect(() => { void load(); }, [user]);
 
-  // Result from the full-screen map picker: a popup posts a message, a
-  // same-tab webview lands back here and we read sessionStorage instead.
-  useEffect(() => {
-    const onMessage = (event) => {
-      if (event.origin !== window.location.origin) return;
-      const d = event.data || {};
-      if (d.type !== 'GETINROUTE_MAP_LOCATION') return;
-      if (mapReturnToken.current && d.returnToken && d.returnToken !== mapReturnToken.current) return;
-      if (d.address && d.lat != null && d.lng != null) {
-        setPick({ address: d.address, lat: d.lat, lng: d.lng, place_id: d.place_id || '' });
-        toast('Location picked on the map — confirm below.');
-      }
-    };
-    window.addEventListener('message', onMessage);
-    try {
-      const raw = sessionStorage.getItem(MAP_LOCATION_RESULT_KEY);
-      if (raw) {
-        const result = JSON.parse(raw);
-        const draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || '{}');
-        if (result && (!draft.returnToken || draft.returnToken === result.returnToken)) {
-          mapReturnToken.current = result.returnToken;
-          if (result.address && result.lat != null && result.lng != null) {
-            setPick({ address: result.address, lat: result.lat, lng: result.lng, place_id: result.place_id || '' });
-          }
-        }
-        sessionStorage.removeItem(MAP_LOCATION_RESULT_KEY);
-        sessionStorage.removeItem(DRAFT_KEY);
-      }
-    } catch (e) { /* private-mode / disabled storage */ }
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
+  // The newest pending request hides the update form (mirrors the server rule
+  // that only one address change can be in flight per employee).
+  const pending = updates.find((u) => u.status === 'pending') || null;
 
   const openMapPicker = () => {
     setMethod(METHOD.MAP);
-    const token = (window.crypto?.randomUUID && window.crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    mapReturnToken.current = token;
-    const q = new URLSearchParams({ returnToken: token, returnTo: '/app/address', title: 'Select your pickup location' });
-    if (pick?.lat != null && pick?.lng != null) {
-      q.set('lat', String(pick.lat));
-      q.set('lng', String(pick.lng));
-      if (pick.address) q.set('address', pick.address);
-      if (pick.place_id) q.set('place_id', pick.place_id);
-    }
-    const url = `/app/map-picker?${q.toString()}`;
-    if (window.ReactNativeWebView) {
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ returnToken: token }));
-      window.location.assign(url);
-      return;
-    }
-    const popup = window.open(url, '_blank');
-    if (!popup) {
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ returnToken: token }));
-      window.location.assign(url);
-    }
+    setMapOpen(true);
   };
 
   const handleMapPick = async (lat, lng) => {
@@ -191,7 +143,7 @@ export default function AddressSettings() {
             {method === METHOD.MAP && (
               <div style={{ marginTop: 12 }}>
                 <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>
-                  Opens the full-screen map: search an address, drag the pin, then tap <b>Confirm location</b>.
+                  Opens the map right on this page: search an address, drag the pin, then tap <b>Confirm location</b>.
                 </p>
                 <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={openMapPicker} type="button">
                   <Map size={16} /> {pick ? 'Re-open map to adjust' : 'Open map picker'}
@@ -264,6 +216,14 @@ export default function AddressSettings() {
           )}
         </>
       )}
+
+      <MapPickerModal
+        open={mapOpen}
+        title="Select your pickup location"
+        initial={pick}
+        onPick={(item) => { setPick(item); toast('Location picked on the map — confirm below.'); }}
+        onClose={() => setMapOpen(false)}
+      />
     </div>
   );
 }

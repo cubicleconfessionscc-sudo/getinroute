@@ -223,7 +223,7 @@ export default function AdminOpsPage() {
             <input value={addrForm.label} onChange={(e) => setAddrForm({ ...addrForm, label: e.target.value })} placeholder="e.g. Bangalore Location 1" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Address (Google Maps picker)</label>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Address — search, or pick on the map</label>
             <AddressPicker value={addrForm.lat != null ? { address: addrForm.address, lat: addrForm.lat, lng: addrForm.lng } : null} onChange={(v) => setAddrForm({ ...addrForm, address: v.address, lat: v.lat, lng: v.lng })} />
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

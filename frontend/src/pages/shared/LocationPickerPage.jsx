@@ -129,7 +129,7 @@ export default function LocationPickerPage() {
         </div>
       )}
 
-      <AddressPicker value={hasPoint ? { address: selected.address || '', lat: selected.lat, lng: selected.lng } : null} onChange={onSearchPick} />
+      <AddressPicker mapButton={false} value={hasPoint ? { address: selected.address || '', lat: selected.lat, lng: selected.lng } : null} onChange={onSearchPick} />
 
       <div style={{ flex: 1, minHeight: 280 }} data-testid="location-map">
         <MapLibreMap

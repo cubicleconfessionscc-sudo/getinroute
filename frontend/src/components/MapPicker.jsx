@@ -47,6 +47,7 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <AddressPicker
+            mapButton={false}
             value={valid ? { address: addr, lat: cur.lat, lng: cur.lng } : null}
             onChange={(item) => { if (item && item.lat != null && item.lng != null) { emit(item.lat, item.lng); } }}
           />

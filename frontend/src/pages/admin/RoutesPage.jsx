@@ -535,6 +535,7 @@ export default function RoutesPage() {
                 {employeesWithAddr.map((e) => (<option key={empIdOf(e)} value={empIdOf(e)}>{e.name} · {e.emp_id || e.employeeId}</option>))}
               </select>
               <AddressPicker
+                mapButton={false}
                 value={(s.lat && s.lng) ? { address: s.name, lat: s.lat, lng: s.lng } : (s.name ? { address: s.name } : null)}
                 onChange={(item) => setStopAddress(i, item)}
               />
@@ -663,7 +664,7 @@ export default function RoutesPage() {
 
       <Modal open={mapFor !== null} onClose={() => setMapFor(null)} title="Search & select location" wide>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Type the address and pick from the dropdown, tap anywhere on the map, drag the pin, or use your current location.</p>
-        <AddressPicker onChange={(item) => applyAddress(mapFor, item)} />
+        <AddressPicker mapButton={false} onChange={(item) => applyAddress(mapFor, item)} />
         <div style={{ marginTop: 12 }}>
           <MapPicker
             lat={(mapCenterFor(mapFor) || {}).lat ?? null}
