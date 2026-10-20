@@ -12,6 +12,9 @@ on:
       - 'scripts/verify-site-config.mjs'
       - '.github/workflows/deploy.yml'
       - '.gitattributes'
+      # These decide what `railway up` packs into the deploy archive.
+      - '.gitignore'
+      - '.railwayignore'
   workflow_dispatch: {}
 
 jobs:
