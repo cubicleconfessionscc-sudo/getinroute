@@ -1,0 +1,13 @@
+# Keep CLI uploads small: the backend image never needs APK mirrors,
+# monorepo app sources, or backups. backend/ must stay in the archive
+# because rootDirectory=backend makes the builder look for <snapshot>/backend.
+Client-Demo-Submission/
+Employee-Driver-APKs/
+Phase1-Builds/
+mobile-backup/
+mobile/
+release/
+frontend/
+backend/binaries/
+backend/public/download/
+Temp/

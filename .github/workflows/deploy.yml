@@ -50,8 +50,8 @@ jobs:
           node scripts/sync-site-apps.mjs --verify
           node scripts/verify-site-config.mjs
 
-      - name: Install Railway CLI (pinned 5.30.4)
-        run: npm install -g @railway/cli@5.30.4
+      - name: Install Railway CLI (pinned 5.68.0)
+        run: npm install -g @railway/cli@5.68.0
 
       - name: Restore Railway session
         env:
@@ -65,7 +65,10 @@ jobs:
           railway whoami
 
       - name: Deploy to Railway (production)
-        working-directory: backend
+        # Must run from the repo root: the service's rootDirectory=backend makes
+        # the builder look for <snapshot>/backend, so uploading from backend/
+        # (which flattens the archive) fails with "snapshot-target-unpack/backend:
+        # no such file or directory". .railwayignore keeps the root upload small.
         run: |
           # --detach avoids depending on Railway's build-log stream, which
           # intermittently dies with "Failed to retrieve build log" and fails the
