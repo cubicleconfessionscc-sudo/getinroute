@@ -5,11 +5,15 @@ import { adminLogin, vendorLogin } from "../../api/adminvendor";
 import { colors, spacing, radius } from "../../theme";
 
 // First screen of the Admin/Vendor app: choose Admin or Vendor, then sign in.
-// The login screen renders immediately; no network/Socket/GPS runs before this.
+// Optional location code: when the account is bound to an operational location,
+// the code issued for that location (invite code) must be entered to sign in
+// scoped to it. The login screen renders immediately; no network/Socket/GPS
+// runs before this.
 export default function AdminVendorLogin({ onSuccess }) {
   const [mode, setMode] = useState(null); // null | 'admin' | 'vendor'
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [locationCode, setLocationCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -18,9 +22,10 @@ export default function AdminVendorLogin({ onSuccess }) {
     if (!identifier.trim() || !password) { setErr("Enter your credentials."); return; }
     setBusy(true); setErr("");
     try {
+      const code = locationCode.trim().toUpperCase();
       const r = mode === "vendor"
-        ? await vendorLogin(identifier.trim(), password)
-        : await adminLogin(identifier.trim(), password);
+        ? await vendorLogin(identifier.trim(), password, code || undefined)
+        : await adminLogin(identifier.trim(), password, code || undefined);
       if (!r || !r.token || !r.user) throw new Error("Login failed: unexpected response.");
       await saveToken(r.token);
       onSuccess(r.user, mode);
@@ -76,6 +81,17 @@ export default function AdminVendorLogin({ onSuccess }) {
           placeholderTextColor={colors.textDim}
           secureTextEntry
         />
+        <Text style={styles.label}>LOCATION CODE (OPTIONAL)</Text>
+        <TextInput
+          style={styles.input}
+          value={locationCode}
+          onChangeText={(t) => setLocationCode(t.toUpperCase())}
+          placeholder="ABCD-EFGH-JKLM"
+          placeholderTextColor={colors.textDim}
+          autoCapitalize="characters"
+          autoCorrect={false}
+        />
+        <Text style={styles.codeHint}>Required only if your account is bound to a location. The code is issued by your company admin.</Text>
         <TouchableOpacity style={[styles.primary, busy && styles.off]} disabled={busy} onPress={submit}>
           {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Sign in</Text>}
         </TouchableOpacity>
@@ -100,5 +116,6 @@ const styles = StyleSheet.create({
   primaryText: { color: "#fff", fontWeight: "800", fontSize: 15, letterSpacing: 0.4 },
   back: { color: colors.textDim, textAlign: "center", marginTop: spacing.md, fontWeight: "700" },
   error: { color: colors.coral, backgroundColor: "#fef2f2", borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 6 },
+  codeHint: { color: colors.textDim, fontSize: 11, marginTop: 6, lineHeight: 15 },
   foot: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: spacing.lg }
 });

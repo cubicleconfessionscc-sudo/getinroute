@@ -1045,11 +1045,13 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
   let sessionLoc = null;
   const rawLoc = req.body && req.body.company_location_id;
   const rawCode = req.body && req.body.locationCode;
-  if (user.role === 'admin' && rawLoc != null && rawLoc !== '') {
+  if ((user.role === 'admin' || user.role === 'vendor') && rawLoc != null && rawLoc !== '') {
     const locId = Number(rawLoc);
     const cid = user.company_id != null ? Number(user.company_id) : Number(user.id);
     const loc = db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(locId, cid);
-    if (!loc) {
+    const vendorLocOk = user.role === 'vendor' && locId && !loc &&
+      db.prepare('SELECT id FROM company_locations WHERE id=?').get(locId);
+    if (!loc && !vendorLocOk) {
       authLog('login location-invalid', { id: user.id, loc: locId });
       return res.status(403).json({ error: 'The selected location is not valid for your company.', code: 'LOCATION_INVALID' });
     }
@@ -1057,12 +1059,15 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
       authLog('login location-forbidden', { id: user.id, loc: locId, allowed: user.company_location_id });
       return res.status(403).json({ error: 'You are not authorized for the selected location.', code: 'LOCATION_FORBIDDEN' });
     }
-    // If this admin is location-scoped, they MUST present a valid location code
-    // and the code MUST match the active code for the chosen location.
-    if (user.company_location_id != null) {
-      if (!rawCode) {
-        return res.status(403).json({ error: 'Enter the location code for this location.', code: 'LOCATION_CODE_REQUIRED' });
-      }
+    // A location-scoped admin or any vendor MUST present a code. Additionally,
+    // whenever a code IS supplied it is always validated against the chosen
+    // location — a wrong or revoked code is rejected for everyone (fail closed).
+    // A company-wide admin who supplies no code keeps the legacy behaviour.
+    const codeRequired = user.company_location_id != null || user.role === 'vendor';
+    if (codeRequired && !rawCode) {
+      return res.status(403).json({ error: 'Enter the location code for this location.', code: 'LOCATION_CODE_REQUIRED' });
+    }
+    if (rawCode) {
       const codeRow = db.prepare(`SELECT id, status FROM location_codes
         WHERE company_location_id=? AND code=?`).get(locId, String(rawCode).trim().toUpperCase());
       if (!codeRow || codeRow.status !== 'active') {
@@ -1071,7 +1076,7 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
       }
     }
     sessionLoc = locId;
-  } else if (user.role === 'admin' && user.company_location_id != null && rawCode) {
+  } else if ((user.role === 'admin' || user.role === 'vendor') && user.company_location_id != null && rawCode) {
     // Caller supplied a code but no location_id. We use the admin's bound
     // location and verify the code against it. This lets a pre-filled
     // location login form work without an explicit company_location_id.
@@ -1372,6 +1377,7 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
       stateRowByName[sName] = existing;
     }
     let addressesCreated = 0;
+    const locationCodes = [];
     for (const a of addressPlan) {
       const stateId = stateRowByName[a.state].id;
       let city = db.prepare('SELECT id FROM company_cities WHERE company_id=? AND state_id=? AND name=?').get(userId, stateId, a.city);
@@ -1384,6 +1390,8 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
         const info4 = db.prepare('INSERT INTO company_locations (company_id, state_id, city_id, name, address, lat, lng) VALUES (?,?,?,?,?,?,?)')
           .run(userId, stateId, city.id, a.name, a.address || null, a.lat, a.lng);
         loc = { id: Number(info4.lastInsertRowid) };
+        const code = issueLocationCode(loc.id, userId, userId);
+        locationCodes.push({ location_id: loc.id, location: a.name, city: a.city, state: a.state, code });
       } else if (a.address || a.lat != null || a.lng != null) {
         db.prepare('UPDATE company_locations SET address=COALESCE(?, address), lat=COALESCE(?, lat), lng=COALESCE(?, lng) WHERE id=?')
           .run(a.address || null, a.lat, a.lng, loc.id);
@@ -1400,7 +1408,7 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
       }
     }
     db.exec('COMMIT');
-      result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated };
+      result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated, locationCodes };
       // Test-only: AUTO_APPROVE_COMPANIES=1 marks the new admin user as
       // approved immediately. The web Playwright suite uses this so it can
       // log in as the just-created company admin without first going through
@@ -1430,6 +1438,7 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
     statesCreated: result.statesCreated,
     locationsCreated: result.locationsCreated,
     addressesCreated: result.addressesCreated,
+    locationCodes: result.locationCodes || [],
     // Test-only fields (only present when AUTO_APPROVE_COMPANIES=1).
     ...(result.testEmail ? { testEmail: result.testEmail, testPassword: result.testPassword } : {})
   });
@@ -2576,7 +2585,9 @@ app.post('/api/admin/locations/locations', auth, role('admin'), (req, res) => {
   const lng = b.lng == null || b.lng === '' ? null : Number(b.lng);
   const info = db.prepare('INSERT INTO company_locations (company_id, state_id, city_id, name, address, lat, lng) VALUES (?,?,?,?,?,?,?)')
     .run(cid, city.state_id, cityId, name, String(b.address || '').trim() || null, lat, lng);
-  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+  const newLocId = Number(info.lastInsertRowid);
+  const code = issueLocationCode(newLocId, cid, req.user.id);
+  res.json({ ok: true, id: newLocId, code });
 });
 
 app.delete('/api/admin/locations/locations/:id', auth, role('admin'), (req, res) => {
@@ -4747,6 +4758,19 @@ app.put('/api/driver/status', auth, role('driver'), (req, res) => {
   const s = LIVE_STATUSES.includes(status) ? status : veh.live_status;
   db.prepare('UPDATE vehicles SET live_status=?, current_stop=? WHERE id=?')
     .run(s, stop_id != null ? Number(stop_id) : veh.current_stop, veh.id);
+  // Trip-dashboard: record when the driver physically reaches a pickup/drop stop.
+  if (s === 'arrived' || s === 'boarding') {
+    const nextSched = db.prepare(`SELECT id, employee_id FROM schedules
+      WHERE vehicle_id=? AND date=? AND status IN ('confirmed','in_progress')
+      ORDER BY pickup_time, id LIMIT 1`)
+      .get(veh.id, dateOnly());
+    if (nextSched) {
+      addTripEvent(nextSched.id, 'driver_arrived', {
+        driver_id: req.user.id,
+        live_status: s, lat: veh.lat ?? null, lng: veh.lng ?? null
+      });
+    }
+  }
   const updated = db.prepare('SELECT * FROM vehicles WHERE id=?').get(veh.id);
   const payload = { vehicle_id: updated.id, live_status: updated.live_status, current_stop: updated.current_stop, status: updated.status, lat: updated.lat, lng: updated.lng, vehicle_name: updated.vehicle_name, plate: updated.plate, driver_name: updated.driver_name };
   emitToAdmins('driver:status', payload);
@@ -5039,6 +5063,67 @@ const EXPORT_KINDS = {
   tracking: {
     headers: ['Employee', 'ID', 'Phone', 'Department', 'Address', 'Lat', 'Lng', 'Last Update'],
     rows: () => db.prepare(`SELECT name, emp_id, phone, department, home_address, lat, lng, last_update FROM users WHERE role='employee' ORDER BY name`).all().map(Object.values)
+  },
+  // Trip dashboard: one row per scheduled trip with the full lifecycle timeline
+  // (employee login time, driver login time, when the driver reached the
+  // employee, check-in swipe, office arrival, checkout, end-trip) for Excel.
+  'trip-dashboard': {
+    headers: ['Date', 'Emp ID', 'Employee', 'Vehicle', 'Plate', 'Driver', 'Route', 'Trip Type',
+      'Scheduled Login', 'Employee Last Login', 'Driver Last Login',
+      'Boarded (Driver Verified)', 'Driver Arrived At Pickup', 'Check-in Swipe', 'Office Arrival', 'Checkout', 'End Trip', 'Status', 'Cancel Reason'],
+    rows: (req) => {
+      const sc = companyAdminScope(req);
+      const ls = locationScope(req);
+      const params = [];
+      let where = '1=1';
+      if (isVendorReq(req)) {
+        where += ' AND v.vendor_id = ?';
+        params.push(req.user.vendor_id);
+      } else {
+        if (!sc.isOwner) { where += ' AND u.company_id = ?'; params.push(sc.cid); }
+        if (Array.isArray(ls) && ls.length) { where += ` AND u.company_location_id IN (${ls.map(() => '?').join(',')})`; params.push(...ls); }
+      }
+      const sched = db.prepare(`SELECT s.*, u.emp_id, u.name AS emp_name, u.last_login AS emp_last_login,
+        v.vehicle_name, v.plate, v.driver_name,
+        (SELECT du.last_login FROM users du WHERE du.role='driver' AND du.vehicle_id = v.id ORDER BY du.id LIMIT 1) AS drv_last_login,
+        r.name AS route_name
+        FROM schedules s
+        LEFT JOIN users u ON u.id = s.employee_id
+        LEFT JOIN vehicles v ON v.id = s.vehicle_id
+        LEFT JOIN routes r ON r.id = s.route_id
+        WHERE ${where} ORDER BY s.date DESC, s.id`).all(...params);
+      const ciBySched = new Map();
+      for (const ci of db.prepare('SELECT * FROM checkins').all()) {
+        if (!ciBySched.has(ci.schedule_id)) ciBySched.set(ci.schedule_id, []);
+        ciBySched.get(ci.schedule_id).push(ci);
+      }
+      const evBySched = new Map();
+      for (const ev of db.prepare('SELECT * FROM trip_events ORDER BY id').all()) {
+        if (!evBySched.has(ev.schedule_id)) evBySched.set(ev.schedule_id, []);
+        evBySched.get(ev.schedule_id).push(ev);
+      }
+      const fmtTs = (t) => { if (!t) return '—'; const d = new Date(t); return isNaN(d) ? String(t) : d.toLocaleString('en-GB'); };
+      const fmtEv = (schedId, kind) => {
+        const list = evBySched.get(schedId) || [];
+        const hit = list.filter((e) => e.kind === kind).pop();
+        return hit ? fmtTs(hit.created_at) : '—';
+      };
+      return sched.map((s) => {
+        const cis = ciBySched.get(s.id) || [];
+        const checkinSwipe = cis.filter((c) => c.type === 'checkin').map((c) => c.time).filter(Boolean).sort().pop();
+        const officeArrival = cis.filter((c) => c.type === 'checkout').map((c) => c.time).filter(Boolean).sort().pop();
+        return [s.date, s.emp_id || '—', s.emp_name || '—', s.vehicle_name || '—', s.plate || '—',
+          s.driver_name || '—', s.route_name || '—', s.direction || 'login',
+          s.login_time || s.pickup_time || '—',
+          fmtTs(s.emp_last_login), fmtTs(s.drv_last_login),
+          fmtEv(s.id, 'boarded'), fmtEv(s.id, 'driver_arrived'),
+          checkinSwipe ? fmtTs(checkinSwipe) : '—',
+          officeArrival ? fmtTs(officeArrival) : fmtEv(s.id, 'office_arrival'),
+          fmtEv(s.id, 'checkout'), fmtEv(s.id, 'run_completed'),
+          s.cancel_status === 'requested' ? 'Cancelled (requested)' : (s.state || s.status || '—'),
+          s.cancel_reason || '—'];
+      });
+    }
   }
 };
 
@@ -5072,8 +5157,8 @@ function exportXlsxRoute(req, res) {
   }
 }
 
-app.get('/api/admin/export/:kind.xlsx', auth, role('admin'), exportXlsxRoute);
-app.get('/api/admin/export/:kind', auth, role('admin'), exportRoute);
+app.get('/api/admin/export/:kind.xlsx', auth, role('admin', 'vendor'), exportXlsxRoute);
+app.get('/api/admin/export/:kind', auth, role('admin', 'vendor'), exportRoute);
 
 // Analytics report exports (reuse the V3 report generators).
 function reportExportRoute(req, res, isXlsx) {
@@ -5898,6 +5983,23 @@ function genVendorCode() {
   return 'VND-' + crypto.randomBytes(3).toString('hex').toUpperCase();
 }
 
+function genLocationCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 12; i++) {
+    if (i > 0 && i % 4 === 0) s += '-';
+    s += alphabet[crypto.randomBytes(1)[0] % alphabet.length];
+  }
+  return s;
+}
+
+function issueLocationCode(locationId, companyId, userId) {
+  const code = genLocationCode();
+  db.prepare(`INSERT INTO location_codes (code, company_id, company_location_id, status, issued_by)
+    VALUES (?,?,?,'active',?)`).run(code, companyId, locationId, userId);
+  return code;
+}
+
 function publicVendor(v) {
   return { id: v.id, name: v.name || ('Vendor #' + v.id), email: v.email, phone: v.phone, status: v.status || 'active',
     assigned_locations: safeLocations(v.assigned_locations), created_at: v.created_at,
@@ -5957,7 +6059,7 @@ function vendorAuth(req, res, next) {
 }
 
 app.post('/api/vendor/login', guard(60, 15 * 60 * 1000), (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, locationCode, company_location_id } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password required', message: 'Email and password required' });
   const ident = String(email).trim();
   const vendor = db.prepare('SELECT * FROM vendors WHERE email = ? OR UPPER(vendor_code) = UPPER(?)').get(ident.toLowerCase(), ident);
@@ -5965,10 +6067,29 @@ app.post('/api/vendor/login', guard(60, 15 * 60 * 1000), (req, res) => {
     return res.status(401).json({ error: 'Invalid credentials', message: 'Invalid credentials' });
   }
   if (vendor.status !== 'active') return res.status(403).json({ error: 'Your access has been deactivated. Contact admin.', message: 'Your access has been deactivated. Contact admin.' });
+  // Optional location binding: a vendor may present a location's active invite
+  // code to sign in scoped to that operational location. The code must be
+  // active and, when an explicit company_location_id is given, must match it.
+  let sessionLoc = null;
+  if (locationCode || company_location_id != null) {
+    const locId = company_location_id != null ? Number(company_location_id) : null;
+    const code = String(locationCode || '').trim().toUpperCase();
+    if (!code) return res.status(400).json({ error: 'Enter the location code for this location.', code: 'LOCATION_CODE_REQUIRED' });
+    const params = [code];
+    let sql = `SELECT id, company_location_id FROM location_codes WHERE code=? AND status='active'`;
+    if (locId) { sql += ' AND company_location_id=?'; params.push(locId); }
+    const codeRow = db.prepare(sql).get(...params);
+    if (!codeRow) return res.status(403).json({ error: 'The location code is invalid or has been revoked.', code: 'LOCATION_CODE_INVALID' });
+    sessionLoc = Number(codeRow.company_location_id);
+  }
   db.prepare("UPDATE vendors SET last_login = datetime('now','localtime'), login_count = login_count + 1 WHERE id = ?").run(vendor.id);
   const mirrorUser = ensureVendorUserMirror(vendor);
-  const token = sign(mirrorUser, null, { src: 'users', app: 'web' });
-  res.json({ token, user: { ...publicVendor(vendor), role: 'vendor', id: mirrorUser.id } });
+  // Persist the vendor's chosen location so follow-up sessions keep the scope.
+  if (sessionLoc != null) {
+    try { db.prepare('UPDATE users SET company_location_id = ? WHERE id = ?').run(sessionLoc, mirrorUser.id); } catch (e) {}
+  }
+  const token = sign(mirrorUser, null, { src: 'users', app: 'web', ...(sessionLoc != null ? { loc: sessionLoc } : {}) });
+  res.json({ token, user: { ...publicVendor(vendor), role: 'vendor', id: mirrorUser.id, ...(sessionLoc != null ? { company_location_id: sessionLoc } : {}) } });
 });
 
 app.get('/api/vendor/me', vendorAuth, (req, res) => {

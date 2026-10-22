@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Linking, TextInput, Modal, AppState } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Linking, TextInput, Modal, AppState, Platform } from "react-native";
 import { getAssignedTrips } from "../../api/trips";
 import { getMyDriverAllotments, completeRun } from "../../api/schedules";
 import { requestCancelRun } from "../../api/driver";
@@ -98,6 +98,11 @@ export default function DriverHomeScreen({ navigation }) {
   const [inviteModal, setInviteModal] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [inviteBusy, setInviteBusy] = useState(false);
+  // Part 4: hamburger drawer with every driver feature in one menu.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [parkingModal, setParkingModal] = useState(false);
+  const [parkingLine, setParkingLine] = useState("");
+  const [parkingBusy, setParkingBusy] = useState(false);
   const idleTimerRef = useRef(null);
   // Tracks which active run/trip ids we've already announced, so a (re)assigned
   // run only speaks once per session.
@@ -165,6 +170,26 @@ export default function DriverHomeScreen({ navigation }) {
     } catch (e) {
       Alert.alert("Could not save", e?.response?.data?.error || "Please try again.");
     }
+  }
+
+  async function saveParkingLine() {
+    const line = parkingLine.trim().toUpperCase();
+    if (!/^L\d{1,2}$/.test(line)) return Alert.alert("Invalid line", "Parking line must be L1..L60 (e.g. L12).");
+    setParkingBusy(true);
+    try {
+      const { setParkingLine: saveLine } = await import("../../api/driver");
+      await saveLine(line);
+      setParkingModal(false);
+      setParkingLine("");
+      Alert.alert("Parking line saved", `Line ${line} recorded for today's trip.`);
+    } catch (e) {
+      Alert.alert("Could not save", e?.response?.data?.error || e.message || "Please try again.");
+    } finally { setParkingBusy(false); }
+  }
+
+  function closeMenu(fn) {
+    setMenuOpen(false);
+    if (fn) setTimeout(fn, 120);
   }
 
   function callHelpline() {
@@ -582,6 +607,9 @@ export default function DriverHomeScreen({ navigation }) {
       <View style={styles.root}>
         <Text style={styles.watermark} numberOfLines={1}>GetInRoute</Text>
         <View style={styles.header}>
+          <TouchableOpacity onPress={() => setMenuOpen(true)} style={styles.hamburger} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.hamburgerIcon}>☰</Text>
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>No cab run right now</Text>
           <ScrollView
             horizontal
@@ -613,6 +641,51 @@ export default function DriverHomeScreen({ navigation }) {
             </View>
           )}
         </ScrollView>
+        <DriverMenu
+          visible={menuOpen} onClose={() => setMenuOpen(false)} navigation={navigation}
+          run={run} duty={duty} activeId={activeId} helpline={helpline}
+          actions={{
+            endTrip: () => closeMenu(endRun),
+            endShift: () => closeMenu(() => navigation.navigate("DriverEndTrip", { runId: activeId, direction: run?.direction })),
+            endDuty: () => { setMenuOpen(false); endCurrentDuty(); },
+            standing: () => closeMenu(() => setStandingModal(true)),
+            parking: () => closeMenu(() => setParkingModal(true)),
+            invite: () => closeMenu(() => setInviteModal(true)),
+            sos: () => closeMenu(() => setSosModal(true)),
+            checklist: () => closeMenu(() => setChecklistModal(true)),
+            call: () => { setMenuOpen(false); callHelpline(); },
+            logout: () => { setMenuOpen(false); setTimeout(logout, 120); },
+          }}
+        />
+        <Modal visible={inviteModal} transparent animationType="fade" onRequestClose={() => setInviteModal(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalSheet}>
+              <Text style={styles.modalTitle}>Enter invite code</Text>
+              <Text style={styles.modalBody}>
+                Ask your admin or vendor for the code. The code binds your duty session to a specific company location.
+              </Text>
+              <TextInput
+                style={styles.inviteInput}
+                value={inviteCode}
+                onChangeText={(t) => setInviteCode(t.toUpperCase())}
+                placeholder="Invite code (e.g. ABCD-EFGH-JKLM)"
+                placeholderTextColor={colors.textDim}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => setInviteModal(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirm} onPress={redeemCode} disabled={inviteBusy}>
+                  <Text style={styles.modalConfirmText}>{inviteBusy ? "Starting…" : "Start duty"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        <ParkingModal visible={parkingModal} value={parkingLine} onChange={setParkingLine}
+          busy={parkingBusy} onCancel={() => setParkingModal(false)} onSave={saveParkingLine} />
       </View>
     );
   }
@@ -625,6 +698,9 @@ export default function DriverHomeScreen({ navigation }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
       >
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => setMenuOpen(true)} style={styles.hamburger} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={styles.hamburgerIcon}>☰</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>{run ? "Your cab run" : "Current trip"}</Text>
         <ScrollView
           horizontal
@@ -972,7 +1048,98 @@ export default function DriverHomeScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      <DriverMenu
+        visible={menuOpen} onClose={() => setMenuOpen(false)} navigation={navigation}
+        run={run} duty={duty} activeId={activeId} helpline={helpline}
+        actions={{
+          endTrip: () => closeMenu(endRun),
+          endShift: () => closeMenu(() => navigation.navigate("DriverEndTrip", { runId: activeId, direction: run?.direction })),
+          endDuty: () => { setMenuOpen(false); endCurrentDuty(); },
+          standing: () => closeMenu(() => setStandingModal(true)),
+          parking: () => closeMenu(() => setParkingModal(true)),
+          invite: () => closeMenu(() => setInviteModal(true)),
+          sos: () => closeMenu(() => setSosModal(true)),
+          checklist: () => closeMenu(() => setChecklistModal(true)),
+          call: () => { setMenuOpen(false); callHelpline(); },
+          logout: () => { setMenuOpen(false); setTimeout(logout, 120); },
+        }}
+      />
+      <ParkingModal visible={parkingModal} value={parkingLine} onChange={setParkingLine}
+        busy={parkingBusy} onCancel={() => setParkingModal(false)} onSave={saveParkingLine} />
     </View>
+  );
+}
+
+// Hamburger drawer: every driver feature in one place — trip/duty controls,
+// standing point, parking line, invite code, SOS, checklist, feedback, help,
+// notifications, chat, settings and sign out.
+function DriverMenu({ visible, onClose, navigation, run, duty, activeId, helpline, actions }) {
+  const nav = (name, params) => { onClose(); setTimeout(() => navigation.navigate(name, params), 120); };
+  const Item = ({ label, onPress, danger, badge }) => (
+    <TouchableOpacity style={[styles.menuItem, danger && styles.menuItemDanger]} onPress={onPress}>
+      <Text style={[styles.menuItemText, danger && { color: colors.coral }]}>{label}</Text>
+      {badge ? <Text style={styles.menuBadge}>{badge}</Text> : null}
+    </TouchableOpacity>
+  );
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={onClose}>
+        <View style={styles.menuPanel}>
+          <Text style={styles.menuBrand}>Menu</Text>
+          <ScrollView style={{ flex: 1 }}>
+            {run && (run.status === "assigned" || run.status === "started") ? (
+              <Item label="End trip" onPress={actions.endTrip} danger />
+            ) : null}
+            <Item label="End shift" onPress={actions.endShift} />
+            {duty ? <Item label="End duty" onPress={actions.endDuty} danger badge={duty.location_name || `Loc #${duty.company_location_id}`} /> : null}
+            <Item label="Standing point" onPress={actions.standing} badge={undefined} />
+            <Item label="Parking line" onPress={actions.parking} />
+            <Item label="Invite code (switch location)" onPress={actions.invite} />
+            {helpline ? <Item label="Call helpline" onPress={actions.call} /> : null}
+            <Item label="SOS / Emergency" onPress={actions.sos} danger />
+            <Item label="Trip checklist" onPress={actions.checklist} />
+            <Item label="Feedback" onPress={() => nav("Feedback")} />
+            <Item label="Notifications" onPress={() => nav("Notifications")} />
+            {activeId ? <Item label="Chat" onPress={() => nav("Chat", { tripId: activeId })} /> : null}
+            <Item label="Help" onPress={() => nav("Help")} />
+            <Item label="Settings" onPress={() => nav("Settings")} />
+            <Item label="Pending sync" onPress={() => nav("PendingSync")} />
+            <Item label="Sign out" onPress={() => { onClose(); setTimeout(() => actions.logout && actions.logout(), 120); }} danger />
+          </ScrollView>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+// Parking-line quick entry (L1..L60) recorded against today's trip.
+function ParkingModal({ visible, value, onChange, busy, onCancel, onSave }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onCancel}>
+        <View style={styles.modalSheet}>
+          <Text style={styles.modalTitle}>Parking line</Text>
+          <Text style={styles.modalBody}>Record which line (L1..L60) your cab is parked at today. Admin and Vendor can see it.</Text>
+          <TextInput
+            style={styles.inviteInput}
+            value={value}
+            onChangeText={(t) => onChange(t.toUpperCase())}
+            placeholder="e.g. L12"
+            placeholderTextColor={colors.textDim}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={4}
+          />
+          <View style={styles.modalActions}>
+            <TouchableOpacity style={styles.modalCancel} onPress={onCancel}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.modalConfirm, busy && { opacity: 0.6 }]} onPress={onSave} disabled={busy}>
+              <Text style={styles.modalConfirmText}>{busy ? "Saving…" : "Save line"}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Modal>
   );
 }
 
@@ -992,10 +1159,19 @@ const styles = StyleSheet.create({
     color: "rgba(0,217,192,0.055)",
     transform: [{ rotate: "-8deg" }]
   },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, paddingBottom: spacing.sm },
+  header: { flexDirection: "row", alignItems: "center", padding: spacing.lg, paddingBottom: spacing.sm },
+  hamburger: { paddingRight: 12, paddingVertical: 2 },
+  hamburgerIcon: { color: colors.text, fontSize: 24, fontWeight: "700" },
+  menuBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", flexDirection: "row" },
+  menuPanel: { width: 285, backgroundColor: colors.panel, paddingTop: Platform.OS === "ios" ? 64 : 44, paddingHorizontal: 14, paddingBottom: 24 },
+  menuBrand: { color: colors.text, fontSize: 20, fontWeight: "900", marginBottom: 8, marginLeft: 6 },
+  menuItem: { paddingVertical: 14, paddingHorizontal: 12, borderRadius: radius.md, marginBottom: 3, backgroundColor: colors.panel },
+  menuItemDanger: { backgroundColor: "#fef2f2" },
+  menuItemText: { color: colors.text, fontSize: 15, fontWeight: "700" },
+  menuBadge: { color: colors.textDim, fontSize: 11, marginTop: 2 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 14, paddingRight: 4 },
   headerActionsScroll: { flexShrink: 1, marginLeft: spacing.sm },
-  headerTitle: { color: colors.text, fontSize: 22, fontWeight: "700" },
+  headerTitle: { color: colors.text, fontSize: 22, fontWeight: "700", flex: 1 },
   link: { color: colors.teal, fontSize: 13, fontWeight: "600" },
   logout: { color: colors.textDim, fontSize: 13 },
   trackButton: {

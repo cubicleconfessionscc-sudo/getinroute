@@ -1,9 +1,10 @@
 import React from 'react';
 import { downloadCsv, downloadFile } from '../../api';
 import { useToast } from '../../components/ui';
-import { FileSpreadsheet, Download, Users, Truck, Route as RouteIcon, CalendarClock, Star, BellRing, History } from 'lucide-react';
+import { FileSpreadsheet, Download, Users, Truck, Route as RouteIcon, CalendarClock, Star, BellRing, History, LayoutDashboard } from 'lucide-react';
 
 const EXPORTS = [
+  { kind: 'trip-dashboard', label: 'Trip Dashboard', desc: 'Full trip lifecycle — logins, boarding, check-in, arrival, checkout & end-trip times', icon: <LayoutDashboard size={20} />, color: 'ico-indigo' },
   { kind: 'employees', label: 'Employee roster', desc: 'All registered employees with approval & status', icon: <Users size={20} />, color: 'ico-indigo' },
   { kind: 'drivers', label: 'Driver roster', desc: 'Drivers linked with their vehicles, lines & trips', icon: <Truck size={20} />, color: 'ico-violet' },
   { kind: 'vehicles', label: 'Vehicle fleet', desc: 'Vehicles, plates, lines, trips and driver contacts', icon: <Truck size={20} />, color: 'ico-pink' },
