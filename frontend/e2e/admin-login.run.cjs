@@ -5,6 +5,10 @@
      2. Dashboard shows ONLY the selected location's data
      3. Tampering with company_location_id in the login request -> DENIED
      4. Two tabs (Admin + Owner) stay logged in independently (sessionStorage)
+     5. Location-code login: owner creates a sub-admin, company admin issues a
+        location code + binds the sub-admin to Loc 2 -> UI login requires the
+        code (missing/wrong code DENIED, lowercase accepted), session scoped
+        to the bound location (also via the code-only path with no dropdown).
    Run with: node e2e/admin-login.run.js   (from frontend/)
 */
 const { spawn } = require('node:child_process');
@@ -132,6 +136,77 @@ async function main() {
     const r1 = await roleOf(p1), r2 = await roleOf(p2);
     check('two tabs: admin tab stays admin after reload', r1before === 'admin' && r1 === 'admin', { r1before, r1 });
     check('two tabs: owner tab stays owner after reload', r2before === 'owner' && r2 === 'owner', { r2before, r2 });
+
+    // ---- 5. Location-code login (sub-admin bound to Loc 2) ----
+    const j = async (p, opts = {}, tok = null) => {
+      const r = await fetch(base + p, {
+        method: opts.method || 'GET',
+        headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
+        body: opts.body ? JSON.stringify(opts.body) : undefined
+      });
+      let body = null; try { body = await r.json(); } catch {}
+      return { status: r.status, body };
+    };
+    const ownerLogin = await j('/api/auth/login', { method: 'POST', body: { identifier: 'owner@e2e.test', password: 'Pw@12345', app: 'web' } });
+    const created = await j('/api/admin/admins', { method: 'POST', body: { name: 'Sub Loc Admin', email: 'sub.loc@e2e.test', password: 'Pw@12345' } }, ownerLogin.body && ownerLogin.body.token);
+    const subId = created.body && created.body.id;
+    check('setup: sub-admin created by owner', created.status === 200 && !!subId, created.body);
+    const caLogin = await j('/api/auth/login', { method: 'POST', body: { identifier: 'co.a@e2e.test', password: 'Pw@12345', app: 'web' } });
+    const caTok = caLogin.body && caLogin.body.token;
+    const codeR = await j('/api/admin/location-codes', { method: 'POST', body: { company_location_id: ids.loc2, notes: 'e2e' } }, caTok);
+    const loc2Code = codeR.body && codeR.body.code;
+    check('setup: location code issued for Loc 2', codeR.status === 200 && !!loc2Code, codeR.body);
+    const bindR = await j('/api/admin/users/' + subId + '/location', { method: 'PUT', body: { company_location_id: ids.loc2 } }, caTok);
+    check('setup: sub-admin bound to Loc 2', bindR.status === 200 && bindR.body && Number(bindR.body.company_location_id) === ids.loc2, bindR.body);
+    const pre = await j('/api/auth/admin-locations', { method: 'POST', body: { identifier: 'sub.loc@e2e.test' } });
+    const preNames = ((pre.body && pre.body.locations) || []).map((l) => l.name);
+    check('setup: pre-auth lists ONLY the bound location (company join works)', preNames.length === 1 && preNames[0] === 'Loc 2', preNames);
+
+    const statsOf = (pg) => pg.evaluate(async () => {
+      const t = sessionStorage.getItem('getinroute_token_admin') || sessionStorage.getItem('getinroute_token_vendor');
+      if (!t) return { status: 0, body: null };
+      const r = await fetch('/api/admin/stats', { headers: { Authorization: 'Bearer ' + t } });
+      return { status: r.status, body: await r.json() };
+    });
+    const fillSub = async (pg, { pickLoc, code }) => {
+      await pg.goto(base + '/admin/login', { waitUntil: 'domcontentloaded' });
+      await pg.fill('[data-testid=admin-id]', 'sub.loc@e2e.test');
+      await pg.click('[data-testid=continue]');
+      await pg.waitForSelector('[data-testid=location-code]', { timeout: 8000 });
+      if (pickLoc) await pg.selectOption('[data-testid=location]', { label: 'Loc 2' });
+      if (code != null) await pg.fill('[data-testid=location-code]', code);
+      await pg.fill('[data-testid=password]', 'Pw@12345');
+      await pg.click('[data-testid=signin]');
+      await sleep(1500);
+    };
+
+    // 5a. WITH the code (lowercase exercises case-insensitive normalize)
+    const c5 = await browser.newContext();
+    const p5 = await c5.newPage();
+    await fillSub(p5, { pickLoc: true, code: loc2Code.toLowerCase() });
+    check('sub-admin logs in WITH the location code (lowercase accepted)', p5.url().includes('/admin') && !p5.url().includes('/login'), p5.url());
+    const s5 = await statsOf(p5);
+    check('sub-admin dashboard scoped to Loc 2 (2 employees)', s5.status === 200 && s5.body && s5.body.employees === 2, s5.body && s5.body.employees);
+    await p5.evaluate(() => sessionStorage.clear());
+
+    // 5b. WITHOUT the code -> DENIED with the code-required message
+    await fillSub(p5, { pickLoc: true, code: '' });
+    const noCodeMsg = await p5.locator('text=Enter the location code for this location').first().isVisible().catch(() => false);
+    const noToken5 = await p5.evaluate(() => !sessionStorage.getItem('getinroute_token_admin'));
+    check('login WITHOUT the code is DENIED (code-required message, no token)', p5.url().endsWith('/admin/login') && noToken5 && noCodeMsg, { url: p5.url(), noToken5, noCodeMsg });
+
+    // 5c. WRONG code -> DENIED with the invalid-code message
+    await fillSub(p5, { pickLoc: true, code: 'AAAA-BBBB-CCCC' });
+    const badCodeMsg = await p5.locator('text=The location code is invalid').first().isVisible().catch(() => false);
+    const noToken5b = await p5.evaluate(() => !sessionStorage.getItem('getinroute_token_admin'));
+    check('login with a WRONG code is DENIED (invalid-code message, no token)', p5.url().endsWith('/admin/login') && noToken5b && badCodeMsg, { url: p5.url(), noToken5b, badCodeMsg });
+
+    // 5d. Code-only path: no dropdown selection, just ID + password + code
+    await fillSub(p5, { pickLoc: false, code: loc2Code });
+    check('code-only login (no location selected) lands on /admin', p5.url().includes('/admin') && !p5.url().includes('/login'), p5.url());
+    const s5d = await statsOf(p5);
+    check('code-only session scoped to the bound location (2 employees)', s5d.status === 200 && s5d.body && s5d.body.employees === 2, s5d.body && s5d.body.employees);
+    await c5.close();
 
     await ctx.close(); await tctx.close(); await mctx.close();
   } finally {

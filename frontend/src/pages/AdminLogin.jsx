@@ -22,13 +22,14 @@ export default function AdminLogin({ variant = 'admin' }) {
   const [stateId, setStateId] = useState('');
   const [cityId, setCityId] = useState('');
   const [locId, setLocId] = useState('');
+  const [locCode, setLocCode] = useState('');
 
   const loadLocations = async () => {
     if (!form.identifier.trim()) { toast('Enter your Admin ID first', 'err'); return; }
     try {
       const r = await api.post('/api/auth/admin-locations', { identifier: form.identifier.trim() });
       setLocs(r || { states: [], cities: [], locations: [] });
-      setStateId(''); setCityId(''); setLocId('');
+      setStateId(''); setCityId(''); setLocId(''); setLocCode('');
     } catch (err) { toast(err.message, 'err'); }
   };
 
@@ -36,7 +37,7 @@ export default function AdminLogin({ variant = 'admin' }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const user = await login(form.identifier.trim(), form.password, locId || undefined);
+      const user = await login(form.identifier.trim(), form.password, locId || undefined, locCode.trim() || undefined);
       if (user.role === 'driver') nav('/driver');
       else if (user.role === 'parent') nav('/parent');
       else if (user.role === 'admin' && user.vertical === 'school') nav('/school');
@@ -95,6 +96,13 @@ export default function AdminLogin({ variant = 'admin' }) {
                   <option value="">All locations (company-wide)</option>
                   {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
+              </div>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label>Location Code</label>
+                <input data-testid="location-code" value={locCode} onChange={(e) => setLocCode(e.target.value)} placeholder="XXXX-XXXX-XXXX" autoComplete="off" style={{ textTransform: 'uppercase' }} />
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>
+                  Location-scoped admins: enter the invite code issued for your location (Operations → Location Codes). Company-wide admins can leave this blank.
+                </div>
               </div>
             </div>
           )}

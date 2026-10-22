@@ -1064,7 +1064,7 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
         return res.status(403).json({ error: 'Enter the location code for this location.', code: 'LOCATION_CODE_REQUIRED' });
       }
       const codeRow = db.prepare(`SELECT id, status FROM location_codes
-        WHERE company_location_id=? AND code=?`).get(locId, String(rawCode).trim());
+        WHERE company_location_id=? AND code=?`).get(locId, String(rawCode).trim().toUpperCase());
       if (!codeRow || codeRow.status !== 'active') {
         authLog('login location-code-bad', { id: user.id, loc: locId });
         return res.status(403).json({ error: 'The location code is invalid or has been revoked.', code: 'LOCATION_CODE_INVALID' });
@@ -1076,7 +1076,7 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
     // location and verify the code against it. This lets a pre-filled
     // location login form work without an explicit company_location_id.
     const codeRow = db.prepare(`SELECT id, status FROM location_codes
-      WHERE company_location_id=? AND code=?`).get(Number(user.company_location_id), String(rawCode).trim());
+      WHERE company_location_id=? AND code=?`).get(Number(user.company_location_id), String(rawCode).trim().toUpperCase());
     if (!codeRow || codeRow.status !== 'active') {
       return res.status(403).json({ error: 'The location code is invalid or has been revoked.', code: 'LOCATION_CODE_INVALID' });
     }
@@ -2746,7 +2746,14 @@ app.put('/api/admin/users/:id/location', auth, role('admin'), (req, res) => {
   // A location-scoped admin may only assign within their own authorized location.
   const scope = locationScope(req);
   if (locId != null && scope && !scope.includes(locId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
-  db.prepare('UPDATE users SET company_location_id=? WHERE id=?').run(locId, target.id);
+  // Binding to a location also joins the target to that location's company —
+  // a location-scoped sub-admin must carry company_id = parent company or the
+  // login location checks (company_locations.company_id) reject them.
+  if (locId != null && cid != null) {
+    db.prepare('UPDATE users SET company_location_id=?, company_id=? WHERE id=?').run(locId, cid, target.id);
+  } else {
+    db.prepare('UPDATE users SET company_location_id=? WHERE id=?').run(locId, target.id);
+  }
   res.json({ ok: true, company_location_id: locId });
 });
 

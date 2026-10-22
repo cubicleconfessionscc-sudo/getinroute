@@ -19,7 +19,7 @@ export default function VendorLogin() {
       localStorage.setItem('gir_user', JSON.stringify(r.user));
       window.location.href = '/vendor-portal';
     } catch (ex) {
-      setErr(ex?.response?.data?.error || ex?.response?.data?.message || 'Invalid credentials');
+      setErr(ex?.message || 'Invalid credentials');
       setBusy(false);
     }
   };
