@@ -39,11 +39,12 @@ deliverables/
 # backend/binaries/ rule would defeat the ! negations below (CLI packers use
 # gitignore semantics, and files inside an excluded directory cannot be
 # re-included). The other binaries stay out of the archive.
-backend/binaries/*
-!backend/binaries/GetInRoute.apk
-!backend/binaries/GetInRouteDriver.apk
-!backend/binaries/GetInRouteSchool.apk
-!backend/binaries/GetInRouteAdmin.apk
+# Ignore only extra raw build artifacts. The published APKs must remain
+# packable by `railway up` — its packer does not reliably apply trailing
+# `!` negation patterns, which silently left newer APKs out of the image.
+backend/binaries/*.aab
+backend/binaries/GetInRoute-Driver.apk
+backend/binaries/GetInRoute-Employee.apk
 .railway/
 
 # Build output lives only under backend/public/admin (served); don't track dev duplicates or source maps
