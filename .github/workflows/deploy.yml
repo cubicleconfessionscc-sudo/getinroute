@@ -153,7 +153,8 @@ jobs:
           # the image, so the only trustworthy check is to hash what is actually
           # served and compare it with the file in this commit.
           rc=0
-          for f in GetInRoute.apk GetInRouteDriver.apk GetInRouteSchool.apk; do
+          for f in GetInRoute.apk GetInRouteDriver.apk GetInRouteSchool.apk GetInRouteAdmin.apk; do
+            if [ ! -f "backend/binaries/$f" ]; then echo "SKIP $f (not bundled in this commit)"; continue; fi
             local_sha=$(sha256sum "backend/binaries/$f" | cut -d' ' -f1)
             live_sha=$(curl -fsS --max-time 300 "https://www.getinroute.in/download/$f" | sha256sum | cut -d' ' -f1)
             if [ "$local_sha" = "$live_sha" ]; then

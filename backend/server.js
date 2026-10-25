@@ -293,7 +293,7 @@ app.get(['/health', '/api/health'], (req, res) => {
       let volList = [];
       if (apkVolumeDir) {
         try { volList = fs.readdirSync(apkVolumeDir); } catch (e) {}
-        for (const n of ['GetInRoute.apk', 'GetInRouteDriver.apk', 'GetInRouteSchool.apk']) {
+        for (const n of ['GetInRoute.apk', 'GetInRouteDriver.apk', 'GetInRouteSchool.apk', 'GetInRouteAdmin.apk']) {
           vol[n] = sizeOf(path.join(apkVolumeDir, n));
         }
       }
@@ -9588,7 +9588,7 @@ if (apkVolumeDir) {
     // Prefer the packaged binaries/ copies first (public/download is excluded
     // from the deploy image via .railwayignore, so a download/ first entry would
     // start an async URL seed that later renames over a good copy).
-    const staged = [path.join(BINARIES_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(BINARIES_DIR, 'GetInRouteSchool.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk')];
+    const staged = [path.join(BINARIES_DIR, 'GetInRoute.apk'), path.join(DOWNLOAD_DIR, 'GetInRoute.apk'), path.join(BINARIES_DIR, 'GetInRouteSchool.apk'), path.join(DOWNLOAD_DIR, 'GetInRouteSchool.apk'), path.join(BINARIES_DIR, 'GetInRouteDriver.apk'), path.join(BINARIES_DIR, 'GetInRouteAdmin.apk')];
     // Explicit version bump (APK_SEED_VERSION) forces the volume APKs to be
     // re-seeded from newly built artifacts on the next deploy. Without it the
     // persistent volume keeps serving the last-good builds and nothing changes.
@@ -9713,6 +9713,10 @@ app.get('/download/GetInRoute.apk', (req, res) => binDownload(res, 'GetInRoute.a
 app.get('/download/GetInRouteSchool.apk', (req, res) => binDownload(res, 'GetInRouteSchool.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteDriver.apk', (req, res) => binDownload(res, 'GetInRouteDriver.apk', DOWNLOAD_DIR));
 app.get('/download/GetInRouteDriver-v2.apk', (req, res) => binDownload(res, 'GetInRouteDriver.apk', DOWNLOAD_DIR));
+// Admin/Vendor console app. The site links a versioned filename for cache
+// busting; both names resolve to the same committed binary.
+app.get('/download/GetInRouteAdmin.apk', (req, res) => binDownload(res, 'GetInRouteAdmin.apk', DOWNLOAD_DIR));
+app.get(/^\/download\/GetInRoute-Admin-[0-9.]+\.apk$/, (req, res) => binDownload(res, 'GetInRouteAdmin.apk', DOWNLOAD_DIR));
 app.use('/download', express.static(DOWNLOAD_DIR, {
   setHeaders: (res, p) => {
     if (p.endsWith('.apk')) res.setHeader('Content-Type', 'application/vnd.android.package-archive');
