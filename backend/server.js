@@ -31,6 +31,15 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('he
 // broken by a silent session takeover (which returned 401 SESSION_REPLACED).
 // Set EMPLOYEE_SINGLE_SESSION=1 to enforce one device per employee.
 const EMPLOYEE_SINGLE_SESSION = String(process.env.EMPLOYEE_SINGLE_SESSION || '0') === '1';
+// Drivers are single-device by policy (one active trip/duty at a time). Set
+// DRIVER_SINGLE_SESSION=0 only for controlled multi-device testing.
+const DRIVER_SINGLE_SESSION = String(process.env.DRIVER_SINGLE_SESSION || '1') === '1';
+function singleSessionFor(user) {
+  if (!user) return false;
+  if (user.role === 'driver') return DRIVER_SINGLE_SESSION;
+  if (user.role === 'employee') return EMPLOYEE_SINGLE_SESSION;
+  return false;
+}
 if (process.env.AUTO_APPROVE_COMPANIES === '1') console.log('[boot] AUTO_APPROVE_COMPANIES=1');
 const MAX_EMPLOYEES = 10000;
 const MAX_VEHICLES = 750;
@@ -577,10 +586,10 @@ const SINGLE_SESSION_ROLES = new Set(['employee', 'driver']);
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 function sessionIsActive(user, payload) {
   if (!user || !SINGLE_SESSION_ROLES.has(user.role)) return true;
-  // Single-device enforcement is OPT-IN (see EMPLOYEE_SINGLE_SESSION above). When
-  // it is off, every issued token stays valid for its full life — a web tab that
+  // Single-device enforcement is per-role (see DRIVER_SINGLE_SESSION). When
+  // it is off, every issued token stays valid for its full life - a web tab that
   // was closed without logging out must never lock the account out.
-  if (!EMPLOYEE_SINGLE_SESSION) return true;
+  if (!singleSessionFor(user)) return true;
   const exp = Number(user.active_sid_expires_at);
   return !!(payload && payload.sid && user.active_sid && payload.sid === user.active_sid && Number.isFinite(exp) && exp > Date.now());
 }
@@ -588,10 +597,10 @@ function startUserSession(user) {
   if (!user || !SINGLE_SESSION_ROLES.has(user.role)) return { sid: null, conflict: false };
   const sid = crypto.randomBytes(24).toString('hex');
   const expiresAt = String(Date.now() + SESSION_TTL_MS);
-  // Single-device enforcement is OPT-IN. Off (the default) means a new sign-in
-  // simply takes over the stored slot instead of rejecting the user with a 409
-  // they have no way to clear from a browser tab.
-  if (!EMPLOYEE_SINGLE_SESSION) {
+  // Single-device enforcement is per-role (drivers ON by default) and OPT-IN
+  // for employees. When off, a new sign-in simply takes over the stored slot
+  // instead of rejecting the user with a 409 they cannot clear from a tab.
+  if (!singleSessionFor(user)) {
     db.prepare('UPDATE users SET active_sid=?, active_sid_expires_at=? WHERE id=?').run(sid, expiresAt, user.id);
     return { sid, conflict: false };
   }
@@ -2889,7 +2898,9 @@ app.get('/api/admin/users', auth, role('admin', 'vendor'), (req, res) => {
 app.post('/api/admin/users/:id/unlock', auth, role('admin'), (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
-  db.prepare('UPDATE users SET locked_until = NULL WHERE id = ?').run(u.id);
+  // Unlock also clears the single-device session slot, which is how an admin
+  // releases a driver whose old phone was lost/replaced.
+  db.prepare('UPDATE users SET locked_until = NULL, active_sid = NULL, active_sid_expires_at = NULL WHERE id = ?').run(u.id);
   res.json({ ok: true });
 });
 
