@@ -1346,11 +1346,22 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
       if (!name) return res.status(400).json({ error: `Every location needs a name (e.g. "${cityName} Location 1").` });
       if (lat != null && (Number.isNaN(lat) || lat < -90 || lat > 90)) return res.status(400).json({ error: 'Invalid latitude on an address.' });
       if (lng != null && (Number.isNaN(lng) || lng < -180 || lng > 180)) return res.status(400).json({ error: 'Invalid longitude on an address.' });
-      addressPlan.push({ state: stateName, city: cityName, name, address: addr, lat, lng });
+      addressPlan.push({ state: stateName, city: cityName, name, address: addr, lat, lng, code: normalizeInviteCode(loc.code) });
     }
   }
   if (!stateNames.length && rawAddresses.length) {
     return res.status(400).json({ error: 'Address entries present but no state could be resolved.' });
+  }
+  // Custom invite codes are optional. Validate them up-front (before the
+  // transaction) so the company gets a precise, per-location error instead of
+  // a rolled-back registration.
+  const seenInviteCodes = new Set();
+  for (const a of addressPlan) {
+    if (!a.code) continue;
+    const err = inviteCodeError(a.code);
+    if (err) return res.status(400).json({ error: `${a.name} (${a.city}): ${err}` });
+    if (seenInviteCodes.has(a.code)) return res.status(400).json({ error: `The invite code "${a.code}" is used for more than one location.` });
+    seenInviteCodes.add(a.code);
   }
 
   const hash = bcrypt.hashSync(adminPassword, 10);
@@ -1390,11 +1401,17 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
         const info4 = db.prepare('INSERT INTO company_locations (company_id, state_id, city_id, name, address, lat, lng) VALUES (?,?,?,?,?,?,?)')
           .run(userId, stateId, city.id, a.name, a.address || null, a.lat, a.lng);
         loc = { id: Number(info4.lastInsertRowid) };
-        const code = issueLocationCode(loc.id, userId, userId);
+        const code = issueLocationCode(loc.id, userId, userId, a.code);
         locationCodes.push({ location_id: loc.id, location: a.name, city: a.city, state: a.state, code });
       } else if (a.address || a.lat != null || a.lng != null) {
         db.prepare('UPDATE company_locations SET address=COALESCE(?, address), lat=COALESCE(?, lat), lng=COALESCE(?, lng) WHERE id=?')
           .run(a.address || null, a.lat, a.lng, loc.id);
+      }
+      if (a.code && !db.prepare("SELECT id FROM location_codes WHERE company_location_id=? AND status='active'").get(loc.id)) {
+        const code = issueLocationCode(loc.id, userId, userId, a.code);
+        if (!locationCodes.find((x) => x.location_id === loc.id)) {
+          locationCodes.push({ location_id: loc.id, location: a.name, city: a.city, state: a.state, code });
+        }
       }
       if (a.lat != null && a.lng != null) {
         const label = `${a.city} ${a.name}`;
@@ -1423,6 +1440,7 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
       }
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch (e2) {}
+    if (e && e.status) return res.status(e.status).json({ error: e.message });
     if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate state, city or location name in the registration form.' });
     return res.status(500).json({ error: 'Could not complete registration.' });
   }
@@ -2583,10 +2601,18 @@ app.post('/api/admin/locations/locations', auth, role('admin'), (req, res) => {
   if (db.prepare('SELECT id FROM company_locations WHERE company_id=? AND city_id=? AND name=?').get(cid, cityId, name)) return res.status(409).json({ error: 'Location already exists in this city.' });
   const lat = b.lat == null || b.lat === '' ? null : Number(b.lat);
   const lng = b.lng == null || b.lng === '' ? null : Number(b.lng);
+  // Optional company-chosen invite code. Validate before inserting the
+  // location so a bad/duplicate code never leaves a half-created location.
+  const customCode = normalizeInviteCode(b.code);
+  if (customCode) {
+    const codeErr = inviteCodeError(customCode);
+    if (codeErr) return res.status(400).json({ error: codeErr });
+    if (activeCodeExists(customCode)) return res.status(409).json({ error: 'That invite code is already in use. Choose a different one.' });
+  }
   const info = db.prepare('INSERT INTO company_locations (company_id, state_id, city_id, name, address, lat, lng) VALUES (?,?,?,?,?,?,?)')
     .run(cid, city.state_id, cityId, name, String(b.address || '').trim() || null, lat, lng);
   const newLocId = Number(info.lastInsertRowid);
-  const code = issueLocationCode(newLocId, cid, req.user.id);
+  const code = issueLocationCode(newLocId, cid, req.user.id, customCode);
   res.json({ ok: true, id: newLocId, code });
 });
 
@@ -5993,8 +6019,44 @@ function genLocationCode() {
   return s;
 }
 
-function issueLocationCode(locationId, companyId, userId) {
-  const code = genLocationCode();
+// Normalise a company-supplied invite code: trim, upper-case, and turn runs of
+// whitespace into a single dash. Returns '' when nothing was supplied.
+function normalizeInviteCode(raw) {
+  return String(raw == null ? '' : raw).trim().toUpperCase().replace(/\s+/g, '-');
+}
+
+// Returns a human-readable error for an invalid custom code, or null when OK.
+// Codes are the shared secret a location admin / vendor types at login, so we
+// keep them simple: letters, digits and dashes, 4-32 characters.
+function inviteCodeError(code) {
+  if (!code) return null;
+  if (code.length < 4) return 'Invite code must be at least 4 characters.';
+  if (code.length > 32) return 'Invite code must be at most 32 characters.';
+  if (!/^[A-Z0-9][A-Z0-9-]*$/.test(code)) return 'Invite code can use only letters, numbers and dashes.';
+  if (code.replace(/-/g, '').length < 4) return 'Invite code must contain at least 4 letters or numbers.';
+  return null;
+}
+
+function activeCodeExists(code) {
+  return !!db.prepare("SELECT id FROM location_codes WHERE UPPER(code)=? AND status='active'").get(code);
+}
+
+// Issue the active code for a location. When customCode is supplied it is used
+// verbatim (after normalisation) so the company can hand out a code of its own
+// choosing; otherwise a random XXXX-XXXX-XXXX code is generated.
+function issueLocationCode(locationId, companyId, userId, customCode) {
+  const wanted = normalizeInviteCode(customCode);
+  let code;
+  if (wanted) {
+    const err = inviteCodeError(wanted);
+    if (err) { const e = new Error(err); e.status = 400; throw e; }
+    if (activeCodeExists(wanted)) {
+      const e = new Error('That invite code is already in use. Choose a different one.'); e.status = 409; throw e;
+    }
+    code = wanted;
+  } else {
+    code = genLocationCode();
+  }
   db.prepare(`INSERT INTO location_codes (code, company_id, company_location_id, status, issued_by)
     VALUES (?,?,?,'active',?)`).run(code, companyId, locationId, userId);
   return code;
@@ -7383,8 +7445,16 @@ app.post('/api/admin/location-codes', auth, role('admin'), (req, res) => {
   if (!loc) return res.status(403).json({ error: 'Location does not belong to this company.' });
   const scope = locationScope(req);
   if (scope && !scope.includes(locId)) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
-  // 12-char URL-safe random code. Avoid 0/O/1/l visually where reasonable.
-  const code = (() => {
+  // Optional company-chosen code. When omitted a random XXXX-XXXX-XXXX code is
+  // generated. A custom code must be valid and not already active elsewhere.
+  const customCode = normalizeInviteCode((req.body || {}).code);
+  if (customCode) {
+    const codeErr = inviteCodeError(customCode);
+    if (codeErr) return res.status(400).json({ error: codeErr });
+    const clash = db.prepare("SELECT id FROM location_codes WHERE UPPER(code)=? AND status='active' AND company_location_id<>?").get(customCode, locId);
+    if (clash) return res.status(409).json({ error: 'That invite code is already in use. Choose a different one.' });
+  }
+  const code = customCode || (() => {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const bytes = crypto.randomBytes(12);
     let s = '';

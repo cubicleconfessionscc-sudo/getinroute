@@ -100,6 +100,18 @@ export default function CompanyOnboard() {
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  // Codes issued for each location during registration (returned by the API).
+  // Shown on the success screen so the company can hand them to the location
+  // admins / vendors who sign in scoped to that location.
+  const [issuedCodes, setIssuedCodes] = useState([]);
+  const [copiedCode, setCopiedCode] = useState('');
+  async function copyCode(code) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(''), 1500);
+    } catch (e) { /* clipboard unavailable — the code is still visible to copy manually */ }
+  }
 
   // Lookup lists for the Location step
   const [stateSearch, setStateSearch] = useState('');
@@ -138,7 +150,7 @@ export default function CompanyOnboard() {
       return { ...p, cities: p.cities.map((c) => {
         if (c.name !== cityName) return c;
         if (c.locations.find((l) => l.name.toLowerCase() === loc.name.toLowerCase())) return c;
-        return { ...c, locations: [...c.locations, { name: loc.name, address: loc.address || '', lat: loc.lat, lng: loc.lng }] };
+        return { ...c, locations: [...c.locations, { name: loc.name, address: loc.address || '', lat: loc.lat, lng: loc.lng, code: loc.code || '' }] };
       }) };
     }));
   }
@@ -186,13 +198,14 @@ export default function CompanyOnboard() {
               name: l.name,
               address: l.address,
               lat: l.lat,
-              lng: l.lng
+              lng: l.lng,
+              ...(l.code ? { code: l.code } : {})
             }))
           });
         }
       }
       const states = plan.map((p) => p.state);
-      await api.post('/api/company/onboard', {
+      const resp = await api.post('/api/company/onboard', {
         companyName,
         domain,
         phone,
@@ -202,6 +215,7 @@ export default function CompanyOnboard() {
         states,
         addresses: flat
       });
+      setIssuedCodes(Array.isArray(resp && resp.locationCodes) ? resp.locationCodes : []);
       setStep(5);
       setDone(true);
     } catch (err) {
@@ -227,6 +241,28 @@ export default function CompanyOnboard() {
           <p className="sub" style={{ marginBottom: 20 }}>
             Your admin account is <strong>pending owner approval</strong>.
           </p>
+          {issuedCodes.length > 0 && (
+            <div style={{ background: 'rgba(124,58,237,.08)', border: '1px solid rgba(124,58,237,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: '#374151', marginBottom: 16 }}>
+              <b style={{ display: 'block', marginBottom: 4 }}>Location invite codes</b>
+              <p style={{ margin: '0 0 10px', fontSize: 12.5, color: '#475569' }}>
+                Share each code with that location&apos;s admin or vendor — they enter it at sign-in to work in that location.
+              </p>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {issuedCodes.map((c) => (
+                  <div key={c.location_id || c.location} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.location}</div>
+                      <div style={{ fontSize: 11.5, color: '#64748b' }}>{[c.city, c.state].filter(Boolean).join(', ')}</div>
+                    </div>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.06em', color: '#7c3aed' }}>{c.code}</span>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={() => copyCode(c.code)} style={{ padding: '4px 8px' }}>
+                      {copiedCode === c.code ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: '#374151', marginBottom: 20 }}>
             <b style={{ display: 'block', marginBottom: 6 }}>Step 6 — Trial Activated (what happens next)</b>
             <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 4 }}>
@@ -341,6 +377,12 @@ export default function CompanyOnboard() {
                 <b>States:</b> {plan.map((p) => p.state).join(', ') || '—'}<br />
                 <b>Total locations:</b> {plan.reduce((n, p) => n + p.cities.reduce((m, c) => m + c.locations.length, 0), 0)}
               </div>
+              {plan.some((p) => p.cities.some((c) => c.locations.some((l) => l.code))) && (
+                <div>
+                  <b>Invite codes:</b>{' '}
+                  {plan.flatMap((p) => p.cities.flatMap((c) => c.locations.filter((l) => l.code).map((l) => `${l.name} → ${l.code}`))).join(' · ')}
+                </div>
+              )}
               <div><b>Admin:</b> {adminName} ({adminEmail})</div>
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
@@ -511,6 +553,7 @@ function StateBlock({ stateName, state, addCity, removeCity, addLocation, remove
 
 function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
   const [locName, setLocName] = useState('');
+  const [locCode, setLocCode] = useState('');
   const [pendingAddress, setPendingAddress] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -540,8 +583,9 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
           }
         } catch { /* offline / rate-limited / no match — save with the typed name */ }
       }
-      addLocation(stateName, cityName, { name, address, lat, lng });
+      addLocation(stateName, cityName, { name, address, lat, lng, code: locCode.trim().toUpperCase() });
       setLocName('');
+      setLocCode('');
       setPendingAddress(null);
     } finally {
       setSaving(false);
@@ -556,7 +600,19 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
           placeholder={`Location name (e.g. "${cityName} Location 1")`}
           style={{ flex: 1 }}
         />
+        <input
+          value={locCode}
+          onChange={(e) => setLocCode(e.target.value.toUpperCase())}
+          placeholder="Invite code (optional)"
+          autoComplete="off"
+          maxLength={32}
+          style={{ width: 190, fontFamily: 'monospace' }}
+          aria-label="Invite code for this location"
+        />
       </div>
+      <p style={{ fontSize: 11.5, color: '#94a3b8', margin: '0 0 8px' }}>
+        Optional: set your own invite code (letters, numbers, dashes). Leave blank to auto-generate one.
+      </p>
       <div style={{ marginBottom: 8 }}>
         <AddressPicker value={pendingAddress} onChange={setPendingAddress} />
       </div>
@@ -573,6 +629,9 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
               <MapPin size={12} color="#7c3aed" />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{l.name}</div>
+                {l.code ? (
+                  <div style={{ fontSize: 11, color: '#7c3aed', fontFamily: 'monospace', fontWeight: 700 }}>code: {l.code}</div>
+                ) : null}
                 <div style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.address || '—'}</span>
                   {l.lat != null && <ViewOnMapLink lat={l.lat} lng={l.lng} address={l.address} label="Map" />}

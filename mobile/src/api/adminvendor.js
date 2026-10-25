@@ -54,8 +54,8 @@ export function deleteRoute(id) { return client.delete(`/admin/routes/${id}`).th
 
 // --- Location codes (invite codes per operational location) ---
 export function getLocationCodes() { return client.get("/admin/location-codes").then((r) => r.data); }
-export function issueLocationCode(company_location_id) {
-  return client.post("/admin/location-codes", { company_location_id }).then((r) => r.data);
+export function issueLocationCode(company_location_id, code) {
+  return client.post("/admin/location-codes", { company_location_id, ...(code ? { code } : {}) }).then((r) => r.data);
 }
 export function revokeLocationCode(id) { return client.post(`/admin/location-codes/${id}/revoke`).then((r) => r.data); }
 
@@ -63,8 +63,8 @@ export function revokeLocationCode(id) { return client.post(`/admin/location-cod
 export function getLocations() { return client.get("/admin/locations").then((r) => r.data); }
 export function addState(name) { return client.post("/admin/locations/states", { name }).then((r) => r.data); }
 export function addCity(state_id, name) { return client.post("/admin/locations/cities", { state_id, name }).then((r) => r.data); }
-export function addLocation(city_id, name, address) {
-  return client.post("/admin/locations/locations", { city_id, name, address }).then((r) => r.data);
+export function addLocation(city_id, name, address, code) {
+  return client.post("/admin/locations/locations", { city_id, name, address, ...(code ? { code } : {}) }).then((r) => r.data);
 }
 export function deleteLocation(id) { return client.delete(`/admin/locations/locations/${id}`).then((r) => r.data); }
 

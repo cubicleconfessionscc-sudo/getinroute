@@ -128,9 +128,10 @@ export default function AdminVendorHome({ user, mode, onLogout }) {
   async function runAction(fn, successMsg) {
     setBusy(true);
     try {
-      await fn();
+      const result = await fn();
       setModal(null); setForm({});
-      if (successMsg) Alert.alert("Done", successMsg);
+      const msg = typeof successMsg === "function" ? successMsg(result) : successMsg;
+      if (msg) Alert.alert("Done", msg);
       await load(true);
     } catch (e) {
       Alert.alert("Failed", e?.response?.data?.error || e?.message || "Please try again.");
@@ -401,9 +402,13 @@ function Screen({ screen, data, mode, user, openModal, runAction, busy, download
               { key: "city_id", label: "CITY ID", placeholder: String(locs.cities?.[0]?.id || "1"), keyboard: "number-pad" },
               { key: "name", label: "LOCATION NAME", placeholder: "Office Tower A", caps: "words" },
               { key: "address", label: "ADDRESS", placeholder: "Optional street address" },
+              { key: "code", label: "INVITE CODE (optional)", placeholder: "e.g. BLR-HQ-2026", caps: "characters" },
             ],
-            okText: "Create (auto-issues a code)",
-            onOk: (f) => runAction(() => addLocation(Number(f.city_id), f.name, f.address), "Location created with invite code."),
+            okText: "Create",
+            onOk: (f) => runAction(
+              () => addLocation(Number(f.city_id), f.name, f.address, (f.code || "").trim().toUpperCase()),
+              (r) => `Location created. Invite code: ${r?.code || "—"}`
+            ),
           })} />
         ) : null}
         <Text style={styles.section}>Locations ({locs.locations.length})</Text>
@@ -424,6 +429,19 @@ function Screen({ screen, data, mode, user, openModal, runAction, busy, download
       <View>
         <Text style={styles.section}>Location invite codes</Text>
         <Text style={styles.hint}>Each operational location has an active code used to sign in scoped to that location.</Text>
+        {!isVendor ? (
+          <Action label="+ Issue / regenerate code" onPress={() => openModal({
+            title: "Issue location invite code", fields: [
+              { key: "company_location_id", label: "LOCATION ID", placeholder: String(data.locations?.locations?.[0]?.id || "1"), keyboard: "number-pad" },
+              { key: "code", label: "CUSTOM CODE (optional)", placeholder: "e.g. BLR-HQ-2026", caps: "characters" },
+            ],
+            okText: "Issue",
+            onOk: (f) => runAction(
+              () => issueLocationCode(Number(f.company_location_id), (f.code || "").trim().toUpperCase()),
+              (r) => `Active code: ${r?.code || "—"}`
+            ),
+          })} />
+        ) : null}
         {data.codes.map((c, i) => (
           <Row key={c.id || i} title={c.code || `Code #${c.id}`}
             sub={[c.location_name || c.company_location_id, c.status, c.created_at].filter(Boolean).join(" · ")}

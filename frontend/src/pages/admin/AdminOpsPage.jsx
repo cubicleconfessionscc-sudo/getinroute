@@ -59,14 +59,14 @@ export default function AdminOpsPage() {
   // ---- Location codes ----
   const [codes, setCodes] = useState([]);
   const [codeModal, setCodeModal] = useState(false);
-  const [codeForm, setCodeForm] = useState({ company_location_id: '', notes: '' });
+  const [codeForm, setCodeForm] = useState({ company_location_id: '', code: '', notes: '' });
   async function loadCodes() {
     try { setCodes(await api.get('/api/admin/location-codes')); } catch (e) { toast(e.message, 'err'); }
   }
   useEffect(() => { loadCodes(); }, []);
 
   async function issueCode() {
-    try { await api.post('/api/admin/location-codes', codeForm); setCodeModal(false); setCodeForm({ company_location_id: '', notes: '' }); loadCodes(); } catch (e) { toast(e.message, 'err'); }
+    try { await api.post('/api/admin/location-codes', codeForm); setCodeModal(false); setCodeForm({ company_location_id: '', code: '', notes: '' }); loadCodes(); } catch (e) { toast(e.message, 'err'); }
   }
   async function revokeCode(c) {
     if (!window.confirm('Revoke the active code for this location? The location admin will be unable to sign in until a new code is issued.')) return;
@@ -156,7 +156,7 @@ export default function AdminOpsPage() {
               Each location has at most one ACTIVE code. The code is the credential a location-scoped admin enters at login.
             </p>
           </div>
-          <button className="btn btn-primary btn-sm" disabled={locData.locations.length === 0} onClick={() => { setCodeForm({ company_location_id: locData.locations[0] ? locData.locations[0].id : '', notes: '' }); setCodeModal(true); }}>
+          <button className="btn btn-primary btn-sm" disabled={locData.locations.length === 0} onClick={() => { setCodeForm({ company_location_id: locData.locations[0] ? locData.locations[0].id : '', code: '', notes: '' }); setCodeModal(true); }}>
             <Plus size={14} /> Issue / Regenerate
           </button>
         </div>
@@ -242,6 +242,18 @@ export default function AdminOpsPage() {
               {locData.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
             <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>If a code is already active for this location it will be revoked and a new one issued.</p>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Custom code (optional)</label>
+            <input
+              value={codeForm.code}
+              onChange={(e) => setCodeForm({ ...codeForm, code: e.target.value.toUpperCase() })}
+              placeholder="e.g. BLR-HQ-2026 (leave blank to auto-generate)"
+              maxLength={32}
+              autoComplete="off"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Letters, numbers and dashes, 4–32 characters.</p>
           </div>
           <div>
             <label style={{ fontSize: 12, color: 'var(--muted)' }}>Notes (optional)</label>
