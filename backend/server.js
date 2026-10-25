@@ -1998,10 +1998,13 @@ app.put('/api/admin/vehicles/:id', auth, role('admin', 'vendor'), (req, res) => 
   const nextLoc = b.company_location_id != null && b.company_location_id !== ''
     ? Number(b.company_location_id)
     : v.company_location_id;
+  // Partial updates (e.g. only company_location_id) must never bind NaN — the
+  // SQLite driver rejects NaN parameters, which surfaced as a 500.
+  const numOr = (x, fallback) => { const n = Number(x); return Number.isFinite(n) ? n : fallback; };
   db.prepare(`UPDATE vehicles SET vehicle_name=?, plate=?, type=?, capacity=?, stand=?, line=?, trip=?, route_id=?, driver_name=?, driver_phone=?, vendor_id=?, speed_limit=?, company_location_id=? WHERE id=?`)
-    .run(b.vehicle_name ?? v.vehicle_name, b.plate ?? v.plate, b.type ?? v.type, Number(b.capacity) ?? v.capacity, b.stand ?? v.stand,
-      Number(b.line) ?? v.line, Number(b.trip) ?? v.trip, b.route_id ?? v.route_id, d ? d.name : (b.driver_name ?? v.driver_name ?? null), d ? d.phone : (b.driver_phone ?? v.driver_phone ?? null),
-      isVendorReq(req) ? v.vendor_id : (b.vendor_id ?? v.vendor_id), b.speed_limit == null ? v.speed_limit : Number(b.speed_limit), nextLoc, v.id);
+    .run(b.vehicle_name ?? v.vehicle_name, b.plate ?? v.plate, b.type ?? v.type, numOr(b.capacity, v.capacity), b.stand ?? v.stand,
+      numOr(b.line, v.line), numOr(b.trip, v.trip), b.route_id ?? v.route_id, d ? d.name : (b.driver_name ?? v.driver_name ?? null), d ? d.phone : (b.driver_phone ?? v.driver_phone ?? null),
+      isVendorReq(req) ? v.vendor_id : (b.vendor_id ?? v.vendor_id), b.speed_limit == null ? v.speed_limit : numOr(b.speed_limit, v.speed_limit), nextLoc, v.id);
   if (d) linkDriver(Number(req.params.id), d.id, isVendorReq(req) ? req.user.vendor_id : (v.vendor_id || null));
   res.json({ ok: true });
 });
