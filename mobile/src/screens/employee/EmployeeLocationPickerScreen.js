@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet, Alert } from "react-native";
-import { Building2, ChevronRight, RefreshCw, MapPin, Clock, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { getEmployeeLocations } from "../../api/company";
 import { listMyLocationChangeRequests, createLocationChangeRequest, cancelLocationChangeRequest } from "../../api/locationChanges";
@@ -97,7 +96,7 @@ export default function EmployeeLocationPickerScreen({ navigation }) {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity onPress={load} style={styles.retry}><RefreshCw size={14} color="#fff" /><Text style={styles.retryText}>Retry</Text></TouchableOpacity>
+        <TouchableOpacity onPress={load} style={styles.retry}><Text style={styles.retryGlyph}>↻</Text><Text style={styles.retryText}>Retry</Text></TouchableOpacity>
       </View>
     );
   }
@@ -120,7 +119,7 @@ export default function EmployeeLocationPickerScreen({ navigation }) {
 
       {pending && (
         <View style={styles.pendingCard}>
-          <Clock size={18} color={colors.amber} />
+          <Text style={{ fontSize: 16 }}>⏳</Text>
           <View style={{ flex: 1 }}>
             <Text style={styles.pendingTitle}>Location change pending</Text>
             <Text style={styles.pendingBody}>
@@ -128,7 +127,7 @@ export default function EmployeeLocationPickerScreen({ navigation }) {
             </Text>
             <Text style={styles.pendingBody}>To: {pending.to ? `${pending.to.name} (${pending.to.city}, ${pending.to.state})` : '—'}</Text>
             <TouchableOpacity style={styles.cancelBtn} onPress={cancelPending}>
-              <X size={14} color="#fff" /><Text style={styles.cancelBtnText}>Cancel request</Text>
+              <Text style={styles.cancelGlyph}>✕</Text><Text style={styles.cancelBtnText}>Cancel request</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -144,12 +143,12 @@ export default function EmployeeLocationPickerScreen({ navigation }) {
               const isCurrent = currentLocationId && Number(loc.id) === Number(currentLocationId);
               return (
                 <TouchableOpacity key={loc.id} style={[styles.row, isCurrent && styles.rowCurrent]} onPress={() => pick(loc)}>
-                  <Building2 size={18} color={isCurrent ? colors.primary : colors.textDim} />
+                  <Text style={{ fontSize: 16, opacity: isCurrent ? 1 : 0.55 }}>🏢</Text>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.rowTitle, isCurrent && { color: colors.primary }]}>{loc.name}{isCurrent ? '  (current)' : ''}</Text>
                     {loc.address ? <Text style={styles.rowHint}>{loc.address}</Text> : null}
                   </View>
-                  <ChevronRight size={16} color={colors.textDim} />
+                  <Text style={{ color: colors.textDim, fontSize: 16 }}>›</Text>
                 </TouchableOpacity>
               );
             })}
@@ -176,8 +175,10 @@ const styles = StyleSheet.create({
   pendingBody: { color: colors.textDim, fontSize: 12, marginTop: 4, lineHeight: 18 },
   cancelBtn: { marginTop: 8, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.coral, borderRadius: radius.sm },
   cancelBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  cancelGlyph: { color: '#fff', fontSize: 12, fontWeight: '800', marginRight: 4 },
   empty: { color: colors.textDim, fontSize: 13 },
   errorText: { color: colors.coral, fontSize: 13, marginBottom: 12 },
   retry: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.primary, borderRadius: radius.sm },
-  retryText: { color: '#fff', fontWeight: '700' }
+  retryText: { color: '#fff', fontWeight: '700' },
+  retryGlyph: { color: '#fff', fontSize: 14, fontWeight: '800', marginRight: 4 }
 });
