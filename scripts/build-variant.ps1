@@ -356,7 +356,11 @@ $out = Join-Path $root "artifacts\$Variant"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $apkName = "$Variant-$($meta.version).apk"
 $aabName = "$Variant-$($meta.version).aab"
-$artifactPairs = @(@($apk, $apkName))
+# NOTE: use the unary comma so each entry stays a 2-item array. A plain
+# @(@($apk, $apkName)) is flattened by PowerShell, which made $pair[0] the
+# first CHARACTER of the path ("D") and failed artifact collection.
+$artifactPairs = @()
+$artifactPairs += ,@($apk, $apkName)
 if (-not $ApkOnly) { $artifactPairs += ,@($aab, $aabName) }
 foreach ($pair in $artifactPairs) {
   if (-not (Test-Path -LiteralPath $pair[0])) { throw "expected build output missing: $($pair[0]) - refusing to publish a stale artifact" }
