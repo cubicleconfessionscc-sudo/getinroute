@@ -6,6 +6,29 @@ let watchSubscription = null;
 let activeTripId = null;
 let stopConfigListener = null;
 
+// Remembers that the driver already declined background location so the OS
+// dialog is never repeated on every trip. Stored outside the secure store
+// because it is a non-sensitive UX preference (falls back silently).
+const BG_DECLINED_KEY = "gir_bg_location_declined";
+let bgDeclinedCache = null;
+async function readBgDeclined() {
+  if (bgDeclinedCache != null) return bgDeclinedCache;
+  try {
+    const SecureStore = require("expo-secure-store");
+    bgDeclinedCache = (await SecureStore.getItemAsync(BG_DECLINED_KEY)) === "1";
+  } catch {
+    bgDeclinedCache = false;
+  }
+  return bgDeclinedCache;
+}
+async function writeBgDeclined() {
+  bgDeclinedCache = true;
+  try {
+    const SecureStore = require("expo-secure-store");
+    await SecureStore.setItemAsync(BG_DECLINED_KEY, "1");
+  } catch { /* best-effort */ }
+}
+
 /**
  * Shows Google's required prominent-disclosure dialog before requesting
  * background location. Returns true if the user tapped Allow, false on Cancel.
@@ -106,18 +129,17 @@ export async function startDriverTracking(tripId) {
     throw new Error("Location permission is required to start a trip.");
   }
 
-  // Check if we already have background permission
+  // Background permission is asked at most once. If the driver declines, we
+  // continue with foreground tracking (the screen is kept awake during a trip)
+  // instead of re-showing the same OS dialog on every single trip.
   const bg = await Location.getBackgroundPermissionsAsync();
-  if (bg.status !== "granted") {
-    // Show the prominent disclosure dialog (Google Play requirement)
+  if (bg.status !== "granted" && !(await readBgDeclined())) {
     const allowed = await showLocationDisclosure();
-    if (!allowed) {
-      throw new Error("Background location is needed so cab tracking works when your phone is locked.");
-    }
-    // Now request the actual OS background permission
-    const bgResult = await Location.requestBackgroundPermissionsAsync();
-    if (bgResult.status !== "granted") {
-      throw new Error("Background location permission denied. Cab tracking will stop when your screen turns off.");
+    if (allowed) {
+      const bgResult = await Location.requestBackgroundPermissionsAsync();
+      if (bgResult.status !== "granted") await writeBgDeclined();
+    } else {
+      await writeBgDeclined();
     }
   }
 
