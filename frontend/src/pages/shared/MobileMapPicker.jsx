@@ -30,13 +30,16 @@ function postToApp(payload) {
 export default function MobileMapPicker() {
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const initialLat = Number(params.get('lat'));
-  const initialLng = Number(params.get('lng'));
-  const hasInitial = Number.isFinite(initialLat) && Number.isFinite(initialLng) && params.get('lat') !== '' && params.get('lng') !== '';
+  const latParam = params.get('lat');
+  const lngParam = params.get('lng');
+  const hasInitial = latParam != null && latParam !== '' && lngParam != null && lngParam !== ''
+    && Number.isFinite(Number(latParam)) && Number.isFinite(Number(lngParam));
   const [selected, setSelected] = useState(() => (hasInitial
-    ? { lat: initialLat, lng: initialLng, address: params.get('address') || '' }
+    ? { lat: Number(latParam), lng: Number(lngParam), address: params.get('address') || '' }
     : null));
-  const [center, setCenter] = useState(() => (hasInitial ? { lat: initialLat, lng: initialLng } : { lat: MAP_DEFAULTS.center[1], lng: MAP_DEFAULTS.center[0] }));
+  const [center, setCenter] = useState(() => (hasInitial
+    ? { lat: Number(latParam), lng: Number(lngParam) }
+    : { lat: MAP_DEFAULTS.center[1], lng: MAP_DEFAULTS.center[0] }));
   const [naming, setNaming] = useState(false);
   const [locating, setLocating] = useState(false);
   const [err, setErr] = useState('');
@@ -56,8 +59,17 @@ export default function MobileMapPicker() {
   }, []);
 
   useEffect(() => {
-    if (hasInitial && !params.get('address')) void select(initialLat, initialLng);
+    if (hasInitial && !params.get('address')) void select(Number(latParam), Number(lngParam));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The app screens are light; use the light theme tokens for the embedded
+  // inputs/dropdown so this page matches the employee app.
+  useEffect(() => {
+    const root = document.documentElement;
+    const prev = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', 'light');
+    return () => { if (prev) root.setAttribute('data-theme', prev); else root.removeAttribute('data-theme'); };
   }, []);
 
   const useMyLocation = async () => {
@@ -85,7 +97,7 @@ export default function MobileMapPicker() {
   const markers = useMemo(() => (hasPoint ? [{ id: 'pick', lat: selected.lat, lng: selected.lng, color: 'indigo' }] : []), [hasPoint, selected]);
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f4f7fb', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', background: '#f4f7fb', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '14px 12px', background: '#fff', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 5 }}>
         <button type="button" onClick={cancel} style={{ border: 0, background: 'none', display: 'flex', alignItems: 'center', gap: 2, color: '#2563eb', fontWeight: 700, fontSize: 15, padding: '4px 6px' }}>
           <ChevronLeft size={18} /> Back
@@ -94,7 +106,7 @@ export default function MobileMapPicker() {
         <span style={{ width: 60 }} />
       </header>
 
-      <div style={{ padding: '10px 12px', background: '#fff' }}>
+      <div style={{ padding: '10px 12px', background: '#fff', flexShrink: 0 }}>
         <AddressPicker
           mapButton={false}
           value={hasPoint ? { address: selected.address || '', lat: selected.lat, lng: selected.lng } : null}
@@ -109,8 +121,8 @@ export default function MobileMapPicker() {
         {err ? <div role="alert" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#fff1f2', color: '#be123c', fontSize: 12.5, fontWeight: 600 }}>{err}</div> : null}
       </div>
 
-      <div style={{ flex: 1, minHeight: 300, padding: '10px 12px' }}>
-        <div style={{ height: '100%', minHeight: 300, borderRadius: 14, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#e9eef4' }}>
+      <div style={{ flex: 1, minHeight: 220, padding: '10px 12px', position: 'relative' }}>
+        <div style={{ position: 'absolute', inset: 10, borderRadius: 14, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#e9eef4' }}>
           <MapLibreMap
             center={center}
             zoom={hasPoint ? 16 : 12}
@@ -123,7 +135,7 @@ export default function MobileMapPicker() {
         </div>
       </div>
 
-      <div style={{ position: 'sticky', bottom: 0, background: '#fff', borderTop: '1px solid #e2e8f0', padding: '12px 14px' }}>
+      <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid #e2e8f0', padding: '12px 14px' }}>
         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#64748b' }}>Selected point</div>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 4 }}>
           <MapPin size={16} color="#2563eb" style={{ marginTop: 3, flexShrink: 0 }} />
