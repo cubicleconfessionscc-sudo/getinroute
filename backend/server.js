@@ -1120,12 +1120,29 @@ app.post('/api/auth/login', guard(120, 15 * 60 * 1000), (req, res) => {
   if (session.conflict) {
     return res.status(409).json({ error: 'This account is already signed in on another device. Log out there first, then try again.', code: 'SESSION_EXISTS' });
   }
+  // Audit: who signed in, when, and from where (when the client could share it).
+  recordLoginEvent(user, 'login', {
+    lat: loginLat,
+    lng: loginLng,
+    app: appName,
+    locId: sessionLoc != null ? sessionLoc : user.company_location_id,
+    req
+  });
   // The app variant + chosen operational location are embedded as SIGNED claims
   // so a client cannot forge them later.
   res.json({ token: sign(user, session.sid, { app: appName, ...(sessionLoc != null ? { loc: sessionLoc } : {}) }), user: publicUser(user) });
 });
 
 app.post('/api/auth/logout', auth, (req, res) => {
+  // Record the sign-out (and last known position if the client sent one) so
+  // the tracking dashboard can show the full working day.
+  recordLoginEvent(req.user, 'logout', {
+    lat: req.body && req.body.lat,
+    lng: req.body && req.body.lng,
+    app: req.body && req.body.app,
+    locId: (req.tokenPayload && req.tokenPayload.loc != null) ? req.tokenPayload.loc : req.user.company_location_id,
+    req
+  });
   // Release the employee/driver active session so the next login starts clean.
   endUserSession(req.user, req.tokenPayload);
   res.json({ ok: true });
@@ -4373,6 +4390,327 @@ app.get('/api/admin/tracking', auth, role('admin', 'vendor'), (req, res) => {
   res.json(buildTracking(isVendorReq(req) ? { vid: req.user.vendor_id } : null, companyAdminScope(req)));
 });
 
+/* ---------------- OPERATIONS INSIGHTS ("Dashboard 2") ----------------
+ * A separate analytics surface from the existing Dashboard: login/logout
+ * activity (with geotags), check-ins, trips, cancellations and per-location
+ * utilisation, all scoped to the caller (company / location / vendor).
+ * Never mutates data; safe to poll. */
+function shiftIsoDate(dateStr, delta) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+function buildInsights(req) {
+  const isVendor = isVendorReq(req);
+  const sc = companyAdminScope(req);
+  const ls = locationScope(req);
+  const locAllowed = (!isVendor && Array.isArray(ls)) ? ls : null;
+  const locFilter = Number((req.query || {}).location_id) || null;
+  const vendorId = isVendor ? Number(req.user.vendor_id) : null;
+
+  const isoDay = /^\d{4}-\d{2}-\d{2}$/;
+  const to = isoDay.test(String((req.query || {}).to || '')) ? String(req.query.to) : dateOnly();
+  const from = isoDay.test(String((req.query || {}).from || '')) ? String(req.query.from) : shiftIsoDate(to, -6);
+  const days = Math.floor((Date.parse(to + 'T00:00:00') - Date.parse(from + 'T00:00:00')) / 86400000) + 1;
+  if (!(days >= 1) || days > 92) {
+    const e = new Error('Date range must be between 1 and 92 days.');
+    e.status = 400;
+    throw e;
+  }
+
+  // --- employees in scope -------------------------------------------------
+  let empSql = `SELECT u.id, u.name, u.emp_id, u.company_location_id, u.last_login, u.phone,
+      l.name AS location_name, c.name AS city, st.name AS state
+    FROM users u
+    LEFT JOIN company_locations l ON l.id = u.company_location_id
+    LEFT JOIN company_cities c ON c.id = l.city_id
+    LEFT JOIN company_states st ON st.id = l.state_id
+    WHERE u.role='employee' AND u.approved=1`;
+  const empParams = [];
+  if (isVendor) {
+    empSql += ' AND 1=0';
+  } else {
+    if (!sc.isOwner) { empSql += ' AND u.company_id=?'; empParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { empSql += ` AND u.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; empParams.push(...locAllowed); }
+    if (locFilter) { empSql += ' AND u.company_location_id=?'; empParams.push(locFilter); }
+  }
+  const employees = db.prepare(empSql + ' ORDER BY u.name COLLATE NOCASE').all(...empParams);
+
+  // --- login activity -----------------------------------------------------
+  let leWhere = "date(le.created_at) BETWEEN ? AND ?";
+  const leParams = [from, to];
+  if (isVendor) {
+    leWhere += " AND le.role='driver' AND le.user_id IN (SELECT du.id FROM users du WHERE du.role='driver' AND du.vehicle_id IN (SELECT vid.id FROM vehicles vid WHERE vid.vendor_id=?))";
+    leParams.push(vendorId);
+  } else {
+    if (!sc.isOwner) { leWhere += ' AND le.company_id=?'; leParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { leWhere += ` AND le.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; leParams.push(...locAllowed); }
+    if (locFilter) { leWhere += ' AND le.company_location_id=?'; leParams.push(locFilter); }
+  }
+  const loginRows = db.prepare(`SELECT le.*, u.name, u.emp_id, l.name AS location_name, v.vehicle_name
+    FROM login_events le
+    LEFT JOIN users u ON u.id = le.user_id
+    LEFT JOIN company_locations l ON l.id = le.company_location_id
+    LEFT JOIN vehicles v ON v.id = u.vehicle_id
+    WHERE ${leWhere} ORDER BY le.id DESC`).all(...leParams);
+
+  // --- schedules in range -------------------------------------------------
+  let sWhere = 's.date BETWEEN ? AND ?';
+  const sParams = [from, to];
+  if (isVendor) {
+    sWhere += ' AND s.vehicle_id IN (SELECT vid.id FROM vehicles vid WHERE vid.vendor_id=?)';
+    sParams.push(vendorId);
+  } else {
+    if (!sc.isOwner) { sWhere += ' AND u.company_id=?'; sParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { sWhere += ` AND u.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; sParams.push(...locAllowed); }
+    if (locFilter) { sWhere += ' AND u.company_location_id=?'; sParams.push(locFilter); }
+  }
+  const schedules = db.prepare(`SELECT s.id, s.employee_id, s.vehicle_id, s.date, s.pickup_time, s.login_time,
+      s.status, s.state, s.cancel_status, s.cancel_reason, u.name AS emp_name, u.emp_id,
+      u.company_location_id, l.name AS location_name, v.vehicle_name, v.plate, v.driver_name
+    FROM schedules s
+    LEFT JOIN users u ON u.id = s.employee_id
+    LEFT JOIN company_locations l ON l.id = u.company_location_id
+    LEFT JOIN vehicles v ON v.id = s.vehicle_id
+    WHERE ${sWhere}`).all(...sParams);
+
+  // --- check-ins ----------------------------------------------------------
+  let cWhere = 'date(c.time) BETWEEN ? AND ?';
+  const cParams = [from, to];
+  if (isVendor) {
+    cWhere += ' AND s.vehicle_id IN (SELECT vid.id FROM vehicles vid WHERE vid.vendor_id=?)';
+    cParams.push(vendorId);
+  } else {
+    if (!sc.isOwner) { cWhere += ' AND u.company_id=?'; cParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { cWhere += ` AND u.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; cParams.push(...locAllowed); }
+    if (locFilter) { cWhere += ' AND u.company_location_id=?'; cParams.push(locFilter); }
+  }
+  const checkinRows = db.prepare(`SELECT c.id, c.schedule_id, c.user_id, c.type, c.time, c.lat, c.lng,
+      u.name, u.emp_id, u.role, u.company_location_id, l.name AS location_name, v.vehicle_name
+    FROM checkins c
+    LEFT JOIN schedules s ON s.id = c.schedule_id
+    LEFT JOIN users u ON u.id = c.user_id
+    LEFT JOIN company_locations l ON l.id = u.company_location_id
+    LEFT JOIN vehicles v ON v.id = s.vehicle_id
+    WHERE ${cWhere} ORDER BY c.id DESC`).all(...cParams);
+
+  // --- trip events --------------------------------------------------------
+  let teWhere = 'date(te.date) BETWEEN ? AND ?';
+  const teParams = [from, to];
+  if (isVendor) {
+    teWhere += ' AND s.vehicle_id IN (SELECT vid.id FROM vehicles vid WHERE vid.vendor_id=?)';
+    teParams.push(vendorId);
+  } else {
+    if (!sc.isOwner) { teWhere += ' AND u.company_id=?'; teParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { teWhere += ` AND u.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; teParams.push(...locAllowed); }
+    if (locFilter) { teWhere += ' AND u.company_location_id=?'; teParams.push(locFilter); }
+  }
+  const tripEvents = db.prepare(`SELECT te.id, te.kind, te.meta, te.date, te.created_at, te.employee_name,
+      u.emp_id, u.role, u.company_location_id, l.name AS location_name, v.vehicle_name
+    FROM trip_events te
+    LEFT JOIN schedules s ON s.id = te.schedule_id
+    LEFT JOIN users u ON u.id = te.employee_id
+    LEFT JOIN company_locations l ON l.id = u.company_location_id
+    LEFT JOIN vehicles v ON v.id = s.vehicle_id
+    WHERE ${teWhere} ORDER BY te.id DESC LIMIT 2000`).all(...teParams);
+
+  // --- driver duty --------------------------------------------------------
+  let dWhere = 'date(d.started_at) BETWEEN ? AND ?';
+  const dParams = [from, to];
+  if (isVendor) { dWhere += ' AND d.vendor_id=?'; dParams.push(vendorId); }
+  else {
+    if (!sc.isOwner) { dWhere += ' AND d.company_id=?'; dParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { dWhere += ` AND d.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; dParams.push(...locAllowed); }
+    if (locFilter) { dWhere += ' AND d.company_location_id=?'; dParams.push(locFilter); }
+  }
+  const dutyRows = db.prepare(`SELECT d.* FROM driver_duty_sessions d WHERE ${dWhere}`).all(...dParams);
+
+  // --- drivers in scope ---------------------------------------------------
+  let drvSql = `SELECT u.id, u.name, u.emp_id, u.last_login, u.vehicle_id, v.vehicle_name, v.plate, l.name AS location_name
+    FROM users u
+    LEFT JOIN vehicles v ON v.id = u.vehicle_id
+    LEFT JOIN company_locations l ON l.id = COALESCE(u.company_location_id, v.company_location_id)
+    WHERE u.role='driver' AND u.approved=1`;
+  const drvParams = [];
+  if (isVendor) { drvSql += ' AND v.vendor_id=?'; drvParams.push(vendorId); }
+  else {
+    if (!sc.isOwner) { drvSql += ' AND (u.company_id=? OR v.company_id=?)'; drvParams.push(sc.cid, sc.cid); }
+    if (locAllowed && locAllowed.length) { drvSql += ` AND COALESCE(u.company_location_id, v.company_location_id) IN (${locAllowed.map(() => '?').join(',')})`; drvParams.push(...locAllowed); }
+    if (locFilter) { drvSql += ' AND COALESCE(u.company_location_id, v.company_location_id)=?'; drvParams.push(locFilter); }
+  }
+  const drivers = db.prepare(drvSql + ' ORDER BY u.name COLLATE NOCASE').all(...drvParams);
+
+  // --- locations in scope -------------------------------------------------
+  let locRows = [];
+  if (isVendor) {
+    locRows = db.prepare(`SELECT DISTINCT l.id, l.name, c.name AS city, st.name AS state
+      FROM company_locations l
+      LEFT JOIN company_cities c ON c.id = l.city_id
+      LEFT JOIN company_states st ON st.id = l.state_id
+      JOIN vehicles v ON v.company_location_id = l.id
+      WHERE v.vendor_id=?
+      ORDER BY st.name, c.name, l.name`).all(vendorId);
+  } else {
+    let lWhere = '1=1';
+    const lParams = [];
+    if (!sc.isOwner) { lWhere += ' AND l.company_id=?'; lParams.push(sc.cid); }
+    if (locAllowed && locAllowed.length) { lWhere += ` AND l.id IN (${locAllowed.map(() => '?').join(',')})`; lParams.push(...locAllowed); }
+    if (locFilter) { lWhere += ' AND l.id=?'; lParams.push(locFilter); }
+    locRows = db.prepare(`SELECT l.id, l.name, c.name AS city, st.name AS state
+      FROM company_locations l
+      LEFT JOIN company_cities c ON c.id = l.city_id
+      LEFT JOIN company_states st ON st.id = l.state_id
+      WHERE ${lWhere} ORDER BY st.name, c.name, l.name`).all(...lParams);
+  }
+
+  // --- aggregation --------------------------------------------------------
+  const isDone = (s) => s.state === 'completed' || s.status === 'completed';
+  const isCancelled = (s) => s.state === 'cancelled' || s.status === 'cancelled' || s.cancel_status === 'requested' || s.cancel_status === 'approved';
+  const loginEvents = loginRows.filter((r) => r.kind === 'login');
+  const logoutEvents = loginRows.filter((r) => r.kind === 'logout');
+  const checkinIn = checkinRows.filter((c) => c.type === 'checkin');
+  const checkoutOut = checkinRows.filter((c) => c.type === 'checkout');
+  const completed = schedules.filter(isDone);
+  const cancelled = schedules.filter((s) => !isDone(s) && isCancelled(s));
+
+  const byDate = new Map();
+  for (let i = 0; i < days; i += 1) {
+    const d = shiftIsoDate(from, i);
+    byDate.set(d, { date: d, logins: 0, logouts: 0, unique_logged_in: 0, checkins: 0, checkouts: 0, trips: 0, completed: 0, cancelled: 0, _uniq: new Set() });
+  }
+  for (const r of loginEvents) {
+    const d = String(r.created_at).slice(0, 10);
+    const b = byDate.get(d); if (!b) continue;
+    b.logins += 1; b._uniq.add(r.user_id);
+  }
+  for (const r of logoutEvents) { const b = byDate.get(String(r.created_at).slice(0, 10)); if (b) b.logouts += 1; }
+  for (const c of checkinIn) { const b = byDate.get(String(c.time).slice(0, 10)); if (b) b.checkins += 1; }
+  for (const c of checkoutOut) { const b = byDate.get(String(c.time).slice(0, 10)); if (b) b.checkouts += 1; }
+  for (const s of schedules) {
+    const b = byDate.get(String(s.date).slice(0, 10)); if (!b) continue;
+    b.trips += 1;
+    if (isDone(s)) b.completed += 1;
+    else if (isCancelled(s)) b.cancelled += 1;
+  }
+  const daily = [...byDate.values()].map((b) => ({ ...b, unique_logged_in: b._uniq.size, _uniq: undefined }));
+
+  const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, logins: 0 }));
+  for (const r of loginEvents) {
+    const hh = Number(String(r.created_at).slice(11, 13));
+    if (Number.isFinite(hh) && hourly[hh]) hourly[hh].logins += 1;
+  }
+
+  const locations = locRows.map((l) => {
+    const emps = employees.filter((e) => Number(e.company_location_id) === Number(l.id));
+    const logins = loginEvents.filter((r) => Number(r.company_location_id) === Number(l.id));
+    const cis = checkinIn.filter((c) => Number(c.company_location_id) === Number(l.id));
+    const trips = schedules.filter((s) => Number(s.company_location_id) === Number(l.id));
+    return {
+      location_id: l.id,
+      location: l.name,
+      city: l.city || '',
+      state: l.state || '',
+      employees: emps.length,
+      logins: logins.length,
+      checkins: cis.length,
+      trips: trips.length,
+      completed: trips.filter(isDone).length,
+      cancelled: trips.filter((s) => !isDone(s) && isCancelled(s)).length
+    };
+  });
+
+  const dutyByDriver = new Map();
+  for (const d of dutyRows) {
+    const start = Date.parse(String(d.started_at).replace(' ', 'T'));
+    const end = d.ended_at ? Date.parse(String(d.ended_at).replace(' ', 'T')) : Date.now();
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) continue;
+    dutyByDriver.set(Number(d.driver_id), (dutyByDriver.get(Number(d.driver_id)) || 0) + (end - start) / 3600000);
+  }
+  const driversOut = drivers.map((d) => {
+    const trips = schedules.filter((s) => Number(s.vehicle_id) === Number(d.vehicle_id));
+    return {
+      driver_id: d.id, name: d.name, emp_id: d.emp_id, vehicle: d.vehicle_name || null, plate: d.plate || null,
+      location: d.location_name || null, last_login: d.last_login || null,
+      trips: trips.length, completed: trips.filter(isDone).length,
+      duty_hours: Math.round((dutyByDriver.get(Number(d.id)) || 0) * 10) / 10
+    };
+  });
+
+  // --- feed ---------------------------------------------------------------
+  const feed = [];
+  const pushFeed = (at, kind, label, name, empId, role, location, vehicle, lat, lng) => {
+    if (!at) return;
+    feed.push({ at: String(at), kind, label, name: name || null, emp_id: empId || null, role: role || null, location: location || null, vehicle: vehicle || null, lat: lat != null ? Number(lat) : null, lng: lng != null ? Number(lng) : null });
+  };
+  const TRIP_LABEL = {
+    boarded: 'Boarded the cab', driver_arrived: 'Driver reached pickup', office_arrival: 'Reached office',
+    dropped: 'Dropped at home', run_started: 'Driver started the run', run_completed: 'Trip completed',
+    cancelled: 'Trip cancelled', no_show: 'Marked no-show', checkin_requested: 'Check-in requested',
+    confirmed: 'Booking confirmed', safety_confirmed: 'Drop safely confirmed'
+  };
+  for (const r of loginRows) {
+    const isEmp = r.role === 'employee';
+    pushFeed(r.created_at, r.kind,
+      `${isEmp ? 'Employee' : r.role === 'driver' ? 'Driver' : 'User'} ${r.kind === 'login' ? 'logged in' : 'logged out'}`,
+      r.name, r.emp_id, r.role, r.location_name, r.vehicle_name, r.lat, r.lng);
+  }
+  for (const c of checkinRows) {
+    pushFeed(c.time, c.type, c.type === 'checkin' ? 'Check-in (boarded)' : 'Check-out (office)', c.name, c.emp_id, c.role, c.location_name, c.vehicle_name, c.lat, c.lng);
+  }
+  for (const e of tripEvents) {
+    pushFeed(e.created_at, e.kind, TRIP_LABEL[e.kind] || e.kind, e.employee_name, e.emp_id, e.role, e.location_name, e.vehicle_name, null, null);
+  }
+  feed.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+  // --- average pickup delay ----------------------------------------------
+  const delays = [];
+  for (const s of schedules) {
+    const ci = checkinIn.find((c) => Number(c.schedule_id) === Number(s.id));
+    if (!ci) continue;
+    const t = s.login_time || s.pickup_time;
+    if (!t) continue;
+    const expected = Date.parse(`${s.date}T${String(t).slice(0, 5)}:00`);
+    const actual = Date.parse(String(ci.time).replace(' ', 'T'));
+    if (Number.isNaN(expected) || Number.isNaN(actual)) continue;
+    delays.push((actual - expected) / 60000);
+  }
+  const avgDelay = delays.length ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : null;
+
+  return {
+    generated_at: ts(),
+    range: { from, to, days },
+    scope: { is_vendor: isVendor, is_owner: !!sc.isOwner, locations: locRows.length },
+    totals: {
+      employees: employees.length,
+      active_employees: new Set(loginEvents.filter((r) => r.role === 'employee').map((r) => r.user_id)).size,
+      logins: loginEvents.length,
+      logouts: logoutEvents.length,
+      checkins: checkinIn.length,
+      checkouts: checkoutOut.length,
+      trips: schedules.length,
+      completed: completed.length,
+      cancelled: cancelled.length,
+      vehicles_active: new Set(schedules.map((s) => s.vehicle_id).filter(Boolean)).size,
+      drivers: drivers.length,
+      duty_hours: Math.round([...dutyByDriver.values()].reduce((a, b) => a + b, 0) * 10) / 10,
+      drivers_on_duty: dutyRows.filter((d) => d.active).length,
+      avg_pickup_delay_min: avgDelay,
+      active_locations: locations.filter((l) => l.employees > 0 || l.trips > 0 || l.logins > 0).length
+    },
+    daily,
+    hourly,
+    locations,
+    drivers: driversOut,
+    feed: feed.slice(0, 80),
+    exportEvents: feed.slice(0, 5000)
+  };
+}
+app.get('/api/admin/insights', auth, role('admin', 'vendor'), (req, res) => {
+  try { res.json(buildInsights(req)); }
+  catch (e) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not build insights' }); }
+});
+
 app.get('/api/owner/tracking', auth, role('admin'), ownerOnly, (req, res) => {
   const tracking = buildTracking(null, { isOwner: true });
   const companies = db.prepare(`
@@ -5165,6 +5503,29 @@ const EXPORT_KINDS = {
           s.cancel_status === 'requested' ? 'Cancelled (requested)' : (s.state || s.status || '—'),
           s.cancel_reason || '—'];
       });
+    }
+  },
+  // Dashboard 2 exports: the same scoped aggregation the insights page renders.
+  'insights-daily': {
+    headers: ['Date', 'Logins', 'Logouts', 'Unique Employees In', 'Check-ins', 'Check-outs', 'Trips', 'Completed', 'Cancelled'],
+    rows: (req) => {
+      const d = buildInsights(req);
+      return d.daily.map((x) => [x.date, x.logins, x.logouts, x.unique_logged_in, x.checkins, x.checkouts, x.trips, x.completed, x.cancelled]);
+    }
+  },
+  'insights-locations': {
+    headers: ['Location', 'City', 'State', 'Employees', 'Logins', 'Check-ins', 'Trips', 'Completed', 'Cancelled'],
+    rows: (req) => {
+      const d = buildInsights(req);
+      return d.locations.map((l) => [l.location, l.city, l.state, l.employees, l.logins, l.checkins, l.trips, l.completed, l.cancelled]);
+    }
+  },
+  'insights-events': {
+    headers: ['Timestamp', 'Event', 'Name', 'Emp ID', 'Role', 'Location', 'Vehicle', 'Latitude', 'Longitude'],
+    rows: (req) => {
+      const d = buildInsights(req);
+      return d.exportEvents.map((e) => [e.at, e.label, e.name || '—', e.emp_id || '—', e.role || '—', e.location || '—', e.vehicle || '—',
+        e.lat != null ? e.lat : '', e.lng != null ? e.lng : '']);
     }
   }
 };
@@ -6167,6 +6528,13 @@ app.post('/api/vendor/login', guard(60, 15 * 60 * 1000), (req, res) => {
     try { db.prepare('UPDATE users SET company_location_id = ? WHERE id = ?').run(sessionLoc, mirrorUser.id); } catch (e) {}
   }
   const token = sign(mirrorUser, null, { src: 'users', app: 'web', ...(sessionLoc != null ? { loc: sessionLoc } : {}) });
+  recordLoginEvent({ ...mirrorUser, role: 'vendor' }, 'login', {
+    lat: req.body && req.body.lat,
+    lng: req.body && req.body.lng,
+    app: 'vendor-web',
+    locId: sessionLoc != null ? sessionLoc : mirrorUser.company_location_id,
+    req
+  });
   res.json({ token, user: { ...publicVendor(vendor), role: 'vendor', id: mirrorUser.id, ...(sessionLoc != null ? { company_location_id: sessionLoc } : {}) } });
 });
 
@@ -6481,6 +6849,30 @@ function addTripEvent(scheduleId, kind, meta) {
   const emp = db.prepare('SELECT name FROM users WHERE id=?').get(s.employee_id);
   db.prepare('INSERT INTO trip_events (schedule_id, employee_id, employee_name, vehicle_id, date, kind, meta) VALUES (?,?,?,?,?,?,?)')
     .run(s.id, s.employee_id, emp ? emp.name : null, s.vehicle_id, s.date, kind, meta ? JSON.stringify(meta) : null);
+}
+
+// Login/logout audit trail with an optional geotag. Never throws — a tracking
+// write must not block authentication.
+function recordLoginEvent(user, kind, { lat, lng, app, locId, req } = {}) {
+  try {
+    if (!user || !user.id) return;
+    const latN = lat != null && Number.isFinite(Number(lat)) ? Number(lat) : null;
+    const lngN = lng != null && Number.isFinite(Number(lng)) ? Number(lng) : null;
+    const loc = locId != null ? Number(locId) : (user.company_location_id != null ? Number(user.company_location_id) : null);
+    db.prepare(`INSERT INTO login_events (user_id, role, company_id, company_location_id, kind, lat, lng, app, ip, user_agent)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      Number(user.id),
+      user.role || null,
+      user.company_id != null ? Number(user.company_id) : null,
+      loc,
+      kind === 'logout' ? 'logout' : 'login',
+      latN,
+      lngN,
+      app || null,
+      req ? (ipOf(req) || null) : null,
+      req && req.headers ? String(req.headers['user-agent'] || '').slice(0, 250) || null : null
+    );
+  } catch (e) { /* tracking is best-effort */ }
 }
 
 /* Night Safety Drop eligibility: enabled via settings + per-employee flag. The

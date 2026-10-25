@@ -1067,3 +1067,31 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_lcr_employee ON location_change_requests(employee_id, status);
   CREATE INDEX IF NOT EXISTS idx_lcr_dest ON location_change_requests(to_location_id, status);
 `);
+
+/* -------------------------------------------------------------------
+ * Login activity (login / logout) with optional geotag.
+ *
+ * Every successful sign-in and every sign-out is recorded here so admins and
+ * vendors can see when and where employees/drivers started and ended their day
+ * ("who logged in, from which office location, at what time"). Scoped reads
+ * join users, so a location-scoped admin only sees their own location.
+ * ------------------------------------------------------------------- */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS login_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    role TEXT,
+    company_id INTEGER,
+    company_location_id INTEGER,
+    kind TEXT NOT NULL CHECK (kind IN ('login','logout')),
+    lat REAL,
+    lng REAL,
+    app TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_login_events_time ON login_events(created_at);
+  CREATE INDEX IF NOT EXISTS idx_login_events_company ON login_events(company_id, company_location_id, created_at);
+`);

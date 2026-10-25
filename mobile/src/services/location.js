@@ -62,6 +62,35 @@ export async function getFreshPosition(timeoutMs = 12000) {
 }
 
 /**
+ * Returns the device position WITHOUT ever showing a permission prompt.
+ * Used to geotag sign-in/sign-out when the user has already allowed location
+ * (which the employee/driver flows require anyway). Returns null when the
+ * permission is not granted or no fix is available in time.
+ */
+export async function getQuietPosition() {
+  try {
+    const fg = await Location.getForegroundPermissionsAsync();
+    if (fg.status !== "granted") return null;
+    const last = await Location.getLastKnownPositionAsync({ maxAge: 15 * 60 * 1000 }).catch(() => null);
+    if (last && last.coords && Number.isFinite(last.coords.latitude) && Number.isFinite(last.coords.longitude)) {
+      return { lat: last.coords.latitude, lng: last.coords.longitude };
+    }
+    let timer = null;
+    const pos = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), 4000); })
+    ]).catch(() => null);
+    if (timer) clearTimeout(timer);
+    if (!pos || !pos.coords) return null;
+    const { latitude, longitude } = pos.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return { lat: latitude, lng: longitude };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Starts watching the driver's GPS position and streams lat/lng + current
  * speed (converted from m/s to km/h) to the server every ~4 seconds or
  * every 20 meters, whichever comes first. This is what powers both the

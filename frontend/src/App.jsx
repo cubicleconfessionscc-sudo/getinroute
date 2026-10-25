@@ -22,6 +22,7 @@ import ResetPassword from './pages/ResetPassword';
 import AdminLayout from './pages/admin/AdminLayout';
 import Dashboard from './pages/admin/Dashboard';
 import LiveTracking from './pages/admin/LiveTracking';
+import OpsInsights from './pages/admin/OpsInsights';
 import RoutesPage from './pages/admin/RoutesPage';
 import VehiclesPage from './pages/admin/VehiclesPage';
 import EmployeesPage from './pages/admin/EmployeesPage';
@@ -177,6 +178,7 @@ export default function App() {
           <Route path="/admin" element={<Require role="admin" roles={['admin', 'vendor']} vertical="company"><AdminLayout /></Require>}>
             <Route index element={<Dashboard />} />
             <Route path="tracking" element={<LiveTracking />} />
+            <Route path="insights" element={<OpsInsights />} />
             <Route path="routes" element={<RoutesPage />} />
             <Route path="vehicles" element={<VehiclesPage />} />
             <Route path="employees" element={<EmployeesPage />} />

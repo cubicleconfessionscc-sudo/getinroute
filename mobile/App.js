@@ -11,6 +11,15 @@ import SchoolApp from "./src/school/SchoolApp";
 import AdminVendorRoot from "./src/screens/adminvendor/AdminVendorRoot";
 import { registerGlobalErrorHandlers } from "./src/services/globalErrors";
 import { startSyncLoop } from "./src/services/offlineQueue";
+import { useKeepAwake } from "expo-keep-awake";
+
+// Keep the screen on while the app is in the foreground. Field testing and
+// long shifts (drivers/operators) made the 6-minute device lock disruptive;
+// the lock is automatically released by the OS when the app is backgrounded.
+function KeepScreenAwake() {
+  useKeepAwake();
+  return null;
+}
 
 // The build variant is baked into the app config at build time by eas.json
 // (company => GetInRoute, driver => GetInRoute Driver, school => GetInRoute
@@ -70,13 +79,14 @@ export default function App() {
     // respect the Android status bar / notch / cutout, so titles never overlap
     // the system status area.
     if (VARIANT === "school") {
-      return <SafeAreaProvider><SchoolAppRoot /></SafeAreaProvider>;
+      return <SafeAreaProvider><KeepScreenAwake /><SchoolAppRoot /></SafeAreaProvider>;
     }
     if (VARIANT === "adminvendor") {
       // New, separate Admin/Vendor app: its own root (login selection first),
       // no Employee/Driver/School navigation and no Owner login.
       return (
         <SafeAreaProvider>
+          <KeepScreenAwake />
           <ErrorBoundary>
             <StatusBar style="dark" />
             <AdminVendorRoot />
@@ -84,7 +94,7 @@ export default function App() {
         </SafeAreaProvider>
       );
     }
-    return <SafeAreaProvider><CompanyApp /></SafeAreaProvider>;
+    return <SafeAreaProvider><KeepScreenAwake /><CompanyApp /></SafeAreaProvider>;
   } catch (e) {
     console.error("FATAL: App render failed", e); try{ console.error("FATAL_STACK", e && e.stack); }catch{};
     return <FallbackView error={e} />;

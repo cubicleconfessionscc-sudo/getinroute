@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import {
   getAdminStats, getAdminEmployees, getAdminDrivers, getAdminVehicles, getAdminRoutes,
-  getAdminSchedules, getAdminTracking, getCheckinLogs, getApprovals, resolveApproval,
+  getAdminSchedules, getAdminTracking, getCheckinLogs,   getApprovals, resolveApproval, getLocationChangeRequests, approveLocationChange, rejectLocationChange,
   getVendorDashboard, getVendorEmployees, getVendorDrivers, getVendorVehicles, getVendorRoutes, getVendorTrips,
   getLocationCodes, issueLocationCode, revokeLocationCode,
   getDriverInvites, createDriverInvite, revokeDriverInvite,
@@ -15,7 +15,11 @@ import {
   getNotifications, downloadExport,
 } from "../../api/adminvendor";
 import { connectSocket } from "../../services/socket";
+import { API_BASE_URL } from "../../api/client";
 import { colors, spacing, radius } from "../../theme";
+
+// The web console lives at the API origin (…/api is stripped).
+const WEB_BASE = String(API_BASE_URL || "https://www.getinroute.in/api").replace(/\/api\/?$/, "");
 
 // Full admin/vendor console. Mirrors the web portal: a hamburger drawer switches
 // between screens; data reloads on drawer actions and on live socket events
@@ -29,6 +33,7 @@ const MENU = [
   { key: "routes", label: "Routes" },
   { key: "schedules", label: "Schedules" },
   { key: "approvals", label: "Approvals" },
+  { key: "loccr", label: "Location Changes" },
   { key: "locations", label: "Locations" },
   { key: "codes", label: "Location Codes" },
   { key: "invites", label: "Driver Invites" },
@@ -39,6 +44,9 @@ const MENU = [
 ];
 
 const EXPORT_KINDS = [
+  ["insights-daily", "Insights · Daily"],
+  ["insights-locations", "Insights · Locations"],
+  ["insights-events", "Insights · Event log"],
   ["trip-dashboard", "Trip Dashboard (Excel lifecycle)"],
   ["employees", "Employee roster"],
   ["drivers", "Driver roster"],
@@ -59,7 +67,7 @@ export default function AdminVendorHome({ user, mode, onLogout }) {
   const [error, setError] = useState("");
   const [data, setData] = useState({
     stats: null, employees: [], drivers: [], vehicles: [], routes: [], schedules: [],
-    tracking: [], checkins: [], approvals: [], codes: [], invites: [], locations: null,
+    tracking: [], checkins: [], approvals: [], loccr: [], codes: [], invites: [], locations: null,
     notifications: [],
   });
   const [modal, setModal] = useState(null); // {type:..., ...}
@@ -88,11 +96,12 @@ export default function AdminVendorHome({ user, mode, onLogout }) {
           getNotifications().catch(() => []),
         ]);
       const approvals = isVendor ? [] : await getApprovals().catch(() => []);
+      const loccr = isVendor ? [] : await getLocationChangeRequests("pending").catch(() => []);
       setData({
         stats: stats || null,
         employees: arr(employees), drivers: arr(drivers), vehicles: arr(vehicles),
         routes: arr(routes), schedules: arr(schedules), tracking: arr(tracking),
-        checkins: arr(checkins), approvals: arr(approvals), codes: arr(codes),
+        checkins: arr(checkins), approvals: arr(approvals), loccr: arr(loccr), codes: arr(codes),
         invites: arr(invites), locations, notifications: arr(notifications),
       });
     } catch (e) {
@@ -184,6 +193,12 @@ export default function AdminVendorHome({ user, mode, onLogout }) {
                   <Text style={[styles.drawerItemText, screen === m.key && styles.drawerItemTextOn]}>{m.label}</Text>
                 </TouchableOpacity>
               ))}
+              <TouchableOpacity
+                style={styles.drawerItem}
+                onPress={() => { setDrawer(false); Linking.openURL(`${WEB_BASE}/admin/insights`).catch(() => Alert.alert("Couldn't open", "Open the web dashboard in your browser.")); }}
+              >
+                <Text style={styles.drawerItemText}>Dashboard 2 (web) ↗</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={[styles.drawerItem, styles.drawerLogout]} onPress={onLogout}>
                 <Text style={[styles.drawerItemText, { color: colors.coral }]}>Sign out</Text>
               </TouchableOpacity>
@@ -388,6 +403,30 @@ function Screen({ screen, data, mode, user, openModal, runAction, busy, download
             ]} />
         ))}
         {!data.approvals.length ? <Empty text="Nothing pending approval." /> : null}
+      </View>
+    );
+  }
+
+  if (screen === "loccr") {
+    if (isVendor) return <Empty text="Location changes are approved by the company admin." />;
+    return (
+      <View>
+        <Text style={styles.section}>Pending location changes ({data.loccr.length})</Text>
+        <Text style={styles.hint}>Employees pick their office location in the Employee app. Approve to move them (and their future bookings/check-ins) to that location; history stays with the old location.</Text>
+        {data.loccr.map((r, i) => (
+          <Row key={r.id || i}
+            title={(r.employee && r.employee.name) || `Employee #${r.employee_id || r.id}`}
+            sub={[
+              r.employee && r.employee.emp_id,
+              `From ${r.from ? r.from.name : "—"} → ${r.to ? r.to.name : "—"}`,
+              r.reason || null
+            ].filter(Boolean).join(" · ")}
+            actions={[
+              { label: "Approve", onPress: () => runAction(() => approveLocationChange(r.id), "Location approved.") },
+              { label: "Reject", danger: true, onPress: () => runAction(() => rejectLocationChange(r.id), "Location request rejected.") },
+            ]} />
+        ))}
+        {!data.loccr.length ? <Empty text="No pending location changes." /> : null}
       </View>
     );
   }

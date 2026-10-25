@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import * as authApi from "../api/auth";
 import { saveToken, clearToken, getToken } from "../api/client";
 import { connectSocket, disconnectSocket } from "../services/socket";
+import { getQuietPosition } from "../services/location";
 
 const AuthContext = createContext(null);
 
@@ -47,7 +48,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function login(email, password) {
-    const { token, user: loggedInUser } = await authApi.login(email, password);
+    // Geotag the sign-in only when location was already granted — never prompt.
+    let position = null;
+    try { position = await getQuietPosition(); } catch { /* best-effort */ }
+    const { token, user: loggedInUser } = await authApi.login(email, password, position);
     await saveToken(token);
     setUser(loggedInUser);
     await connectSocket();
@@ -61,7 +65,9 @@ export function AuthProvider({ children }) {
   }
 
   async function logout() {
-    try { await authApi.logout(); } catch { /* best-effort server session invalidation */ }
+    let position = null;
+    try { position = await getQuietPosition(); } catch { /* best-effort */ }
+    try { await authApi.logout(position); } catch { /* best-effort server session invalidation */ }
     await clearToken();
     disconnectSocket();
     setUser(null);

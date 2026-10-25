@@ -11,13 +11,14 @@ import {
   LayoutDashboard, MapPinned, Route as RouteIcon, Truck, Users, ClipboardCheck,
   CalendarClock, FileSpreadsheet, Bell, LogOut, Menu, X, MessageCircle, MessageSquare, History,
   Settings, ShieldAlert, UserX, Building2, Shield, Ticket, HeadphonesIcon, School, ParkingCircle, XCircle, Database,
-  CreditCard, Flag, ShieldCheck, Brain, BarChart3, FileText, DollarSign, Send, Activity, Zap
+  CreditCard, Flag, ShieldCheck, Brain, BarChart3, FileText, DollarSign, Send, Activity, Zap, Gauge
 } from 'lucide-react';
 
 const NAV_OWNER = [
   { label: 'Overview', items: [
     { to: '/admin', icon: <LayoutDashboard size={18} />, text: 'Dashboard', end: true },
-    { to: '/admin/tracking', icon: <MapPinned size={18} />, text: 'Live Tracking' }
+    { to: '/admin/tracking', icon: <MapPinned size={18} />, text: 'Live Tracking' },
+    { to: '/admin/insights', icon: <Gauge size={18} />, text: 'Dashboard 2' }
   ]},
   { label: 'Platform', items: [
     { to: '/admin/company-approvals', icon: <Building2 size={18} />, text: 'Company Approvals' },
@@ -52,7 +53,8 @@ const NAV_OWNER = [
 const NAV_ADMIN = [
   { label: 'Overview', items: [
     { to: '/admin', icon: <LayoutDashboard size={18} />, text: 'Dashboard', end: true },
-    { to: '/admin/tracking', icon: <MapPinned size={18} />, text: 'Live Tracking' }
+    { to: '/admin/tracking', icon: <MapPinned size={18} />, text: 'Live Tracking' },
+    { to: '/admin/insights', icon: <Gauge size={18} />, text: 'Dashboard 2' }
   ]},
   { label: 'Manage', items: [
     { to: '/admin/routes', icon: <RouteIcon size={18} />, text: 'Routes & Speed Limits' },
@@ -104,7 +106,8 @@ const NAV_ADMIN = [
 const NAV_VENDOR = [
   { label: 'Overview', items: [
     { to: '/admin', icon: <LayoutDashboard size={18} />, text: 'Dashboard', end: true },
-    { to: '/admin/tracking', icon: <MapPinned size={18} />, text: 'Live Tracking' }
+    { to: '/admin/tracking', icon: <MapPinned size={18} />, text: 'Live Tracking' },
+    { to: '/admin/insights', icon: <Gauge size={18} />, text: 'Dashboard 2' }
   ]},
   { label: 'Manage', items: [
     { to: '/admin/routes', icon: <RouteIcon size={18} />, text: 'Routes' },

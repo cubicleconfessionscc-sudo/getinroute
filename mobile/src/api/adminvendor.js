@@ -73,6 +73,17 @@ export function getDriverInvites() { return client.get("/admin/driver-invites").
 export function createDriverInvite(data) { return client.post("/admin/driver-invites", data).then((r) => r.data); }
 export function revokeDriverInvite(id) { return client.post(`/admin/driver-invites/${id}/revoke`).then((r) => r.data); }
 
+// --- Employee location-change requests (first-time office selection & moves) ---
+export function getLocationChangeRequests(status = "pending") {
+  return client.get("/admin/location-change-requests", { params: { status } }).then((r) => r.data);
+}
+export function approveLocationChange(id, reason) {
+  return client.post(`/admin/location-change-requests/${id}/approve`, { reason: reason || "" }).then((r) => r.data);
+}
+export function rejectLocationChange(id, reason) {
+  return client.post(`/admin/location-change-requests/${id}/reject`, { reason: reason || "" }).then((r) => r.data);
+}
+
 // --- Exports (CSV / XLSX download with session token) ---
 import { API_BASE_URL, getToken } from "./client";
 import * as FileSystem from "expo-file-system";

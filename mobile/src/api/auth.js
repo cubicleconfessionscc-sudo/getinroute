@@ -18,15 +18,26 @@ export function register(payload) {
   return client.post("/auth/register", { ...payload, app: APP }).then((r) => r.data);
 }
 
-export function login(email, password) {
-  return client.post("/auth/login", { email, password, app: APP }).then((r) => r.data);
+export function login(email, password, position) {
+  const body = { email, password, app: APP };
+  if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+    body.lat = position.lat;
+    body.lng = position.lng;
+  }
+  return client.post("/auth/login", body).then((r) => r.data);
 }
 
 export function me() {
   return client.get("/auth/me").then((r) => r.data);
 }
 
-// Invalidates the server-side active session (single-device login for employees).
-export function logout() {
-  return client.post("/auth/logout").then((r) => r.data);
+// Invalidates the server-side active session (single-device login for employees)
+// and records the sign-out position when one is available.
+export function logout(position) {
+  const body = { app: APP };
+  if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+    body.lat = position.lat;
+    body.lng = position.lng;
+  }
+  return client.post("/auth/logout", body).then((r) => r.data);
 }

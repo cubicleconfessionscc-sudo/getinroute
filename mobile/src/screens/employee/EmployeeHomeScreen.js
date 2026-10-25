@@ -341,6 +341,19 @@ export default function EmployeeHomeScreen({ navigation }) {
 
         <OfflineBanner onOpenSync={() => navigation.navigate("PendingSync")} />
 
+        {!user?.company_location_id ? (
+          <View style={styles.locBanner}>
+            <Text style={styles.locBannerTitle}>Select your office location</Text>
+            <Text style={styles.locBannerBody}>
+              Your bookings, trips, check-ins and tracking go only to the office location you choose and its admin/vendor.
+              Changing it later needs admin approval.
+            </Text>
+            <TouchableOpacity style={styles.locBannerBtn} onPress={() => navigation.navigate("EmployeeLocationPicker")}>
+              <Text style={styles.locBannerBtnText}>Choose office location</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* Next trip */}
         <View style={styles.sectionHead}>
           <Text style={styles.sectionTitle}>Your next trip</Text>
@@ -481,6 +494,7 @@ export default function EmployeeHomeScreen({ navigation }) {
         <View style={styles.actionsGrid}>
           <Action icon="🚗" label="Book Ride" onPress={() => navigation.navigate("EmployeeSchedule")} />
           <Action icon="📍" label="My Address" onPress={() => navigation.navigate("EmployeeLocations")} />
+          <Action icon="🏢" label="Office location" onPress={() => navigation.navigate("EmployeeLocationPicker")} />
           <Action icon="📅" label="Schedule" onPress={() => navigation.navigate("EmployeeSchedule")} />
           <Action icon="📜" label="History" onPress={() => navigation.navigate("EmployeeHistory")} />
         </View>
@@ -590,6 +604,11 @@ const styles = StyleSheet.create({
   badgeText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   sectionHead: { paddingHorizontal: spacing.lg, marginTop: spacing.lg, marginBottom: spacing.sm },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "800" },
+  locBanner: { marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  locBannerTitle: { color: colors.text, fontSize: 14.5, fontWeight: "800" },
+  locBannerBody: { color: colors.textDim, fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+  locBannerBtn: { marginTop: 10, alignSelf: "flex-start", backgroundColor: colors.primary, borderRadius: radius.sm, paddingVertical: 9, paddingHorizontal: 14 },
+  locBannerBtnText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   card: { backgroundColor: colors.panel, borderRadius: radius.lg, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.line, ...shadow.card },
   tripCard: { padding: spacing.lg },
   tripTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

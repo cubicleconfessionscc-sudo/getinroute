@@ -1,9 +1,12 @@
 import React from 'react';
 import { downloadCsv, downloadFile } from '../../api';
 import { useToast } from '../../components/ui';
-import { FileSpreadsheet, Download, Users, Truck, Route as RouteIcon, CalendarClock, Star, BellRing, History, LayoutDashboard } from 'lucide-react';
+import { FileSpreadsheet, Download, Users, Truck, Route as RouteIcon, CalendarClock, Star, BellRing, History, LayoutDashboard, Building2 } from 'lucide-react';
 
 const EXPORTS = [
+  { kind: 'insights-daily', label: 'Insights · Daily', desc: 'Dashboard 2 daily series: logins, check-ins, trips, completed & cancelled', icon: <LayoutDashboard size={20} />, color: 'ico-blue' },
+  { kind: 'insights-locations', label: 'Insights · Locations', desc: 'Per-location employees, logins, check-ins, trips & cancellations', icon: <Building2 size={20} />, color: 'ico-green' },
+  { kind: 'insights-events', label: 'Insights · Event log', desc: 'Full timeline: logins/logouts with location, check-ins, arrivals & trips', icon: <History size={20} />, color: 'ico-amber' },
   { kind: 'trip-dashboard', label: 'Trip Dashboard', desc: 'Full trip lifecycle — logins, boarding, check-in, arrival, checkout & end-trip times', icon: <LayoutDashboard size={20} />, color: 'ico-indigo' },
   { kind: 'employees', label: 'Employee roster', desc: 'All registered employees with approval & status', icon: <Users size={20} />, color: 'ico-indigo' },
   { kind: 'drivers', label: 'Driver roster', desc: 'Drivers linked with their vehicles, lines & trips', icon: <Truck size={20} />, color: 'ico-violet' },
