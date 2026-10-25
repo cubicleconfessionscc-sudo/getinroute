@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { MapPin, Search, Loader2, Check, X, LocateFixed } from 'lucide-react';
-import { searchAddress, pickLocation } from '../lib/geo';
+import { searchAddress, pickLocation, reverseGeocode } from '../lib/geo';
+import { getPosition } from '../lib/geolocation';
 import MapLibreMap from './MapLibreMap';
 import { api } from '../api';
 
@@ -50,15 +51,19 @@ export function MapPickerModal({ open, title = 'Select location on the map', ini
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) { setError('Location is not available in this browser.'); return; }
+  const useMyLocation = async () => {
     setLocating(true);
     setError('');
-    navigator.geolocation.getCurrentPosition(
-      (p) => { setLocating(false); selectPoint(p.coords.latitude, p.coords.longitude); },
-      () => { setLocating(false); setError('Could not get your location — check browser permission, or search the address instead.'); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-    );
+    try {
+      const pos = await getPosition({ interactive: true });
+      if (!pos) {
+        setError('Could not get your location — check browser permission, or search the address instead.');
+        return;
+      }
+      selectPoint(pos.lat, pos.lng);
+    } finally {
+      setLocating(false);
+    }
   };
 
   const hasPoint = !!(selected && selected.lat != null && selected.lng != null
@@ -144,6 +149,9 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
   const [dropPos, setDropPos] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [geoErr, setGeoErr] = useState('');
+  const [justResolved, setJustResolved] = useState(false);
   const [provider, setProvider] = useState('google');
   const [mapOpen, setMapOpen] = useState(false);
   const debounceRef = useRef(null);
@@ -171,6 +179,7 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
 
   const onInputChange = (v) => {
     setQuery(v);
+    setJustResolved(false);
     clearTimeout(debounceRef.current);
     if (v.length >= 3) debounceRef.current = setTimeout(() => doSearch(v), 350);
     else setResults([]);
@@ -215,6 +224,7 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
   const applyItem = (item) => {
     setSelected(item);
     setQuery(item.address ? item.address.split(',').slice(0, 3).join(',') : '');
+    setJustResolved(true);
     onChange && onChange(item);
   };
 
@@ -233,15 +243,46 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
     });
   };
 
+  // One-tap exact point from the device GPS. Prompts only on this click and
+  // then reverse-geocodes to a readable address.
+  const locateMe = async () => {
+    setGeoErr('');
+    setLocating(true);
+    try {
+      const pos = await getPosition({ interactive: true });
+      if (!pos) { setGeoErr('Location unavailable. Allow access or search the address.'); return; }
+      const row = await reverseGeocode(pos.lat, pos.lng).catch(() => null);
+      if (row && row.address) {
+        applyItem({ ...row, lat: pos.lat, lng: pos.lng });
+      } else {
+        const picked = await pickLocation(pos.lat, pos.lng);
+        if (picked) applyItem({ ...picked, city: '', state: '', postal_code: '', country: '', provider_id: '' });
+      }
+    } catch {
+      setGeoErr('Could not read your location. Try searching the address instead.');
+    } finally {
+      setLocating(false);
+    }
+  };
+
   const dropdown = open && results.length > 0 && dropPos
     ? createPortal(
         <div ref={ddRef} className="addr-dd" style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}>
-          {results.map((r, i) => (
-            <button key={`${r.provider_id || i}-${i}`} type="button" className="addr-dd-item" onClick={() => pick(r)}>
-              <MapPin size={14} color="var(--primary)" style={{ flexShrink: 0, marginTop: 2 }} />
-              <span>{r.label || r.address}</span>
-            </button>
-          ))}
+          {results.map((r, i) => {
+            const primary = r.label || r.address || '';
+            const secondary = r.address && r.address !== primary ? r.address : '';
+            const locality = [r.city, r.state, r.postal_code].filter(Boolean).join(', ');
+            return (
+              <button key={`${r.provider_id || i}-${i}`} type="button" className="addr-dd-item" onClick={() => pick(r)}>
+                <MapPin size={14} color="var(--primary)" style={{ flexShrink: 0, marginTop: 2 }} />
+                <span style={{ minWidth: 0, display: 'grid', gap: 1 }}>
+                  <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{primary}</span>
+                  {secondary ? <span style={{ fontSize: 11.5, color: '#68707c' }}>{secondary}</span> : null}
+                  {locality ? <span style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600 }}>{locality}</span> : null}
+                </span>
+              </button>
+            );
+          })}
           <div className="addr-dd-foot">{provider === 'google' ? 'Powered by Google' : 'OpenStreetMap data'}</div>
         </div>,
         document.body
@@ -255,13 +296,32 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
         <input
           value={query}
           onChange={(e) => onInputChange(e.target.value)}
-          placeholder="Type an address and pick from dropdown…"
+          placeholder="Search an address, building or area…"
           data-testid="address-search"
-          style={{ paddingLeft: 32, width: '100%' }}
+          style={{ paddingLeft: 32, paddingRight: 40, width: '100%' }}
         />
-        {loading && <Loader2 size={15} style={{ position: 'absolute', right: 10, top: 11, color: 'var(--muted)', animation: 'spin 1s linear infinite' }} />}
+        {loading
+          ? <Loader2 size={15} style={{ position: 'absolute', right: 10, top: 11, color: 'var(--muted)', animation: 'spin 1s linear infinite' }} />
+          : (
+            <button
+              type="button"
+              onClick={locateMe}
+              disabled={locating}
+              title="Use my current location"
+              aria-label="Use my current location"
+              data-testid="use-my-location"
+              style={{ position: 'absolute', right: 6, top: 5, background: 'none', border: 'none', cursor: 'pointer', color: locating ? 'var(--muted)' : 'var(--primary)', padding: 5, display: 'flex' }}
+            >
+              {locating ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <LocateFixed size={15} />}
+            </button>
+          )}
       </div>
-      {!loading && query.length >= 3 && results.length === 0 && (
+      {geoErr ? (
+        <div role="alert" style={{ marginTop: 6, padding: '6px 10px', borderRadius: 8, background: '#fff1f2', color: '#be123c', fontSize: 12, fontWeight: 600 }}>
+          {geoErr}
+        </div>
+      ) : null}
+      {!loading && !justResolved && query.length >= 3 && results.length === 0 && (
         <div className="addr-dd-empty">No address matches found for “{query}”. Try a nearby landmark or check spelling.</div>
       )}
       {dropdown}

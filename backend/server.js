@@ -342,7 +342,9 @@ app.get('/api/geo/search', guard(30, 60 * 1000), (req, res) => {
   geocodeSearch(q, { limit }).then((rows) => res.json(rows)).catch(() => res.json([]));
 });
 
-app.get('/api/geo/reverse', auth, guard(60, 60 * 1000), (req, res) => {
+// Reverse geocoding is read-only and needed before sign-in too (company
+// registration picks office locations on the map). Rate-limited per IP.
+app.get('/api/geo/reverse', guard(60, 60 * 1000), (req, res) => {
   const lat = Number(req.query.lat);
   const lng = Number(req.query.lng);
   if (Number.isNaN(lat) || Number.isNaN(lng)) return res.json(null);

@@ -4,6 +4,7 @@ import { LocateFixed, MapPin, Check, Loader2 } from 'lucide-react';
 import MapLibreMap from '../../components/MapLibreMap';
 import AddressPicker from '../../components/AddressPicker';
 import { pickLocation } from '../../lib/geo';
+import { getPosition } from '../../lib/geolocation';
 
 /* Full-screen "pick a location" page shared by every portal.
    Search an address (autocomplete), drop or drag the pin, then Confirm — the
@@ -70,19 +71,20 @@ export default function LocationPickerPage() {
     setFocus({ lat: Number(item.lat), lng: Number(item.lng) });
   };
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) { setError('Location is not available in this browser.'); return; }
+  const useMyLocation = async () => {
     setLocating(true);
     setError('');
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        setLocating(false);
-        selectPoint(p.coords.latitude, p.coords.longitude);
-        setFocus({ lat: p.coords.latitude, lng: p.coords.longitude });
-      },
-      () => { setLocating(false); setError('Could not get your location — check browser permission, or search the address instead.'); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-    );
+    try {
+      const pos = await getPosition({ interactive: true });
+      if (!pos) {
+        setError('Could not get your location — check browser permission, or search the address instead.');
+        return;
+      }
+      selectPoint(pos.lat, pos.lng);
+      setFocus({ lat: pos.lat, lng: pos.lng });
+    } finally {
+      setLocating(false);
+    }
   };
 
   const hasPoint = selected && selected.lat != null && selected.lng != null

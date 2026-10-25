@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useToast } from '../components/ui';
-import { Building2, Eye, EyeOff, Clock, ShieldCheck, ChevronLeft, ChevronRight, Sparkles, CheckCircle2, MapPin, Plus, Trash2, X } from 'lucide-react';
+import { Building2, Eye, EyeOff, Clock, ShieldCheck, ChevronLeft, ChevronRight, Sparkles, CheckCircle2, MapPin, Plus, Trash2, X, LocateFixed, Loader2 } from 'lucide-react';
 import AddressPicker from '../components/AddressPicker';
 import ViewOnMapLink from '../components/ViewOnMapLink';
-import { searchAddress } from '../lib/geo';
+import MapLibreMap from '../components/MapLibreMap';
+import { searchAddress, pickLocation, reverseGeocode } from '../lib/geo';
+import { getPosition } from '../lib/geolocation';
 
 // Total steps: 6 to match the previous flow (Company Information, Locations,
 // Administrator Information, Review, Pending Approval, Trial Activated).
@@ -80,6 +82,17 @@ function defaultCityFor(state) {
   return '';
 }
 
+// Canonicalise a state/UT name coming from the geocoder (often "Karnataka",
+// sometimes "Karnataka, India") against our dropdown list. Returns null when it
+// is not a recognised Indian state so callers can fall back.
+function resolveIndianState(raw) {
+  const needle = String(raw || '').split(',')[0].trim().toLowerCase();
+  if (!needle) return null;
+  const exact = INDIAN_STATES.find((s) => s.toLowerCase() === needle);
+  if (exact) return exact;
+  return INDIAN_STATES.find((s) => s.toLowerCase().includes(needle) || needle.includes(s.toLowerCase())) || null;
+}
+
 export default function CompanyOnboard() {
   const toast = useToast();
   const nav = useNavigate();
@@ -145,14 +158,31 @@ export default function CompanyOnboard() {
   }
   function addLocation(stateName, cityName, loc) {
     if (!loc || !loc.name) return;
-    setPlan(plan.map((p) => {
-      if (p.state !== stateName) return p;
-      return { ...p, cities: p.cities.map((c) => {
-        if (c.name !== cityName) return c;
-        if (c.locations.find((l) => l.name.toLowerCase() === loc.name.toLowerCase())) return c;
-        return { ...c, locations: [...c.locations, { name: loc.name, address: loc.address || '', lat: loc.lat, lng: loc.lng, code: loc.code || '' }] };
-      }) };
-    }));
+    // When the location came from an address search / map pick, trust the
+    // geocoder's state and city so the point lands under the right city even
+    // if a different city tab was open. Unknown states fall back to the tab.
+    const targetState = resolveIndianState(loc.state) || stateName;
+    const targetCity = String(loc.city || '').trim() || cityName;
+    setPlan((prev) => {
+      const next = prev.map((p) => ({ ...p, cities: p.cities.map((c) => ({ ...c, locations: [...c.locations] })) }));
+      let sp = next.find((p) => p.state === targetState);
+      if (!sp) { sp = { state: targetState, cities: [] }; next.push(sp); }
+      let cp = sp.cities.find((c) => c.name.toLowerCase() === targetCity.toLowerCase());
+      if (!cp) { cp = { name: targetCity, locations: [] }; sp.cities.push(cp); }
+      if (!cp.locations.find((l) => l.name.toLowerCase() === loc.name.toLowerCase())) {
+        cp.locations.push({
+          name: loc.name,
+          address: loc.address || '',
+          lat: loc.lat,
+          lng: loc.lng,
+          city: targetCity,
+          state: targetState,
+          code: loc.code || ''
+        });
+      }
+      return next;
+    });
+    return { state: targetState, city: targetCity };
   }
   function removeLocation(stateName, cityName, locName) {
     setPlan(plan.map((p) => {
@@ -556,19 +586,66 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
   const [locCode, setLocCode] = useState('');
   const [pendingAddress, setPendingAddress] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [geoErr, setGeoErr] = useState('');
+  const [placed, setPlaced] = useState(null);
+  const [addrDetail, setAddrDetail] = useState('');
 
-  // A location is valid as soon as it has a name. Picking an address from the
-  // autocomplete dropdown is optional enrichment (adds lat/lng for maps and
-  // navigation) — it must never be a prerequisite, otherwise a typo-free typed
-  // name could not reach the portal or the APKs.
+  const hasPoint = !!(pendingAddress && pendingAddress.lat != null && pendingAddress.lng != null);
+  const addrText = String((pendingAddress && pendingAddress.address) || '');
+  const addrParts = addrText.split(',').map((s) => s.trim()).filter(Boolean);
+  const addrPrimary = addrParts[0] || '';
+  const addrSecondary = addrParts.slice(1, 4).join(', ');
+  const locality = [pendingAddress && pendingAddress.city, pendingAddress && pendingAddress.state, pendingAddress && pendingAddress.postal_code]
+    .filter(Boolean).join(', ');
+
+  function onAddressPicked(item) {
+    if (!item) return;
+    setGeoErr('');
+    setPendingAddress(item);
+    setPlaced(null);
+    if (!locName.trim()) {
+      const guess = String(item.name || item.address || item.label || '').split(',')[0].trim();
+      if (guess) setLocName(guess);
+    }
+  }
+
+  async function useMyLocation() {
+    setGeoErr('');
+    setLocating(true);
+    try {
+      const pos = await getPosition({ interactive: true });
+      if (!pos) {
+        setGeoErr('Could not read your location. Allow location access in the browser, or search the address instead.');
+        return;
+      }
+      const row = await reverseGeocode(pos.lat, pos.lng).catch(() => null);
+      if (row && row.address) {
+        onAddressPicked({ ...row, lat: pos.lat, lng: pos.lng });
+      } else {
+        const picked = await pickLocation(pos.lat, pos.lng);
+        if (picked) onAddressPicked({ ...picked, city: '', state: '', postal_code: '' });
+      }
+    } catch (e) {
+      setGeoErr(e.message || 'Could not read your location.');
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  // A location is valid as soon as it has a name. Picking an address adds the
+  // exact point (lat/lng) plus the city/state the point really belongs to, so
+  // the registration always records real location information.
   async function add() {
-    const name = locName.trim();
+    const name = locName.trim() || (pendingAddress ? String(pendingAddress.address || '').split(',')[0].trim() : '');
     if (!name || saving) return;
     setSaving(true);
     try {
-      let address = (pendingAddress && pendingAddress.address) || name;
-      let lat = pendingAddress ? pendingAddress.lat : null;
-      let lng = pendingAddress ? pendingAddress.lng : null;
+      let address = (pendingAddress && pendingAddress.address) || '';
+      let lat = pendingAddress && pendingAddress.lat != null ? pendingAddress.lat : null;
+      let lng = pendingAddress && pendingAddress.lng != null ? pendingAddress.lng : null;
+      let pickedCity = (pendingAddress && pendingAddress.city) || '';
+      let pickedState = (pendingAddress && pendingAddress.state) || '';
       if (lat == null || lng == null) {
         try {
           const hits = await Promise.race([
@@ -580,58 +657,138 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
             if (!pendingAddress) address = hit.address || hit.display_name || name;
             lat = hit.lat;
             lng = hit.lng;
+            pickedCity = pickedCity || hit.city || '';
+            pickedState = pickedState || hit.state || '';
           }
         } catch { /* offline / rate-limited / no match — save with the typed name */ }
       }
-      addLocation(stateName, cityName, { name, address, lat, lng, code: locCode.trim().toUpperCase() });
+      const detail = addrDetail.trim();
+      if (detail && address && !address.toLowerCase().includes(detail.toLowerCase())) {
+        address = `${address}, ${detail}`;
+      }
+      const target = addLocation(stateName, cityName, {
+        name,
+        address,
+        lat,
+        lng,
+        city: pickedCity,
+        state: pickedState,
+        code: locCode.trim().toUpperCase()
+      });
+      setPlaced(target || null);
       setLocName('');
       setLocCode('');
+      setAddrDetail('');
       setPendingAddress(null);
+      setGeoErr('');
     } finally {
       setSaving(false);
     }
   }
+
+  const placedElsewhere = placed && (placed.state !== stateName || placed.city.toLowerCase() !== cityName.toLowerCase());
+
   return (
-    <div style={{ border: '1px dashed #cbd5e1', borderRadius: 10, padding: 10, background: '#f8fafc' }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+    <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 12, background: '#fff' }}>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <label style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '.04em' }}>Location name</label>
         <input
           value={locName}
           onChange={(e) => setLocName(e.target.value)}
-          placeholder={`Location name (e.g. "${cityName} Location 1")`}
-          style={{ flex: 1 }}
+          placeholder={`e.g. "${cityName} Head Office"`}
         />
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <label style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '.04em' }}>Address (recommended)</label>
+        <div style={{ marginTop: 6 }}>
+          <AddressPicker value={pendingAddress} onChange={onAddressPicked} mapButton />
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-outline" onClick={useMyLocation} disabled={locating} style={{ padding: '6px 10px', fontSize: 13 }}>
+            {locating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <LocateFixed size={14} />}
+            {locating ? 'Finding you…' : 'Use my location'}
+          </button>
+          <span style={{ fontSize: 11.5, color: '#94a3b8' }}>Type the address and pick a suggestion, or drop an exact pin on the map.</span>
+        </div>
+        {geoErr ? (
+          <div role="alert" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#fff1f2', color: '#be123c', fontSize: 12.5, fontWeight: 600 }}>
+            {geoErr}
+          </div>
+        ) : null}
+        {hasPoint ? (
+          <div style={{ marginTop: 10, border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: '8px 10px', display: 'grid', gap: 2, fontSize: 12.5 }}>
+              <div style={{ fontWeight: 700, color: '#0f172a' }}>{addrPrimary || locName || 'Pinned location'}</div>
+              {addrSecondary ? <div style={{ color: '#64748b' }}>{addrSecondary}</div> : null}
+              {locality ? <div style={{ color: '#475569', fontSize: 11.5 }}>{locality}</div> : null}
+              <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#7c3aed', fontWeight: 700 }}>
+                {Number(pendingAddress.lat).toFixed(5)}, {Number(pendingAddress.lng).toFixed(5)}
+              </div>
+            </div>
+            <MapLibreMap
+              center={{ lat: Number(pendingAddress.lat), lng: Number(pendingAddress.lng) }}
+              zoom={15}
+              markers={[{ id: 'pending', lat: Number(pendingAddress.lat), lng: Number(pendingAddress.lng), color: 'indigo' }]}
+              fit={false}
+              height={150}
+            />
+            <div style={{ display: 'flex', gap: 6, padding: '6px 8px', background: '#f8fafc' }}>
+              <ViewOnMapLink lat={pendingAddress.lat} lng={pendingAddress.lng} address={pendingAddress.address} label="Open in Maps" />
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setPendingAddress(null); setAddrDetail(''); }} style={{ marginLeft: 'auto' }}>Clear address</button>
+            </div>
+            <div style={{ padding: '0 8px 8px' }}>
+              <input
+                value={addrDetail}
+                onChange={(e) => setAddrDetail(e.target.value)}
+                placeholder="Add landmark / floor / gate (optional) — e.g. Tower B, 3rd floor"
+                maxLength={120}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+        <label style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '.04em' }}>Invite code (optional)</label>
         <input
           value={locCode}
           onChange={(e) => setLocCode(e.target.value.toUpperCase())}
-          placeholder="Invite code (optional)"
+          placeholder="Leave blank to auto-generate (e.g. BLR-HQ-2026)"
           autoComplete="off"
           maxLength={32}
-          style={{ width: 190, fontFamily: 'monospace' }}
+          style={{ fontFamily: 'monospace' }}
           aria-label="Invite code for this location"
         />
+        <p style={{ fontSize: 11.5, color: '#94a3b8', margin: 0 }}>
+          This is the code this location&apos;s admins and vendors enter at sign-in. Letters, numbers and dashes (4–32).
+        </p>
       </div>
-      <p style={{ fontSize: 11.5, color: '#94a3b8', margin: '0 0 8px' }}>
-        Optional: set your own invite code (letters, numbers, dashes). Leave blank to auto-generate one.
-      </p>
-      <div style={{ marginBottom: 8 }}>
-        <AddressPicker value={pendingAddress} onChange={setPendingAddress} />
-      </div>
-      <button type="button" className="btn btn-primary" disabled={!locName.trim() || saving} onClick={add} style={{ width: '100%', justifyContent: 'center' }}>
-        <Plus size={14} /> {saving ? 'Saving…' : 'Add'}
+
+      <button type="button" className="btn btn-primary" disabled={(!locName.trim() && !pendingAddress) || saving} onClick={add} style={{ width: '100%', justifyContent: 'center', marginTop: 10 }}>
+        <Plus size={14} /> {saving ? 'Saving…' : 'Add location'}
       </button>
-      <p style={{ fontSize: 11.5, color: '#94a3b8', margin: '6px 0 0' }}>
-        Typing a name is enough — the address below is optional and only pins the location on the map.
-      </p>
+      {placedElsewhere ? (
+        <p style={{ fontSize: 12, color: '#15803d', margin: '8px 0 0', fontWeight: 600 }}>
+          Added under {placed.city}, {placed.state} (from the address).
+        </p>
+      ) : null}
+
       {city.locations.length > 0 && (
-        <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+        <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+            {cityName} locations ({city.locations.length})
+          </div>
           {city.locations.map((l) => (
-            <div key={l.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12 }}>
-              <MapPin size={12} color="#7c3aed" />
+            <div key={l.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 9, fontSize: 12 }}>
+              <MapPin size={13} color="#7c3aed" />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600 }}>{l.name}</div>
+                <div style={{ fontWeight: 700 }}>{l.name}</div>
                 {l.code ? (
                   <div style={{ fontSize: 11, color: '#7c3aed', fontFamily: 'monospace', fontWeight: 700 }}>code: {l.code}</div>
-                ) : null}
+                ) : (
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>code auto-generated on submit</div>
+                )}
                 <div style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.address || '—'}</span>
                   {l.lat != null && <ViewOnMapLink lat={l.lat} lng={l.lng} address={l.address} label="Map" />}

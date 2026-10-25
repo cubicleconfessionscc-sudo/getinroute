@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken, clearToken, tokenRole } from './api';
+import { getPosition } from './lib/geolocation';
 
 const AuthCtx = createContext(null);
 
@@ -19,14 +20,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = async (identifier, password, companyLocationId, locationCode) => {
+    // Optional login geo-tag. Never prompts for browser permission: this only
+    // reuses a position the user already allowed elsewhere (or a cached one).
     let lat = null, lng = null;
     try {
-      const pos = await new Promise((resolve, reject) => {
-        if (!navigator.geolocation) return reject();
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
-      });
-      lat = pos.coords.latitude;
-      lng = pos.coords.longitude;
+      const pos = await getPosition({ interactive: false, timeout: 3000 });
+      if (pos) { lat = pos.lat; lng = pos.lng; }
     } catch {}
     const code = locationCode != null ? String(locationCode).trim() : '';
     const r = await api.post('/api/auth/login', { identifier, password, lat, lng, app: 'web', ...(companyLocationId != null && companyLocationId !== '' ? { company_location_id: companyLocationId } : {}), ...(code ? { locationCode: code } : {}) });

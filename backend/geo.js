@@ -163,14 +163,21 @@ function normalizeFeature(f) {
   const p = f.properties || {};
   const g = f.geometry || {};
   const coords = g.coordinates || [];
+  // Photon splits Indian localities inconsistently: metro areas often carry
+  // only `county`/`district` and no `city`. Use those for the human-readable
+  // address text, but keep `city` strict (city/locality only) so auto-placement
+  // never invents a taluk as a city.
+  const cityText = p.city || p.locality || p.district || p.county || '';
+  const city = p.city || p.locality || '';
+  const state = p.state || p.region || '';
   return {
     label: p.label || p.name || '',
-    address: [p.name, p.housenumber, p.street, p.city, p.state, p.postcode, p.country].filter(Boolean).join(', '),
+    address: [p.name, p.housenumber, p.street, cityText, p.state || p.region, p.postcode, p.country].filter(Boolean).join(', '),
     lat: coords[1],
     lng: coords[0],
     provider_id: (p.osm_id != null ? String(p.osm_id) : null),
-    city: p.city || '',
-    state: p.state || '',
+    city,
+    state,
     postal_code: p.postcode || '',
     country: p.country || '',
     osm_type: p.osm_type || '',

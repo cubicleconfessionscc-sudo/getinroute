@@ -4,6 +4,7 @@ import MapLibreMap from './MapLibreMap';
 import AddressPicker from './AddressPicker';
 import LocationText from './LocationText';
 import { resolveAddress } from '../lib/geo';
+import { getPosition } from '../lib/geolocation';
 
 export default function MapPicker({ lat, lng, onPick, height = '260px', label }) {
   const [cur, setCur] = useState({ lat: lat ?? null, lng: lng ?? null });
@@ -28,15 +29,19 @@ export default function MapPicker({ lat, lng, onPick, height = '260px', label })
     if (onPick) onPick(point.lat, point.lng);
   };
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) return setGeoErr('Geolocation is not supported in this browser.');
+  const useMyLocation = async () => {
     setGeoLocating(true);
     setGeoErr('');
-    navigator.geolocation.getCurrentPosition(
-      (p) => { setGeoLocating(false); emit(p.coords.latitude, p.coords.longitude); },
-      () => { setGeoLocating(false); setGeoErr('Could not get your location — check browser permission.'); },
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: 15000 }
-    );
+    try {
+      const pos = await getPosition({ interactive: true });
+      if (!pos) {
+        setGeoErr('Could not get your location — check browser permission.');
+        return;
+      }
+      emit(pos.lat, pos.lng);
+    } finally {
+      setGeoLocating(false);
+    }
   };
 
   return (

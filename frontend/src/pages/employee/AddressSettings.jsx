@@ -5,6 +5,7 @@ import { useToast } from '../../components/ui';
 import AddressPicker, { MapPickerModal } from '../../components/AddressPicker';
 import ViewOnMapLink from '../../components/ViewOnMapLink';
 import { pickLocation } from '../../lib/geo';
+import { getPosition } from '../../lib/geolocation';
 import { MapPin, Loader2, Send, Map, Search, LocateFixed } from 'lucide-react';
 
 /* Employee "My Address".
@@ -47,19 +48,20 @@ export default function AddressSettings() {
     if (p) setPick(p);
   };
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) return toast('Location is not available in this browser.', 'err');
+  const useMyLocation = async () => {
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      async (p) => {
-        await handleMapPick(p.coords.latitude, p.coords.longitude);
-        setMethod(METHOD.MAP);
-        setLocating(false);
-        toast('Location captured — confirm below.');
-      },
-      () => { setLocating(false); toast('Could not get your location. Allow location access or pick on the map.', 'err'); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
-    );
+    try {
+      const pos = await getPosition({ interactive: true });
+      if (!pos) {
+        toast('Could not get your location. Allow location access or pick on the map.', 'err');
+        return;
+      }
+      await handleMapPick(pos.lat, pos.lng);
+      setMethod(METHOD.MAP);
+      toast('Location captured — confirm below.');
+    } finally {
+      setLocating(false);
+    }
   };
 
   const submit = async () => {
