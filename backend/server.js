@@ -2897,11 +2897,31 @@ app.get('/api/admin/users', auth, role('admin', 'vendor'), (req, res) => {
   })));
 });
 
-app.post('/api/admin/users/:id/unlock', auth, role('admin'), (req, res) => {
-  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+app.post('/api/admin/users/:id/unlock', auth, role('admin', 'vendor'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(req.params.id));
   if (!u) return res.status(404).json({ error: 'User not found' });
-  // Unlock also clears the single-device session slot, which is how an admin
-  // releases a driver whose old phone was lost/replaced.
+  // Scope the action: a vendor may only release their own drivers, and a
+  // company/location admin only users inside their scope.
+  if (isVendorReq(req)) {
+    const vid = Number(req.user.vendor_id);
+    const veh = u.vehicle_id ? db.prepare('SELECT vendor_id FROM vehicles WHERE id=?').get(u.vehicle_id) : null;
+    const own = (u.vendor_id != null && Number(u.vendor_id) === vid) || (veh && Number(veh.vendor_id) === vid);
+    if (!own) return res.status(403).json({ error: 'This user is outside your vendor scope.' });
+  } else {
+    const sc = companyAdminScope(req);
+    if (!sc.isOwner) {
+      const scope = locationScope(req); // null = company-wide, array = location ids
+      const sameCompany = u.company_id != null && Number(u.company_id) === Number(sc.cid);
+      const veh = u.vehicle_id ? db.prepare('SELECT company_location_id FROM vehicles WHERE id=?').get(u.vehicle_id) : null;
+      const inScope = !scope || (
+        (u.company_location_id != null && scope.includes(Number(u.company_location_id))) ||
+        (veh && veh.company_location_id != null && scope.includes(Number(veh.company_location_id)))
+      );
+      if (!sameCompany || !inScope) return res.status(403).json({ error: 'This user is outside your location scope.' });
+    }
+  }
+  // Unlock also clears the single-device session slot, which is how an admin or
+  // vendor releases a driver whose old phone was lost/replaced.
   db.prepare('UPDATE users SET locked_until = NULL, active_sid = NULL, active_sid_expires_at = NULL WHERE id = ?').run(u.id);
   res.json({ ok: true });
 });

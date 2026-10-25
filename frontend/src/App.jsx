@@ -56,6 +56,7 @@ import SubscriptionCommandCenter from './pages/admin/SubscriptionCommandCenter';
 import FeatureFlags from './pages/admin/FeatureFlags';
 import SystemHealth from './pages/admin/SystemHealth';
 import LocationPickerPage from './pages/shared/LocationPickerPage';
+import MobileMapPicker from './pages/shared/MobileMapPicker';
 import PolicyEngine from './pages/admin/PolicyEngine';
 import IntelligenceCenter from './pages/admin/IntelligenceCenter';
 import AITransportManager from './pages/admin/AITransportManager';
@@ -168,6 +169,7 @@ export default function App() {
           <Route path="/employee-login" element={<EmployeeLogin />} />
           <Route path="/register" element={<Register />} />
           <Route path="/register-company" element={<CompanyOnboard />} />
+          <Route path="/mobile-map" element={<MobileMapPicker />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/parent/register" element={<ParentRegister />} />

@@ -43,6 +43,9 @@ export function suspendEmployee(id) { return client.put(`/admin/users/${id}`, { 
 // --- Drivers CRUD ---
 export function addDriver(data) { return client.post("/admin/drivers", data).then((r) => r.data); }
 export function deleteDriver(id) { return client.delete(`/admin/drivers/${id}`).then((r) => r.data); }
+// Release a driver's single-device session (lost/replaced phone). Also clears
+// any login lockout. Scoped server-side to the caller's company/location/vendor.
+export function unlockUser(id) { return client.post(`/admin/users/${id}/unlock`).then((r) => r.data); }
 
 // --- Vehicles CRUD ---
 export function addVehicle(data) { return client.post("/admin/vehicles", data).then((r) => r.data); }

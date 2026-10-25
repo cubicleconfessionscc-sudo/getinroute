@@ -11,7 +11,7 @@ import {
   getDriverInvites, createDriverInvite, revokeDriverInvite,
   getLocations, addLocation,
   addEmployee, deleteEmployee, setEmployeeLocation, suspendEmployee, approveEmployee,
-  addVehicle, deleteVehicle, addDriver, deleteDriver, addRoute, deleteRoute,
+  addVehicle, deleteVehicle, addDriver, deleteDriver, addRoute, deleteRoute, unlockUser,
   getNotifications, downloadExport,
 } from "../../api/adminvendor";
 import { connectSocket } from "../../services/socket";
@@ -324,7 +324,10 @@ function Screen({ screen, data, mode, user, openModal, runAction, busy, download
         {data.drivers.map((d, i) => (
           <Row key={d.id || i} title={d.name || d.emp_id || "Driver"}
             sub={[d.emp_id, d.phone, d.vehicle_name, d.status].filter(Boolean).join(" · ")}
-            actions={isVendor ? [] : [{ label: "Delete", danger: true, onPress: () => runAction(() => deleteDriver(d.id), "Deleted.") }]} />
+            actions={[
+              { label: "Release device", onPress: () => runAction(() => unlockUser(d.id), "Device released. The driver can sign in on their new phone.") },
+              ...(isVendor ? [] : [{ label: "Delete", danger: true, onPress: () => runAction(() => deleteDriver(d.id), "Deleted.") }]),
+            ]} />
         ))}
         {!data.drivers.length ? <Empty text="No drivers for your scope." /> : null}
       </View>
