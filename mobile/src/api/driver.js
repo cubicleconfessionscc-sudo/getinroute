@@ -35,8 +35,9 @@ export function getDriverToday() {
 }
 
 // Driver: set cab live status (en_route / arrived / boarding / dropping).
-export function setDriverStatus(status) {
-  return client.put("/driver/status", { status }).then((r) => r.data);
+// Passing scheduleId records the arrival against that passenger's pickup.
+export function setDriverStatus(status, scheduleId) {
+  return client.put("/driver/status", { status, ...(scheduleId ? { schedule_id: scheduleId } : {}) }).then((r) => r.data);
 }
 
 // Driver: confirm a rider's 6-digit check-in OTP read out to them on the run.

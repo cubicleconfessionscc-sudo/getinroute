@@ -16,7 +16,7 @@ import { notifyTripAssigned, notifyChatMessage } from "../../services/notificati
 import { scheduleAlarmBefore } from "../../services/alarms";
 import { colors, spacing, radius } from "../../theme";
 import client from "../../api/client";
-import { getDuty, redeemInvite, endDuty } from "../../api/driver";
+import { getDuty, redeemInvite, endDuty, setDriverStatus } from "../../api/driver";
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -841,7 +841,14 @@ export default function DriverHomeScreen({ navigation }) {
                     {!boarded && !dropped && !noShow && (
                       <TouchableOpacity
                         style={[styles.stopButton, isArrived && { borderColor: colors.amber }]}
-                        onPress={() => setArrived((p) => ({ ...p, [stop.employeeId]: !p[stop.employeeId] }))}
+                        onPress={() => {
+                          const next = !arrived[stop.employeeId];
+                          setArrived((p) => ({ ...p, [stop.employeeId]: next }));
+                          // Record the arrival on the backend so Admin/Vendor
+                          // tracking (Dashboard 2 / trip dashboard) shows exactly
+                          // when the driver reached this passenger's pickup.
+                          if (next) setDriverStatus("arrived", stop.scheduleId).catch(() => {});
+                        }}
                       >
                         <Text style={styles.stopButtonText}>{isArrived ? "Arrived ✓" : "I've arrived"}</Text>
                       </TouchableOpacity>

@@ -5167,15 +5167,20 @@ app.post('/api/driver/trip', auth, role('driver'), (req, res) => {
 
 const LIVE_STATUSES = ['idle', 'en_route', 'arrived', 'boarding', 'dropping', 'completed'];
 app.put('/api/driver/status', auth, role('driver'), (req, res) => {
-  const { status, stop_id } = req.body || {};
+  const { status, stop_id, schedule_id } = req.body || {};
   const veh = db.prepare('SELECT * FROM vehicles WHERE id=?').get(req.user.vehicle_id);
   if (!veh) return res.status(400).json({ error: 'No vehicle assigned' });
   const s = LIVE_STATUSES.includes(status) ? status : veh.live_status;
   db.prepare('UPDATE vehicles SET live_status=?, current_stop=? WHERE id=?')
     .run(s, stop_id != null ? Number(stop_id) : veh.current_stop, veh.id);
-  // Trip-dashboard: record when the driver physically reaches a pickup/drop stop.
+  // Trip-dashboard: record when the driver physically reaches a specific
+  // passenger's pickup (the app sends schedule_id). Falls back to the next
+  // pending pickup for older app builds.
   if (s === 'arrived' || s === 'boarding') {
-    const nextSched = db.prepare(`SELECT id, employee_id FROM schedules
+    const target = schedule_id != null
+      ? db.prepare('SELECT id, employee_id FROM schedules WHERE id=? AND vehicle_id=?').get(Number(schedule_id), veh.id)
+      : null;
+    const nextSched = target || db.prepare(`SELECT id, employee_id FROM schedules
       WHERE vehicle_id=? AND date=? AND status IN ('confirmed','in_progress')
       ORDER BY pickup_time, id LIMIT 1`)
       .get(veh.id, dateOnly());
