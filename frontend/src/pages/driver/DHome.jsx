@@ -14,12 +14,22 @@ const LIVE = [
   { key: 'completed', label: 'Done' }
 ];
 
+// Same pre-trip check as the mobile app's "Trip checklist".
+const CHECK_ITEMS = [
+  'Fuel/charge level adequate',
+  'Tires in good condition',
+  'Mirrors and lights working',
+  'First aid kit present'
+];
+
 export default function DHome() {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [sending, setSending] = useState(false);
   const [otpMap, setOtpMap] = useState({});
   const [standInput, setStandInput] = useState('');
+  const [checked, setChecked] = useState({});
+  const checklistComplete = CHECK_ITEMS.every((i) => checked[i]);
   const load = () => api.get('/api/driver/today').then(setData).catch(() => {});
   useEffect(() => { load(); }, []);
   useInterval(load, 5000);
@@ -153,6 +163,23 @@ export default function DHome() {
         </div>
       </div>
 
+      {!onTrip && (
+        <div className="m-card">
+          <div className="m-label">Pre-trip vehicle check</div>
+          <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+            {CHECK_ITEMS.map((item) => (
+              <label key={item} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={!!checked[item]} onChange={() => setChecked((p) => ({ ...p, [item]: !p[item] }))} />
+                <span>{item}</span>
+              </label>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+            Confirm every item before starting the trip.
+          </div>
+        </div>
+      )}
+
       <div className="m-card">
         <div className="m-label">Trip control</div>
         {onTrip ? (
@@ -166,7 +193,18 @@ export default function DHome() {
           <div style={{ textAlign: 'center', padding: '6px 0' }}>
             <b style={{ fontSize: 16 }}>Ready to roll?</b>
             <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 12px' }}>Start the trip to begin picking up employees. Live tracking turns on automatically.</div>
-            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => tripAction('start')}><Play size={16} /> Start trip</button>
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+              disabled={!checklistComplete}
+              onClick={() => {
+                if (!checklistComplete) return toast('Complete the pre-trip checklist first.', 'err');
+                tripAction('start');
+              }}
+            >
+              <Play size={16} /> Start trip
+            </button>
+            {!checklistComplete ? <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 8 }}>Complete the pre-trip checklist to enable Start trip.</div> : null}
           </div>
         )}
       </div>
