@@ -17,6 +17,8 @@ import { getFreshPosition } from "../../services/location";
 import { useActiveScreenAwake } from "../../services/screenAwake";
 import { connectSocket, joinTrip, leaveTrip, getSocket } from "../../services/socket";
 import { useAuth } from "../../context/AuthContext";
+import { useFocusEffect } from "@react-navigation/native";
+import * as authApi from "../../api/auth";
 import SwipeButton from "../../components/SwipeButton";
 import OfflineBanner from "../../components/OfflineBanner";
 import EmployeeBottomNav from "../../components/EmployeeBottomNav";
@@ -101,7 +103,7 @@ function openInGoogleMaps(lat, lng, label) {
 }
 
 export default function EmployeeHomeScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { user, logout, setUser } = useAuth();
   const [allotment, setAllotment] = useState(null);
   const [trip, setTrip] = useState(null);
   const [schedules, setSchedules] = useState([]);
@@ -156,6 +158,16 @@ export default function EmployeeHomeScreen({ navigation }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // Refresh the signed-in profile whenever the screen regains focus — after a
+  // location request is approved, the company location banner disappears
+  // without forcing the employee to restart the app.
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    authApi.me()
+      .then((r) => { if (alive && r && r.user) setUser(r.user); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [setUser]));
   useEffect(() => {
     const sub = navigation.addListener("focus", () => load());
     return sub;
