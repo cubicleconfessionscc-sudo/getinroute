@@ -4444,7 +4444,7 @@ function buildInsights(req) {
     if (locAllowed && locAllowed.length) { empSql += ` AND u.company_location_id IN (${locAllowed.map(() => '?').join(',')})`; empParams.push(...locAllowed); }
     if (locFilter) { empSql += ' AND u.company_location_id=?'; empParams.push(locFilter); }
   }
-  const employees = db.prepare(empSql + ' ORDER BY u.name COLLATE NOCASE').all(...empParams);
+  const employees = db.prepare(empSql + ' ORDER BY u.name').all(...empParams);
 
   // --- login activity -----------------------------------------------------
   let leWhere = "date(le.created_at) BETWEEN ? AND ?";
@@ -4560,7 +4560,7 @@ function buildInsights(req) {
       drvParams.push(locFilter, locFilter);
     }
   }
-  const drivers = db.prepare(drvSql + ' ORDER BY u.name COLLATE NOCASE').all(...drvParams);
+  const drivers = db.prepare(drvSql + ' ORDER BY u.name').all(...drvParams);
 
   // --- locations in scope -------------------------------------------------
   let locRows = [];
