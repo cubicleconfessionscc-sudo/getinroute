@@ -9556,7 +9556,7 @@ const WEBSITE_INDEX = path.join(WEBSITE_DIR, 'index.html');
  * /school-login (the URLs printed under "Sign in on Web" on the download cards)
  * used to serve the brochure instead of the sign-in form. Keep in sync with
  * frontend/src/App.jsx. */
-const SPA_ROUTES = ['/', '/admin', '/login', '/admin/login', '/company/login', '/vendor/login', '/school/login', '/apps', '/get-started', '/platform', '/solutions', '/about', '/contact', '/employee-login', '/driver-login', '/parent-login', '/school-login', '/company-login', '/owner', '/register', '/register-company', '/forgot-password', '/reset-password', '/app', '/driver', '/employee', '/cs', '/vendor-login', '/vendor-portal', '/school', '/parent'];
+const SPA_ROUTES = ['/', '/admin', '/login', '/admin/login', '/company/login', '/vendor/login', '/school/login', '/apps', '/get-started', '/platform', '/solutions', '/about', '/contact', '/employee-login', '/driver-login', '/parent-login', '/school-login', '/company-login', '/owner', '/register', '/register-company', '/forgot-password', '/reset-password', '/app', '/driver', '/employee', '/cs', '/vendor-login', '/vendor-portal', '/school', '/parent', '/mobile-map'];
 
 /* App binary downloads (APK / IPA) for the landing page "Download the App" section.
    Binaries too large for `railway up` (>100 MB cap) are staged one-per-deploy into
