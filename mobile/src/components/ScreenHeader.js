@@ -31,8 +31,21 @@ export default function ScreenHeader({ title, onBack, right }) {
 
 // Wraps a screen with the header + a full-height body. Used as the `component`
 // for every Stack.Screen so the native header can be turned off entirely.
+//
+// The wrapper is memoised per (Screen, title, back). Without this, every render
+// of the navigator (e.g. when AuthContext's user object refreshes) produced a
+// brand-new component type, so React Navigation unmounted and remounted the
+// screen. That reset all local state (loading spinners restarted) and re-ran
+// effects in a loop — the "next trip keeps refreshing by itself" bug.
+const wrapperCache = new WeakMap();
 export function withScreenHeader(Screen, title, { back = true } = {}) {
-  return function ScreenWithHeader(props) {
+  let byConfig = wrapperCache.get(Screen);
+  if (!byConfig) { byConfig = new Map(); wrapperCache.set(Screen, byConfig); }
+  const key = `${title == null ? "\u0000" : title}::${back ? 1 : 0}`;
+  const cached = byConfig.get(key);
+  if (cached) return cached;
+
+  const Wrapped = function ScreenWithHeader(props) {
     const navigation = props.navigation;
     const canBack = back && navigation && navigation.canGoBack && navigation.canGoBack();
     return (
@@ -44,6 +57,9 @@ export function withScreenHeader(Screen, title, { back = true } = {}) {
       </View>
     );
   };
+  Wrapped.displayName = `ScreenWithHeader(${Screen.displayName || Screen.name || "Screen"})`;
+  byConfig.set(key, Wrapped);
+  return Wrapped;
 }
 
 const styles = StyleSheet.create({

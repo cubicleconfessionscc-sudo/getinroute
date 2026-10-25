@@ -133,45 +133,59 @@ export default function EmployeeHomeScreen({ navigation }) {
   };
 
   const load = useCallback(async () => {
-    const [requests, live, loc, sched] = await Promise.all([
-      getMyTrips().catch(() => []),
-      getMyLiveAllotment().catch(() => []),
-      getLocationProfile().catch(() => ({ locationStatus: "none" })),
-      getMySchedules().catch(() => [])
-    ]);
-    setLocationStatus(loc?.locationStatus || "none");
-    setLocationProfile(loc || null);
+    // "Your next trip" must never wait for the address/schedule extras. Fetch
+    // the trip-critical data first, stop the spinner as soon as it arrives (or
+    // after a short safety window), then let the extras update in the
+    // background. Previously one slow request kept the card spinning.
+    const safety = setTimeout(() => setLoading(false), 3500);
+    try {
+      const [requests, live] = await Promise.all([
+        getMyTrips().catch(() => []),
+        getMyLiveAllotment().catch(() => [])
+      ]);
+      const activeRequest = (Array.isArray(requests) ? requests : []).find(
+        (r) => r.trip && r.trip.status !== "completed" && r.trip.status !== "cancelled"
+      );
+      setTrip(activeRequest?.trip || null);
 
-    const activeRequest = (Array.isArray(requests) ? requests : []).find(
-      (r) => r.trip && r.trip.status !== "completed" && r.trip.status !== "cancelled"
-    );
-    setTrip(activeRequest?.trip || null);
+      const activeAllotment =
+        (Array.isArray(live) ? live : []).find((a) => a.status === "assigned" || a.status === "started") || null;
+      setAllotment(activeAllotment);
+      setDriverLocation(activeAllotment?.driverLocation || null);
+    } finally {
+      clearTimeout(safety);
+      isFirstLoadRef.current = false;
+      setLoading(false);
+    }
 
-    const activeAllotment =
-      (Array.isArray(live) ? live : []).find((a) => a.status === "assigned" || a.status === "started") || null;
-    setAllotment(activeAllotment);
-    setDriverLocation(activeAllotment?.driverLocation || null);
-
-    setSchedules(Array.isArray(sched) ? sched : []);
-    isFirstLoadRef.current = false;
-    setLoading(false);
+    // Secondary data — rendered where needed, never blocks the card.
+    getLocationProfile()
+      .then((loc) => { setLocationStatus(loc?.locationStatus || "none"); setLocationProfile(loc || null); })
+      .catch(() => {});
+    getMySchedules()
+      .then((sched) => setSchedules(Array.isArray(sched) ? sched : []))
+      .catch(() => {});
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-  // Refresh the signed-in profile whenever the screen regains focus — after a
-  // location request is approved, the company location banner disappears
-  // without forcing the employee to restart the app.
+  // Mount + focus both trigger a refresh, but a single guard collapses the
+  // near-simultaneous double fire so the card loads once and updates quietly.
+  const lastLoadRef = useRef(0);
+  const loadOnce = useCallback(() => {
+    const now = Date.now();
+    if (now - lastLoadRef.current < 1500) return;
+    lastLoadRef.current = now;
+    load();
+  }, [load]);
+
+  useEffect(() => { loadOnce(); }, [loadOnce]);
   useFocusEffect(useCallback(() => {
     let alive = true;
+    loadOnce();
     authApi.me()
       .then((r) => { if (alive && r && r.user) setUser(r.user); })
       .catch(() => {});
     return () => { alive = false; };
-  }, [setUser]));
-  useEffect(() => {
-    const sub = navigation.addListener("focus", () => load());
-    return sub;
-  }, [navigation, load]);
+  }, [loadOnce, setUser]));
 
   useEffect(() => {
     getSupportConfig().then((c) => setHelpline(c?.helplinePhone || "")).catch(() => {});
