@@ -605,10 +605,12 @@ function startUserSession(user) {
     return { sid, conflict: false };
   }
   // Conditional update closes the simultaneous-login race: only one request can
-  // claim an empty/expired session slot.
+  // claim an empty/expired session slot. The expiry is stored as a TEXT
+  // millisecond epoch; comparing TEXT avoids PostgreSQL inferring the bound
+  // parameter as int32 (which overflowed and rejected every driver login).
   const updated = db.prepare(`UPDATE users SET active_sid=?, active_sid_expires_at=?
-    WHERE id=? AND (active_sid IS NULL OR active_sid='' OR active_sid_expires_at IS NULL OR CAST(active_sid_expires_at AS INTEGER)<=?)`)
-    .run(sid, expiresAt, user.id, Date.now());
+    WHERE id=? AND (active_sid IS NULL OR active_sid='' OR active_sid_expires_at IS NULL OR active_sid_expires_at <= ?)`)
+    .run(sid, expiresAt, user.id, String(Date.now()));
   return updated.changes > 0 ? { sid, conflict: false } : { sid: null, conflict: true };
 }
 function endUserSession(user, payload) {
