@@ -43,6 +43,7 @@ backend/binaries/*
 !backend/binaries/GetInRoute.apk
 !backend/binaries/GetInRouteDriver.apk
 !backend/binaries/GetInRouteSchool.apk
+!backend/binaries/GetInRouteAdmin.apk
 .railway/
 
 # Build output lives only under backend/public/admin (served); don't track dev duplicates or source maps
