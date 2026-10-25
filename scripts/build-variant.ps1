@@ -19,7 +19,7 @@
 #>
 
 param(
-  [Parameter(Mandatory = $true)][ValidateSet('employee', 'driver', 'school')]
+  [Parameter(Mandatory = $true)][ValidateSet('employee', 'driver', 'school', 'adminvendor')]
   [string]$Variant,
   [switch]$SkipPrebuild,
   [switch]$ApkOnly
@@ -33,9 +33,10 @@ $envFile = Join-Path $root 'secrets\signing.env'
 # Single source of truth for artifact naming + pre-publish assertions.
 # Must stay in step with mobile/app.config.js (android.versionCode / versionName).
 $VariantMeta = @{
-  'employee' = @{ package = 'com.getinroute.employee'; versionCode = 1; version = '1.0.0' }
-  'driver'   = @{ package = 'com.getinroute.driver';   versionCode = 1;  version = '1.0.0' }
-  'school'   = @{ package = 'com.getinroute.school';   versionCode = 1;  version = '1.0.0' }
+  'employee'    = @{ package = 'com.getinroute.employee';    versionCode = 36; version = '1.1.7' }
+  'driver'      = @{ package = 'com.getinroute.driver';      versionCode = 15; version = '1.1.7' }
+  'school'      = @{ package = 'com.getinroute.school';      versionCode = 3;  version = '1.1.7' }
+  'adminvendor' = @{ package = 'com.getinroute.adminvendor'; versionCode = 1;  version = '1.1.7' }
 }
 $meta = $VariantMeta[$Variant]
 

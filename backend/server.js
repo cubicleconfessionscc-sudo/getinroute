@@ -1965,8 +1965,8 @@ app.post('/api/admin/vehicles', auth, role('admin', 'vendor'), (req, res) => {
     if (route_id && !ctx.routeIds.map(Number).includes(Number(route_id))) return res.status(403).json({ error: 'Route not assigned to you' });
     const d = driver_id ? db.prepare("SELECT * FROM users WHERE id=? AND role='driver' AND vendor_id=?").get(driver_id, ctx.vid) : null;
     if (driver_id && !d) return res.status(403).json({ error: 'Not your driver' });
-    const info = db.prepare('INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, speed_limit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), ctx.vid, speed_limit == null ? null : Number(speed_limit));
+    const info = db.prepare('INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, speed_limit, company_location_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), ctx.vid, speed_limit == null ? null : Number(speed_limit), req.user.company_location_id != null ? Number(req.user.company_location_id) : null);
     if (d) linkDriver(Number(info.lastInsertRowid), d.id, ctx.vid);
     return res.json({ ok: true, id: Number(info.lastInsertRowid) });
   }
@@ -1975,8 +1975,8 @@ app.post('/api/admin/vehicles', auth, role('admin', 'vendor'), (req, res) => {
   const { vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, driver_id, speed_limit } = req.body || {};
   if (!vehicle_name) return res.status(400).json({ error: 'Vehicle name required' });
   const d = resolveDriver(driver_id);
-  const info = db.prepare('INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, speed_limit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), vendor_id || null, speed_limit == null ? null : Number(speed_limit));
+  const info = db.prepare('INSERT INTO vehicles (vehicle_name, plate, type, capacity, stand, line, trip, route_id, driver_name, driver_phone, vendor_id, speed_limit, company_location_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(vehicle_name, plate, type || null, Number(capacity) || 4, stand || null, Number(line) || 1, Number(trip) || 1, route_id || null, d ? d.name : (driver_name ?? null), d ? d.phone : (driver_phone ?? null), vendor_id || null, speed_limit == null ? null : Number(speed_limit), (req.body && req.body.company_location_id != null ? Number(req.body.company_location_id) : (req.user.company_location_id != null ? Number(req.user.company_location_id) : null)));
   if (d) linkDriver(Number(info.lastInsertRowid), d.id, vendor_id || null);
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
 });
@@ -1995,10 +1995,13 @@ app.put('/api/admin/vehicles/:id', auth, role('admin', 'vendor'), (req, res) => 
   if (isVendorReq(req) && b.driver_id && !(d && Number(d.vendor_id) === Number(req.user.vendor_id))) {
     return res.status(403).json({ error: 'Not your driver' });
   }
-  db.prepare(`UPDATE vehicles SET vehicle_name=?, plate=?, type=?, capacity=?, stand=?, line=?, trip=?, route_id=?, driver_name=?, driver_phone=?, vendor_id=?, speed_limit=? WHERE id=?`)
+  const nextLoc = b.company_location_id != null && b.company_location_id !== ''
+    ? Number(b.company_location_id)
+    : v.company_location_id;
+  db.prepare(`UPDATE vehicles SET vehicle_name=?, plate=?, type=?, capacity=?, stand=?, line=?, trip=?, route_id=?, driver_name=?, driver_phone=?, vendor_id=?, speed_limit=?, company_location_id=? WHERE id=?`)
     .run(b.vehicle_name ?? v.vehicle_name, b.plate ?? v.plate, b.type ?? v.type, Number(b.capacity) ?? v.capacity, b.stand ?? v.stand,
       Number(b.line) ?? v.line, Number(b.trip) ?? v.trip, b.route_id ?? v.route_id, d ? d.name : (b.driver_name ?? v.driver_name ?? null), d ? d.phone : (b.driver_phone ?? v.driver_phone ?? null),
-      isVendorReq(req) ? v.vendor_id : (b.vendor_id ?? v.vendor_id), b.speed_limit == null ? v.speed_limit : Number(b.speed_limit), v.id);
+      isVendorReq(req) ? v.vendor_id : (b.vendor_id ?? v.vendor_id), b.speed_limit == null ? v.speed_limit : Number(b.speed_limit), nextLoc, v.id);
   if (d) linkDriver(Number(req.params.id), d.id, isVendorReq(req) ? req.user.vendor_id : (v.vendor_id || null));
   res.json({ ok: true });
 });
