@@ -2059,7 +2059,10 @@ app.get('/api/admin/employees', auth, role('admin', 'vendor'), (req, res) => {
   if (!isVendorReq(req)) {
     const scope = locationScope(req);
     if (scope && scope.length) {
-      locWhere = ' AND (u.company_location_id IN (' + scope.map(() => '?').join(',') + ') OR u.company_location_id IS NULL)';
+      // Strict location scope: an unassigned employee (company_location_id NULL)
+      // must NOT leak into every location admin's roster. The company-wide admin
+      // remains the only role that sees and assigns unassigned staff.
+      locWhere = ' AND u.company_location_id IN (' + scope.map(() => '?').join(',') + ')';
       for (const id of scope) params.push(id);
     }
   }
@@ -4538,9 +4541,21 @@ function buildInsights(req) {
   const drvParams = [];
   if (isVendor) { drvSql += ' AND v.vendor_id=?'; drvParams.push(vendorId); }
   else {
-    if (!sc.isOwner) { drvSql += ' AND (u.company_id=? OR v.company_id=?)'; drvParams.push(sc.cid, sc.cid); }
-    if (locAllowed && locAllowed.length) { drvSql += ` AND COALESCE(u.company_location_id, v.company_location_id) IN (${locAllowed.map(() => '?').join(',')})`; drvParams.push(...locAllowed); }
-    if (locFilter) { drvSql += ' AND COALESCE(u.company_location_id, v.company_location_id)=?'; drvParams.push(locFilter); }
+    if (!sc.isOwner) {
+      // vehicles have no company_id: derive membership via the company's drivers
+      // or the vehicles used on their employees' schedules.
+      drvSql += ' AND (u.company_id=? OR u.vehicle_id IN (SELECT DISTINCT s.vehicle_id FROM schedules s JOIN users e ON e.id=s.employee_id WHERE e.company_id=? AND s.vehicle_id IS NOT NULL))';
+      drvParams.push(sc.cid, sc.cid);
+    }
+    if (locAllowed && locAllowed.length) {
+      const ph = locAllowed.map(() => '?').join(',');
+      drvSql += ` AND (u.company_location_id IN (${ph}) OR v.company_location_id IN (${ph}))`;
+      drvParams.push(...locAllowed, ...locAllowed);
+    }
+    if (locFilter) {
+      drvSql += ' AND (u.company_location_id=? OR v.company_location_id=?)';
+      drvParams.push(locFilter, locFilter);
+    }
   }
   const drivers = db.prepare(drvSql + ' ORDER BY u.name COLLATE NOCASE').all(...drvParams);
 
