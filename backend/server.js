@@ -310,7 +310,7 @@ app.get(['/health', '/api/health'], (req, res) => {
 // Geocoding/routing come from ./geo, which reports the provider ACTUALLY in
 // use (a configured-but-rejected Google key — e.g. billing disabled — is
 // reported as photon/osrm, not google).
-const { geocodeSearch, geocodeReverse, calculateRoute, effectiveProviders } = require('./geo');
+const { geocodeSearch, geocodeReverse, calculateRoute, effectiveProviders, resolveMapLink } = require('./geo');
 app.get('/api/config/public', (req, res) => {
   const eff = effectiveProviders();
   res.json({
@@ -349,6 +349,20 @@ app.get('/api/geo/reverse', guard(60, 60 * 1000), (req, res) => {
   const lng = Number(req.query.lng);
   if (Number.isNaN(lat) || Number.isNaN(lng)) return res.json(null);
   geocodeReverse(lat, lng).then((r) => res.json(r)).catch(() => res.json(null));
+});
+
+// Resolve a Google Maps share/short link to its final URL (SSRF-guarded to
+// Google hosts only) so the address picker can extract the exact pin a user
+// copied from Google Maps.
+app.get('/api/geo/resolve-link', guard(20, 60 * 1000), (req, res) => {
+  const url = String(req.query.url || '').trim();
+  if (!url) return res.status(400).json({ error: 'url is required' });
+  resolveMapLink(url)
+    .then((finalUrl) => {
+      if (!finalUrl) return res.status(400).json({ error: 'Only Google Maps links are supported' });
+      res.json({ url: finalUrl });
+    })
+    .catch(() => res.status(400).json({ error: 'Could not resolve that link' }));
 });
 
 app.post('/api/geo/route', auth, guard(30, 60 * 1000), (req, res) => {

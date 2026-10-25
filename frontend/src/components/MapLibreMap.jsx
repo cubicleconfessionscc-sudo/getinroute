@@ -114,6 +114,13 @@ export default function MapLibreMap({
       map.on('load', () => {
         setStatus('ready');
         applyData(map);
+        // The canvas is often created before the surrounding modal/flex layout
+        // settles. Force a couple of resizes so the full viewport paints instead
+        // of leaving a white band on the right/bottom half.
+        const settle = () => { try { map.resize(); } catch {} };
+        requestAnimationFrame(settle);
+        setTimeout(settle, 120);
+        setTimeout(settle, 420);
       });
 
       map.on('style.error', () => {
@@ -286,25 +293,49 @@ export default function MapLibreMap({
   }, [status, focus?.lat, focus?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div>
-      {status === 'loading' && (
-        <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', borderRadius: 12, border: '1.5px solid var(--line)' }}>
-          Loading map…
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height,
+        minHeight: 160,
+        borderRadius: 12,
+        border: '1.5px solid var(--line)',
+        overflow: 'hidden',
+        background: '#e9eef4',
+        zIndex: 0
+      }}
+    >
+      {/* The map container is ALWAYS mounted at full size. Initialising
+          MapLibre inside a display:none/zero-height box is what produced the
+          half-painted white canvas — the loading state is an overlay now. */}
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      {status !== 'ready' && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--muted)',
+            fontSize: 13,
+            background: status === 'error' ? 'transparent' : 'linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)'
+          }}
+        >
+          {status === 'error' ? null : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: 'var(--primary, #2563eb)', animation: 'spin 0.9s linear infinite' }} />
+              Loading map…
+            </span>
+          )}
         </div>
       )}
-      {status === 'error' && <MapError detail={errMsg} onRetry={() => { mapRef.current = null; initMap(); }} />}
-      <div
-        ref={containerRef}
-        style={{
-          height,
-          width: '100%',
-          borderRadius: 12,
-          border: '1.5px solid var(--line)',
-          display: status === 'ready' ? 'block' : 'none',
-          zIndex: 0,
-          position: 'relative'
-        }}
-      />
+      {status === 'error' && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12, background: 'transparent' }}>
+          <MapError detail={errMsg} onRetry={() => { try { mapRef.current?.remove(); } catch {} mapRef.current = null; initMap(); }} />
+        </div>
+      )}
     </div>
   );
 }

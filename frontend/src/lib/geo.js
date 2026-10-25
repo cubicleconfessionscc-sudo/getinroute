@@ -10,6 +10,38 @@ export async function searchAddress(query, { limit = 8 } = {}) {
   return Array.isArray(r) ? r : [];
 }
 
+/* --- Pasted exact pins -------------------------------------------------------
+   People copy locations out of Google Maps. A pasted Google link, raw
+   coordinates or Plus Code carries the exact point, which is always more
+   reliable than re-geocoding a fuzzy business name. These helpers only parse;
+   callers still reverse-geocode for a human-readable address. */
+
+export function isMapLink(text) {
+  const s = String(text || '').trim();
+  return /^https?:\/\//i.test(s) && /(google\.[a-z.]+|goo\.gl|g\.co|maps\.app\.goo\.gl)/i.test(s);
+}
+
+export function parseLatLng(text) {
+  const s = String(text || '').trim().replace(/^\(|\)$/g, '');
+  const m = s.match(/^(-?\d{1,3}\.\d{3,})\s*[, ]\s*(-?\d{1,3}\.\d{3,})$/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (Number.isNaN(lat) || Number.isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+export function parseMapUrlCoordinates(url) {
+  const s = String(url || '');
+  let m = s.match(/@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
+  if (m) return { lat: Number(m[1]), lng: Number(m[2]) };
+  m = s.match(/!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/);
+  if (m) return { lat: Number(m[1]), lng: Number(m[2]) };
+  m = s.match(/[?&](?:q|query|ll|center|destination|sll|daddr|viewpoint)=(-?\d{1,3}\.\d+)[,%C\s]+(-?\d{1,3}\.\d+)/i);
+  if (m) return { lat: Number(m[1]), lng: Number(m[2]) };
+  return null;
+}
+
 export async function reverseGeocode(lat, lng) {
   if (lat == null || lng == null) return null;
   return api.get('/api/geo/reverse', { lat: String(lat), lng: String(lng) });

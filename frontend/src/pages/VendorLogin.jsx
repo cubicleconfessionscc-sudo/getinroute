@@ -28,8 +28,8 @@ export default function VendorLogin() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9', padding: 20 }}>
       <form onSubmit={submit} className="card" style={{ width: '100%', maxWidth: 400, padding: 28 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(124,58,237,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Truck size={20} color="#7c3aed" />
+          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(37,99,235,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Truck size={20} color="var(--primary)" />
           </div>
           <h1 style={{ fontSize: 20, margin: 0 }}>Vendor Portal</h1>
         </div>
@@ -44,7 +44,7 @@ export default function VendorLogin() {
           Vendors cannot self-register. Contact your company admin for access.
         </p>
         <p style={{ fontSize: 12, textAlign: 'center', marginTop: 8 }}>
-          <a href="/login" style={{ color: '#7c3aed', fontWeight: 600 }}>All sign-in portals</a>
+          <a href="/login" style={{ color: 'var(--primary)', fontWeight: 600 }}>All sign-in portals</a>
         </p>
       </form>
     </div>

@@ -1,9 +1,9 @@
 /* GetInRoute Map Configuration
    Single source of truth for map rendering, geocoding, and routing providers.
    All provider URLs are configurable via Vite env vars.
-   Default tile style: OpenFreeMap "liberty" (free, no key, commercially permitted). */
-
-const DEFAULT_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+   Default tile style: OpenFreeMap "positron" — a clean, minimal, professional
+   basemap (free, no key, commercially permitted). */
+const DEFAULT_STYLE = 'https://tiles.openfreemap.org/styles/positron';
 
 export const MAP_STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL || DEFAULT_STYLE;
 

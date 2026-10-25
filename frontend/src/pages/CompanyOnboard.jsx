@@ -255,8 +255,8 @@ export default function CompanyOnboard() {
 
   if (done) {
     return (
-      <div className="auth-bg" style={{ background: 'radial-gradient(1200px 600px at 20% -10%, rgba(124,58,237,.25), transparent), radial-gradient(900px 500px at 110% 110%, rgba(236,72,153,.2), transparent), #0f172a' }}>
-        <div className="auth-card" style={{ textAlign: 'center', borderTop: '4px solid #7c3aed', maxWidth: 560 }}>
+      <div className="auth-bg" style={{ background: 'var(--grad-hero)' }}>
+        <div className="auth-card" style={{ textAlign: 'center', borderTop: '4px solid var(--primary)', maxWidth: 560 }}>
           <div className="onb-progress" style={{ marginBottom: 16 }}>
             {[1, 2, 3, 4].map((s) => <span key={s} className="onb-dot ok" />)}
             <span className="onb-dot wait" />
@@ -272,7 +272,7 @@ export default function CompanyOnboard() {
             Your admin account is <strong>pending owner approval</strong>.
           </p>
           {issuedCodes.length > 0 && (
-            <div style={{ background: 'rgba(124,58,237,.08)', border: '1px solid rgba(124,58,237,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: '#374151', marginBottom: 16 }}>
+            <div style={{ background: 'rgba(37,99,235,.08)', border: '1px solid rgba(37,99,235,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: 'var(--text-2)', marginBottom: 16 }}>
               <b style={{ display: 'block', marginBottom: 4 }}>Location invite codes</b>
               <p style={{ margin: '0 0 10px', fontSize: 12.5, color: '#475569' }}>
                 Share each code with that location&apos;s admin or vendor — they enter it at sign-in to work in that location.
@@ -284,7 +284,7 @@ export default function CompanyOnboard() {
                       <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.location}</div>
                       <div style={{ fontSize: 11.5, color: '#64748b' }}>{[c.city, c.state].filter(Boolean).join(', ')}</div>
                     </div>
-                    <span style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.06em', color: '#7c3aed' }}>{c.code}</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.06em', color: 'var(--primary)' }}>{c.code}</span>
                     <button type="button" className="btn btn-sm btn-ghost" onClick={() => copyCode(c.code)} style={{ padding: '4px 8px' }}>
                       {copiedCode === c.code ? 'Copied' : 'Copy'}
                     </button>
@@ -293,7 +293,7 @@ export default function CompanyOnboard() {
               </div>
             </div>
           )}
-          <div style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: '#374151', marginBottom: 20 }}>
+          <div style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: 'var(--text-2)', marginBottom: 20 }}>
             <b style={{ display: 'block', marginBottom: 6 }}>Step 6 — Trial Activated (what happens next)</b>
             <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 4 }}>
               <li>The platform owner reviews and approves your company.</li>
@@ -319,10 +319,10 @@ export default function CompanyOnboard() {
   }[step];
 
   return (
-    <div className="auth-bg" style={{ background: 'radial-gradient(1200px 600px at 20% -10%, rgba(124,58,237,.25), transparent), radial-gradient(900px 500px at 110% 110%, rgba(236,72,153,.2), transparent), #0f172a' }}>
-      <div className="auth-card" style={{ borderTop: '4px solid #7c3aed', maxWidth: 720 }}>
+    <div className="auth-bg" style={{ background: 'var(--grad-hero)' }}>
+      <div className="auth-card" style={{ borderTop: '4px solid var(--primary)', maxWidth: 720 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg, #7c3aed, #ec4899)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 18 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'var(--grad)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 18 }}>
             <Building2 size={20} />
           </div>
           <div>
@@ -470,9 +470,9 @@ function LocationsStep({ plan, setPlan, stateSearch, setStateSearch, filteredSta
         {plan.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
             {plan.map((p) => (
-              <span key={p.state} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(124,58,237,.12)', color: '#7c3aed', borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}>
+              <span key={p.state} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(37,99,235,.12)', color: 'var(--primary)', borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}>
                 {p.state}
-                <button type="button" onClick={() => removeState(p.state)} aria-label={`Remove ${p.state}`} style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <button type="button" onClick={() => removeState(p.state)} aria-label={`Remove ${p.state}`} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                   <X size={12} />
                 </button>
               </span>
@@ -485,7 +485,7 @@ function LocationsStep({ plan, setPlan, stateSearch, setStateSearch, filteredSta
             return (
               <button key={s} type="button" disabled={selected} onClick={() => addState(s)} className="state-pick-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '8px 12px', background: selected ? '#f1f5f9' : '#fff', border: 'none', borderBottom: '1px solid #f1f5f9', cursor: selected ? 'default' : 'pointer', textAlign: 'left', fontSize: 13, color: selected ? '#94a3b8' : '#0f172a' }}>
                 <span>{s}</span>
-                {selected ? <span style={{ fontSize: 11, color: '#94a3b8' }}>added</span> : <Plus size={14} color="#7c3aed" />}
+                {selected ? <span style={{ fontSize: 11, color: '#94a3b8' }}>added</span> : <Plus size={14} color="var(--primary)" />}
               </button>
             );
           })}
@@ -523,7 +523,7 @@ function StateBlock({ stateName, state, addCity, removeCity, addLocation, remove
     <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-          <MapPin size={16} color="#7c3aed" />
+          <MapPin size={16} color="var(--primary)" />
           {stateName}
         </div>
         <span style={{ fontSize: 12, color: '#64748b' }}>{state.cities.length} cities</span>
@@ -709,8 +709,11 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
             {locating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <LocateFixed size={14} />}
             {locating ? 'Finding you…' : 'Use my location'}
           </button>
-          <span style={{ fontSize: 11.5, color: '#94a3b8' }}>Type the address and pick a suggestion, or drop an exact pin on the map.</span>
+          <span style={{ fontSize: 11.5, color: '#94a3b8' }}>Search and pick a suggestion, paste a Google Maps link / pin / Plus Code, or drop an exact pin on the map.</span>
         </div>
+        <p style={{ fontSize: 11.5, color: '#94a3b8', margin: '6px 0 0' }}>
+          Can&apos;t find the exact building? In Google Maps choose <b>Share → Copy link</b> and paste it above — the exact pin is used.
+        </p>
         {geoErr ? (
           <div role="alert" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#fff1f2', color: '#be123c', fontSize: 12.5, fontWeight: 600 }}>
             {geoErr}
@@ -722,7 +725,7 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
               <div style={{ fontWeight: 700, color: '#0f172a' }}>{addrPrimary || locName || 'Pinned location'}</div>
               {addrSecondary ? <div style={{ color: '#64748b' }}>{addrSecondary}</div> : null}
               {locality ? <div style={{ color: '#475569', fontSize: 11.5 }}>{locality}</div> : null}
-              <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#7c3aed', fontWeight: 700 }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--primary)', fontWeight: 700 }}>
                 {Number(pendingAddress.lat).toFixed(5)}, {Number(pendingAddress.lng).toFixed(5)}
               </div>
             </div>
@@ -781,11 +784,11 @@ function CityBlock({ stateName, cityName, city, addLocation, removeLocation }) {
           </div>
           {city.locations.map((l) => (
             <div key={l.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 9, fontSize: 12 }}>
-              <MapPin size={13} color="#7c3aed" />
+              <MapPin size={13} color="var(--primary)" />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700 }}>{l.name}</div>
                 {l.code ? (
-                  <div style={{ fontSize: 11, color: '#7c3aed', fontFamily: 'monospace', fontWeight: 700 }}>code: {l.code}</div>
+                  <div style={{ fontSize: 11, color: 'var(--primary)', fontFamily: 'monospace', fontWeight: 700 }}>code: {l.code}</div>
                 ) : (
                   <div style={{ fontSize: 11, color: '#94a3b8' }}>code auto-generated on submit</div>
                 )}

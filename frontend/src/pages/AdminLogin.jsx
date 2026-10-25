@@ -55,7 +55,7 @@ export default function AdminLogin({ variant = 'admin' }) {
 
   return (
     <div className="auth-bg">
-      <div className="auth-card" style={{ borderTop: '4px solid #7c3aed' }}>
+      <div className="auth-card" style={{ borderTop: '4px solid var(--primary)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
           <div className="brand-logo"><MapPinned size={20} /></div>
           <div>
@@ -124,7 +124,7 @@ export default function AdminLogin({ variant = 'admin' }) {
           </button>
         </form>
         <p className="auth-switch">New company? <Link to="/register-company" className="auth-link">Register here</Link></p>
-        <p className="auth-switch" style={{ marginTop: 8 }}>Are you a transport vendor? <Link to="/vendor/login" className="auth-link" style={{ color: '#7c3aed' }}>Vendor Login</Link></p>
+        <p className="auth-switch" style={{ marginTop: 8 }}>Are you a transport vendor? <Link to="/vendor/login" className="auth-link" style={{ color: 'var(--primary)' }}>Vendor Login</Link></p>
         <div style={{ marginTop: 10, textAlign: 'center' }}>
           <Link to="/login" className="auth-link" style={{ fontSize: 13 }}>All sign-in portals</Link>
         </div>

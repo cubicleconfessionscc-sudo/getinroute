@@ -373,7 +373,7 @@ export default function Landing() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 28 }}>
           {AUTOMATION_FLOW.map((step, i) => (
             <React.Fragment key={i}>
-              <span className="chip" style={{ background: i % 2 === 0 ? 'rgba(14,165,233,.14)' : 'rgba(129,140,248,.14)', color: i % 2 === 0 ? '#7dd3fc' : '#a5b4fc', fontSize: 13, padding: '8px 14px' }}>{step}</span>
+              <span className="chip" style={{ background: i % 2 === 0 ? 'rgba(37,99,235,.14)' : 'rgba(56,189,248,.14)', color: i % 2 === 0 ? '#93c5fd' : '#7dd3fc', fontSize: 13, padding: '8px 14px' }}>{step}</span>
               {i < AUTOMATION_FLOW.length - 1 && <ArrowRight size={16} style={{ color: 'var(--violet)' }} />}
             </React.Fragment>
           ))}

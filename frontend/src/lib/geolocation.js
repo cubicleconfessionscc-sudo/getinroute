@@ -10,6 +10,10 @@
 
 const POS_CACHE_KEY = 'gir_geo_last_position';
 const PERMISSION_TTL_MS = 30 * 1000;
+// Kept across page loads so repeatedly using "Use my location" (or signing in)
+// never re-triggers the browser permission prompt. Tight enough to stay useful
+// for pickups; callers can override the max age.
+const POSITION_TTL_MS = 30 * 60 * 1000;
 
 export async function geolocationPermissionState() {
   try {
@@ -21,9 +25,9 @@ export async function geolocationPermissionState() {
   return 'unknown';
 }
 
-export function readCachedPosition(maxAgeMs = 10 * 60 * 1000) {
+export function readCachedPosition(maxAgeMs = POSITION_TTL_MS) {
   try {
-    const raw = sessionStorage.getItem(POS_CACHE_KEY);
+    const raw = localStorage.getItem(POS_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed.lat !== 'number' || typeof parsed.lng !== 'number') return null;
@@ -34,13 +38,13 @@ export function readCachedPosition(maxAgeMs = 10 * 60 * 1000) {
 
 export function cachePosition(lat, lng) {
   try {
-    sessionStorage.setItem(POS_CACHE_KEY, JSON.stringify({ lat: Number(lat), lng: Number(lng), ts: Date.now() }));
+    localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ lat: Number(lat), lng: Number(lng), ts: Date.now() }));
   } catch { /* private mode / quota — caching is optional */ }
 }
 
 /* Resolve the device position without ever prompting unless interactive.
  * Returns { lat, lng } or null. Never rejects. */
-export async function getPosition({ interactive = false, timeout = 10000, maxAgeMs = 10 * 60 * 1000 } = {}) {
+export async function getPosition({ interactive = false, timeout = 10000, maxAgeMs = POSITION_TTL_MS } = {}) {
   if (!navigator.geolocation) return null;
 
   const cached = readCachedPosition(maxAgeMs);

@@ -186,6 +186,135 @@ function normalizeFeature(f) {
   };
 }
 
+/* ---------- Nominatim fallback (better business/POI coverage) ---------- */
+const NOMINATIM_BASE = process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org';
+let nominatimLast = 0;
+let nominatimChain = Promise.resolve();
+// Nominatim's usage policy asks for at most one request per second. All calls
+// are serialised through this tiny queue; results are cached above anyway.
+function nominatimGate() {
+  nominatimChain = nominatimChain.then(async () => {
+    const wait = Math.max(0, 1100 - (Date.now() - nominatimLast));
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    nominatimLast = Date.now();
+  });
+  return nominatimChain;
+}
+function nominatimNormalize(x) {
+  const a = x.address || {};
+  const locality = a.city || a.town || a.village || a.municipality || a.city_district || a.suburb || '';
+  return {
+    label: x.name || String(x.display_name || '').split(',')[0] || '',
+    address: x.display_name || '',
+    lat: Number(x.lat),
+    lng: Number(x.lon),
+    provider_id: x.place_id != null ? 'N' + x.place_id : null,
+    city: a.city || a.town || a.village || a.municipality || '',
+    state: a.state || a.region || '',
+    postal_code: a.postcode || '',
+    country: a.country || '',
+    osm_type: x.osm_type || '',
+    housenumber: a.house_number || '',
+    street: a.road || '',
+    locality,
+    provider: 'nominatim'
+  };
+}
+async function nominatimSearch(query, { limit = 8 } = {}) {
+  await nominatimGate();
+  const params = new URLSearchParams({
+    q: String(query).trim(),
+    format: 'jsonv2',
+    limit: String(limit),
+    addressdetails: '1',
+    'accept-language': 'en'
+  });
+  const r = await fetch(`${NOMINATIM_BASE}/search?${params}`, {
+    headers: { 'User-Agent': 'GetInRoute/1.0 (support@getinroute.in)', Accept: 'application/json' },
+    signal: AbortSignal.timeout(9000)
+  });
+  if (!r.ok) throw new Error(`Nominatim returned ${r.status}`);
+  const data = await r.json();
+  return (Array.isArray(data) ? data : [])
+    .map(nominatimNormalize)
+    .filter((x) => !Number.isNaN(x.lat) && !Number.isNaN(x.lng))
+    .slice(0, limit);
+}
+
+/* Query cleanup: users paste Google-Maps-style strings ("Sagility India
+   Private Limited, near Electronic City"). Try the raw text, then variants
+   with directional noise and company suffixes removed. */
+const NAME_NOISE = /\b(private\s+limited|pvt\.?\s*ltd\.?|limited|ltd\.?|llp|inc\.?|corp\.?|corporation|company)\b/gi;
+const NEAR_NOISE = /\b(near|opposite|opp\.?|behind|beside|adjacent\s+to|next\s+to)\b[^,]*/gi;
+function queryVariants(q) {
+  const base = String(q).trim();
+  const out = [base];
+  const push = (v) => {
+    const s = String(v || '').replace(/\s+/g, ' ').trim();
+    if (s && !out.includes(s)) out.push(s);
+  };
+  const noNear = base.replace(NEAR_NOISE, ' ').replace(/\s*,\s*,+/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '');
+  push(noNear);
+  push(noNear.replace(NAME_NOISE, ' ').replace(/\s*,\s*,+/g, ', ').replace(/^[,\s]+|[,\s]+$/g, ''));
+  const segs = base.split(',').map((s) => s.trim()).filter(Boolean);
+  if (segs.length > 2) {
+    push(segs.slice(0, 2).join(', '));
+    push(segs.slice(0, 2).join(', ').replace(NAME_NOISE, ' ').replace(/\s+/g, ' ').trim());
+  }
+  return out.slice(0, 4);
+}
+const GENERIC_TOKENS = new Set(['india', 'indian', 'private', 'pvt', 'ltd', 'limited', 'llp', 'inc', 'corp', 'corporation',
+  'company', 'technologies', 'technology', 'solutions', 'services', 'systems', 'group', 'international', 'global',
+  'near', 'opposite', 'the', 'and', 'of', 'office', 'branch']);
+function keyTokens(query) {
+  const first = String(query).split(',')[0] || '';
+  const words = first.toLowerCase().match(/[a-z0-9]+/g) || [];
+  return [...new Set(words)].filter((t) => t.length >= 4 && !GENERIC_TOKENS.has(t));
+}
+function looksRelevant(rows, tokens) {
+  if (!tokens.length) return rows.length > 0;
+  return rows.some((r) => {
+    const hay = `${r.label || ''} ${r.address || ''}`.toLowerCase();
+    return tokens.some((t) => hay.includes(t));
+  });
+}
+async function photonSearch(query, limit, bbox) {
+  const params = new URLSearchParams({ q: String(query).trim(), lang: 'en', limit: String(limit) });
+  if (bbox) params.set('bbox', bbox);
+  const r = await fetch(`${GEOCODER_BASE}/api?${params}`, { signal: AbortSignal.timeout(9000) });
+  if (!r.ok) throw new Error(`Geocoder returned ${r.status}`);
+  const data = await r.json();
+  return (data.features || [])
+    .map(normalizeFeature)
+    .filter((f) => f.lat != null && f.lng != null && !Number.isNaN(Number(f.lat)));
+}
+
+/* Resolve a Google Maps short/share link to its final URL so the frontend can
+   extract the exact pin. Strictly limited to Google-owned hosts (SSRF guard). */
+const MAP_LINK_HOSTS = /(^|\.)(google\.com|google\.co\.[a-z]{2,3}|goo\.gl|g\.co|maps\.app\.goo\.gl)$/i;
+async function resolveMapLink(rawUrl) {
+  let current;
+  try { current = new URL(String(rawUrl || '').trim()); } catch { return null; }
+  if (current.protocol !== 'https:' && current.protocol !== 'http:') return null;
+  for (let hop = 0; hop < 5; hop += 1) {
+    if (!MAP_LINK_HOSTS.test(current.hostname)) return null;
+    const r = await fetch(current.href, {
+      method: 'GET',
+      redirect: 'manual',
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GetInRouteBot/1.0; +https://getinroute.in)' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (r.status >= 300 && r.status < 400) {
+      const loc = r.headers.get('location');
+      if (!loc) return null;
+      current = new URL(loc, current);
+      continue;
+    }
+    return r.url || current.href;
+  }
+  return current.href;
+}
+
 function routeKey(points) {
   return points.map((p) => `${Number(p.lat).toFixed(6)},${Number(p.lng).toFixed(6)}`).join(';');
 }
@@ -200,26 +329,47 @@ async function geocodeSearch(query, { limit = 8, lang = 'en', bbox } = {}) {
   if (GOOGLE_KEY && googleHealth.geocode) {
     try {
       const rows = await googleGeocodeSearch(query, { limit });
-      cacheSetByKind('search', key, rows); dbCacheSet('search', key, rows);
-      return rows;
+      if (rows.length) { cacheSetByKind('search', key, rows); dbCacheSet('search', key, rows); return rows; }
     } catch (e) {
       console.warn('[geo] Google search failed, using Photon:', e.message || e);
       if (isGoogleAuthFailure(e)) { googleHealth.geocode = false; console.warn('[geo] Google geocoding disabled for this process (auth/billing) — using Photon from now on.'); }
     }
   }
 
-  const params = new URLSearchParams({ q: String(query).trim(), lang, limit: String(limit) });
-  if (bbox) params.set('bbox', bbox);
-  const r = await fetch(`${GEOCODER_BASE}/api?${params}`, { signal: AbortSignal.timeout(9000) });
-  if (!r.ok) throw new Error(`Geocoder returned ${r.status}`);
-  const data = await r.json();
-  const rows = (data.features || [])
-    .map(normalizeFeature)
-    .filter((f) => f.lat != null && f.lng != null && !Number.isNaN(Number(f.lat)))
-    .slice(0, limit);
-  cacheSetByKind('search', key, rows);
-  dbCacheSet('search', key, rows);
-  return rows;
+  const tokens = keyTokens(query);
+  const variants = queryVariants(query);
+  let firstNonEmpty = null;
+
+  // 1) Photon (OSM autocomplete). Walk the cleaned-up variants; only accept a
+  //    set when it actually mentions the place we asked for.
+  for (const v of variants) {
+    let rows = [];
+    try { rows = await photonSearch(v, limit, bbox); } catch (e) { rows = []; }
+    if (!rows.length) continue;
+    if (!firstNonEmpty) firstNonEmpty = rows;
+    if (looksRelevant(rows, tokens)) {
+      cacheSetByKind('search', key, rows);
+      dbCacheSet('search', key, rows);
+      return rows;
+    }
+  }
+
+  // 2) Nominatim (same OSM data, but much better business/POI indexing).
+  for (const v of variants.slice(0, 2)) {
+    try {
+      const rows = await nominatimSearch(v, limit);
+      if (rows.length && (looksRelevant(rows, tokens) || !firstNonEmpty)) {
+        cacheSetByKind('search', key, rows);
+        dbCacheSet('search', key, rows);
+        return rows;
+      }
+    } catch (e) { /* provider unavailable — fall through */ }
+  }
+
+  const out = firstNonEmpty || [];
+  cacheSetByKind('search', key, out);
+  dbCacheSet('search', key, out);
+  return out;
 }
 
 async function geocodeReverse(lat, lng) {
@@ -331,4 +481,4 @@ function bjKey(bbox) {
   return Array.isArray(bbox) ? bbox.join(',') : '';
 }
 
-module.exports = { geocodeSearch, geocodeReverse, calculateRoute, effectiveProviders };
+module.exports = { geocodeSearch, geocodeReverse, calculateRoute, effectiveProviders, resolveMapLink };

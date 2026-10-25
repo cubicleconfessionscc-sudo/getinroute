@@ -102,7 +102,7 @@ export default function ELocation() {
       </div>
 
       {isFirstTime && (
-        <div className="m-card" style={{ borderColor: 'var(--primary)', background: 'rgba(124,58,237,.06)' }}>
+        <div className="m-card" style={{ borderColor: 'var(--primary)', background: 'rgba(37,99,235,.06)' }}>
           <b style={{ fontSize: 13 }}>First-time selection</b>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>
             Pick the location you work out of. Later changes need admin approval.

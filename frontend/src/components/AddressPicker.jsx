@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { MapPin, Search, Loader2, Check, X, LocateFixed } from 'lucide-react';
-import { searchAddress, pickLocation, reverseGeocode } from '../lib/geo';
+import { searchAddress, pickLocation, reverseGeocode, isMapLink, parseLatLng, parseMapUrlCoordinates } from '../lib/geo';
+import { looksLikePlusCode, decodePlusCode } from '../lib/pluscode';
 import { getPosition } from '../lib/geolocation';
 import MapLibreMap from './MapLibreMap';
 import { api } from '../api';
@@ -152,6 +153,7 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
   const [locating, setLocating] = useState(false);
   const [geoErr, setGeoErr] = useState('');
   const [justResolved, setJustResolved] = useState(false);
+  const [pinNote, setPinNote] = useState('');
   const [provider, setProvider] = useState('google');
   const [mapOpen, setMapOpen] = useState(false);
   const debounceRef = useRef(null);
@@ -180,9 +182,67 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
   const onInputChange = (v) => {
     setQuery(v);
     setJustResolved(false);
+    setGeoErr('');
+    setPinNote('');
     clearTimeout(debounceRef.current);
+    if (isMapLink(v) || looksLikePlusCode(v) || parseLatLng(v)) {
+      resolvePasted(v);
+      return;
+    }
     if (v.length >= 3) debounceRef.current = setTimeout(() => doSearch(v), 350);
     else setResults([]);
+  };
+
+  // A pasted Google Maps link / coordinates / Plus Code carries an exact point.
+  // Resolve it and reverse-geocode so the field shows a real address, not just
+  // a pin we guessed from a fuzzy business name.
+  const pinFromCoords = async (lat, lng, note) => {
+    setLoading(true);
+    try {
+      const row = await reverseGeocode(lat, lng).catch(() => null);
+      applyItem({
+        lat: Number(lat),
+        lng: Number(lng),
+        address: (row && row.address) || `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`,
+        label: (row && row.label) || 'Pinned location',
+        city: (row && row.city) || '',
+        state: (row && row.state) || '',
+        postal_code: (row && row.postal_code) || '',
+        country: (row && row.country) || '',
+        provider_id: (row && row.provider_id) || ''
+      });
+      setPinNote(note ? `Exact pin used from ${note}.` : 'Exact pin used.');
+      setResults([]);
+      setOpen(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resolvePasted = async (v) => {
+    setLoading(true);
+    setGeoErr('');
+    try {
+      if (isMapLink(v)) {
+        let pt = parseMapUrlCoordinates(v);
+        if (!pt) {
+          const r = await api.get('/api/geo/resolve-link', { url: v.trim() }).catch(() => null);
+          if (r && r.url) pt = parseMapUrlCoordinates(r.url);
+        }
+        if (pt) { await pinFromCoords(pt.lat, pt.lng, 'the Google Maps link'); return; }
+        setGeoErr('Could not read a pin from that link. Open it in Google Maps and copy the coordinates (e.g. 12.9716, 77.5946).');
+        return;
+      }
+      if (looksLikePlusCode(v)) {
+        const pt = decodePlusCode(v);
+        if (pt) { await pinFromCoords(pt.lat, pt.lng, 'the Plus Code'); return; }
+      }
+      const pt = parseLatLng(v);
+      if (pt) { await pinFromCoords(pt.lat, pt.lng, 'the pasted coordinates'); return; }
+      setGeoErr('Could not read a location from that text.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -296,7 +356,7 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
         <input
           value={query}
           onChange={(e) => onInputChange(e.target.value)}
-          placeholder="Search an address, building or area…"
+          placeholder="Search an address — or paste a Google Maps link, pin or Plus Code"
           data-testid="address-search"
           style={{ paddingLeft: 32, paddingRight: 40, width: '100%' }}
         />
@@ -316,13 +376,20 @@ export default function AddressPicker({ value, onChange, mapButton = true }) {
             </button>
           )}
       </div>
+      {pinNote ? (
+        <div style={{ marginTop: 6, padding: '6px 10px', borderRadius: 8, background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', color: '#047857', fontSize: 12, fontWeight: 600 }}>
+          {pinNote}
+        </div>
+      ) : null}
       {geoErr ? (
         <div role="alert" style={{ marginTop: 6, padding: '6px 10px', borderRadius: 8, background: '#fff1f2', color: '#be123c', fontSize: 12, fontWeight: 600 }}>
           {geoErr}
         </div>
       ) : null}
       {!loading && !justResolved && query.length >= 3 && results.length === 0 && (
-        <div className="addr-dd-empty">No address matches found for “{query}”. Try a nearby landmark or check spelling.</div>
+        <div className="addr-dd-empty">
+          No address matches found for “{query}”. Try a nearby landmark, or paste a Google Maps link / pin / Plus Code for the exact location.
+        </div>
       )}
       {dropdown}
       {mapButton && (
