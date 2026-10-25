@@ -4729,7 +4729,10 @@ function buildInsights(req) {
 }
 app.get('/api/admin/insights', auth, role('admin', 'vendor'), (req, res) => {
   try { res.json(buildInsights(req)); }
-  catch (e) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not build insights' }); }
+  catch (e) {
+    console.error('[insights] failed:', e && e.stack ? e.stack : e);
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not build insights' });
+  }
 });
 
 app.get('/api/owner/tracking', auth, role('admin'), ownerOnly, (req, res) => {
