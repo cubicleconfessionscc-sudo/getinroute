@@ -4,6 +4,7 @@ import { useAuth } from '../../auth';
 import { useInterval, useToast } from '../../components/ui';
 import { useSocketEvent } from '../../socket';
 import { api } from '../../api';
+import BackButton from '../../components/BackButton';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import { useNoindex } from '../../components/Noindex';
 import {
@@ -104,6 +105,7 @@ export default function SchoolLayout() {
       <div className="main">
         <div className="topbar">
           <button className="menu-btn" onClick={() => setOpen(true)}><Menu size={18} /></button>
+          <BackButton label="Back" className="btn btn-ghost btn-sm" to="/school" />
           <div className="spacer" />
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: '#047857', background: 'rgba(16,185,129,0.14)', padding: '4px 10px', borderRadius: 999 }}>🎓 School</span>
           <div style={{ textAlign: 'right' }}>

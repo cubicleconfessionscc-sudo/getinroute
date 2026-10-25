@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
+import BackButton from '../../components/BackButton';
 import {
   LayoutDashboard, Car, CalendarDays, Ticket, MapPin, Home, History, LifeBuoy, Settings, LogOut, Bell, Building2
 } from 'lucide-react';
@@ -18,6 +19,8 @@ export default function EmployeeApp() {
     { to: '/app/location', icon: <Building2 size={18} />, label: 'Company Location', end: false },
     { to: '/app/history', icon: <History size={18} />, label: 'History', end: false },
     { to: '/app/notifications', icon: <Bell size={18} />, label: 'Notifications', end: false },
+    { to: '/app/help', icon: <LifeBuoy size={18} />, label: 'Help & SOS', end: false },
+    { to: '/app/settings', icon: <Settings size={18} />, label: 'Settings', end: false },
     { to: '/app/tickets', icon: <LifeBuoy size={18} />, label: 'Support', end: false }
   ];
 
@@ -49,6 +52,7 @@ export default function EmployeeApp() {
       <div className="emp-main">
         <header className="emp-top">
           <button className="emp-back" onClick={() => nav('/app')}>GetInRoute</button>
+          <BackButton label="Back" className="btn btn-sm btn-ghost" />
           <div className="emp-top-right">
             <NavLink to="/app/notifications" className="emp-bell" aria-label="Notifications" title="Notifications"><Bell size={18} /></NavLink>
             <div className="emp-user">

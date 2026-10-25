@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../../auth';
+import BackButton from '../../components/BackButton';
 import { Home, ShieldAlert, User, LogOut, Bell } from 'lucide-react';
 
 const navs = [
@@ -21,6 +22,7 @@ export default function ParentApp() {
             <div className="sub">Parent · GetInRoute School</div>
           </div>
           <div className="spacer" />
+          <BackButton label="Back" className="btn btn-sm" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} to="/parent" />
           <button className="btn btn-icon" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }}><Bell size={18} /></button>
           <button className="btn btn-icon" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} onClick={logout}><LogOut size={18} /></button>
         </div>

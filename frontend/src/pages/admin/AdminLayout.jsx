@@ -7,6 +7,7 @@ import { api } from '../../api';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import { useNoindex } from '../../components/Noindex';
 import ThemePicker from '../../components/ThemePicker';
+import BackButton from '../../components/BackButton';
 import {
   LayoutDashboard, MapPinned, Route as RouteIcon, Truck, Users, ClipboardCheck,
   CalendarClock, FileSpreadsheet, Bell, LogOut, Menu, X, MessageCircle, MessageSquare, History,
@@ -221,6 +222,7 @@ export default function AdminLayout() {
       <div className="main">
         <div className="topbar">
           <button className="menu-btn" onClick={() => setOpen(true)}><Menu size={18} /></button>
+          <BackButton label="Back" className="btn btn-ghost btn-sm" to={isVendor ? '/admin' : '/admin'} />
           <div className="spacer" />
           {!isVendor && (
             <div className="bell-wrap">

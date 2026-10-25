@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { Home, Route as RouteIcon, Star, LogOut, Bell, MessageCircle, KeyRound, CheckCheck } from 'lucide-react';
+import BackButton from '../../components/BackButton';
+import { Home, Route as RouteIcon, Star, LogOut, Bell, MessageCircle, KeyRound, CheckCheck, LifeBuoy, Settings } from 'lucide-react';
 import { api } from '../../api';
 import { useInterval } from '../../components/ui';
 import ThemeButton from '../../components/ThemeButton';
@@ -32,6 +33,8 @@ export default function DriverApp() {
     { to: '/driver/route', icon: <RouteIcon />, label: 'My Route', end: false },
     { to: '/driver/chat', icon: <MessageCircle />, label: 'Chat', end: false },
     { to: '/driver/feedback', icon: <Star />, label: 'Feedback', end: false },
+    { to: '/driver/help', icon: <LifeBuoy />, label: 'Help & SOS', end: false },
+    { to: '/driver/settings', icon: <Settings />, label: 'Settings', end: false },
     { to: '/driver/notifications', icon: <CheckCheck />, label: 'Notifications', end: false }
   ];
 
@@ -44,6 +47,7 @@ export default function DriverApp() {
             <div className="sub">{user?.emp_id} · {user?.vertical === 'school' ? 'School Driver' : 'Driver'}</div>
           </div>
           <div className="spacer" />
+          <BackButton label="Back" className="btn btn-sm" style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }} />
           <ThemeButton compact />
           <button className="btn btn-icon" style={{ background: 'rgba(255,255,255,.15)', color: '#fff', position: 'relative' }}
             onClick={() => nav('/driver/notifications')} aria-label="Notifications" title="Notifications">

@@ -73,6 +73,9 @@ import ParentsManagement from './pages/admin/ParentsManagement';
 import WhatIfSimulator from './pages/admin/WhatIfSimulator';
 
 import EmployeeApp from './pages/employee/EmployeeApp';
+import HelpPage from './pages/shared/HelpPage';
+import AccountSettings from './pages/shared/AccountSettings';
+import GlobalBack from './components/GlobalBack';
 import EHome from './pages/employee/EHome';
 import ESchedule from './pages/employee/ESchedule';
 import EBook from './pages/employee/EBook';
@@ -143,6 +146,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
+        <GlobalBack />
         <Routes>
           <Route path="/" element={<Landing />} />
 
@@ -261,6 +265,8 @@ export default function App() {
             <Route path="history" element={<EHistory />} />
             <Route path="chat" element={<MobileChat />} />
             <Route path="feedback" element={<EFeedback />} />
+            <Route path="help" element={<HelpPage kind="employee" />} />
+            <Route path="settings" element={<AccountSettings kind="employee" />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="tickets" element={<TicketListPage />} />
             <Route path="tickets/new" element={<TicketCreatePage />} />
@@ -273,6 +279,8 @@ export default function App() {
             <Route path="duty" element={<DDuty />} />
             <Route path="chat" element={<MobileChat />} />
             <Route path="feedback" element={<DFeedback />} />
+            <Route path="help" element={<HelpPage kind="driver" />} />
+            <Route path="settings" element={<AccountSettings kind="driver" />} />
             <Route path="notifications" element={<NotificationsPage />} />
           </Route>
 
