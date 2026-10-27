@@ -1952,7 +1952,10 @@ app.put('/api/admin/routes/:id', auth, role('admin', 'vendor'), (req, res) => {
 });
 app.delete('/api/admin/routes/:id', auth, role('admin'), (req, res) => {
   if (!canAccessAdminObject(req, 'route', req.params.id)) return res.status(403).json({ error: 'Access denied' });
-  db.prepare('DELETE FROM routes WHERE id = ?').run(req.params.id);
+  const rid = Number(req.params.id);
+  db.prepare('UPDATE schedules SET route_id=NULL WHERE route_id=?').run(rid);
+  db.prepare('UPDATE vehicles SET route_id=NULL WHERE route_id=?').run(rid);
+  db.prepare('DELETE FROM routes WHERE id = ?').run(rid);
   res.json({ ok: true });
 });
 
@@ -2056,8 +2059,12 @@ app.delete('/api/admin/vehicles/:id', auth, role('admin', 'vendor'), (req, res) 
   if (isVendorReq(req) && !db.prepare('SELECT id FROM vehicles WHERE id = ? AND vendor_id = ?').get(req.params.id, req.user.vendor_id)) {
     return res.status(403).json({ error: 'Not your vehicle' });
   }
-  unlinkDrivers(req.params.id);
-  db.prepare('DELETE FROM vehicles WHERE id = ?').run(req.params.id);
+  const vid = Number(req.params.id);
+  unlinkDrivers(vid);
+  db.prepare('DELETE FROM speed_events WHERE vehicle_id=?').run(vid);
+  db.prepare('DELETE FROM parking_events WHERE vehicle_id=?').run(vid);
+  db.prepare('UPDATE schedules SET vehicle_id=NULL WHERE vehicle_id=?').run(vid);
+  db.prepare('DELETE FROM vehicles WHERE id = ?').run(vid);
   res.json({ ok: true });
 });
 
@@ -2288,7 +2295,41 @@ app.put('/api/admin/users/:id', auth, role('admin', 'vendor'), (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/admin/users/:id', auth, role('admin'), (req, res) => {
-  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  const uid = Number(req.params.id);
+  if (!uid) return res.status(400).json({ error: 'Invalid user id' });
+  const target = db.prepare('SELECT id, role, company_id, company_location_id FROM users WHERE id=?').get(uid);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  const sc = companyAdminScope(req);
+  if (!sc.isOwner) {
+    const scope = locationScope(req);
+    const sameCompany = target.company_id == null || Number(target.company_id) === Number(sc.cid);
+    const inScope = !scope || (target.company_location_id != null && scope.includes(Number(target.company_location_id)));
+    if (!sameCompany || (scope && !inScope)) return res.status(403).json({ error: 'This user is outside your location scope.' });
+  }
+  try { db.exec('BEGIN'); } catch (e) {}
+  // Cascade so deleted accounts leave no orphaned tracking/address/invite data.
+  db.prepare('DELETE FROM login_events WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM address_updates WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM notifications WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM feedback WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM driver_duty_sessions WHERE driver_id=?').run(uid);
+  db.prepare('DELETE FROM driver_assignment_events WHERE driver_id=?').run(uid);
+  db.prepare('DELETE FROM location_change_requests WHERE employee_id=?').run(uid);
+  db.prepare('DELETE FROM trip_chat_messages WHERE sender_id=?').run(uid);
+  db.prepare('DELETE FROM sos_events WHERE reporter_id=?').run(uid);
+  // Schedules + their check-ins/trip events for this employee.
+  const scheds = db.prepare('SELECT id FROM schedules WHERE employee_id=?').all(uid).map((r) => r.id);
+  if (scheds.length) {
+    const ph = scheds.map(() => '?').join(',');
+    db.prepare(`DELETE FROM checkins WHERE schedule_id IN (${ph})`).run(...scheds);
+    db.prepare(`DELETE FROM trip_events WHERE schedule_id IN (${ph})`).run(...scheds);
+    db.prepare(`DELETE FROM schedules WHERE id IN (${ph})`).run(...scheds);
+  }
+  db.prepare('DELETE FROM checkins WHERE user_id=?').run(uid);
+  // Vehicles: unlink, keep the vehicle.
+  db.prepare('UPDATE vehicles SET driver_id=NULL, driver_name=NULL, driver_phone=NULL WHERE driver_id=?').run(uid);
+  db.prepare('DELETE FROM users WHERE id = ?').run(uid);
+  try { db.exec('COMMIT'); } catch (e) {}
   res.json({ ok: true });
 });
 
@@ -2357,7 +2398,70 @@ app.delete('/api/admin/admins/:id', auth, role('admin'), ownerOnly, (req, res) =
   const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'admin');
   if (!u) return res.status(404).json({ error: 'Admin not found' });
   if (u.emp_id === 'ADMIN') return res.status(400).json({ error: 'Cannot delete the primary owner account' });
-  db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+  const cid = u.company_id != null ? Number(u.company_id) : Number(u.id);
+  try { db.exec('BEGIN'); } catch (e) {}
+  // Cascade the whole company workspace so addresses, invite codes and tracking
+  // rows do not outlive the admin account.
+  const empIds = db.prepare("SELECT id FROM users WHERE (company_id=? OR id=?) AND role IN ('employee','driver')").all(cid, u.id).map((r) => r.id);
+  if (empIds.length) {
+    const ph = empIds.map(() => '?').join(',');
+    const scheds = db.prepare(`SELECT id FROM schedules WHERE employee_id IN (${ph})`).all(...empIds).map((r) => r.id);
+    if (scheds.length) {
+      const sp = scheds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM checkins WHERE schedule_id IN (${sp})`).run(...scheds);
+      db.prepare(`DELETE FROM trip_events WHERE schedule_id IN (${sp})`).run(...scheds);
+      db.prepare(`DELETE FROM schedules WHERE id IN (${sp})`).run(...scheds);
+    }
+    db.prepare(`DELETE FROM checkins WHERE user_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM login_events WHERE user_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM notifications WHERE user_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM driver_duty_sessions WHERE driver_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM location_change_requests WHERE employee_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM feedback WHERE user_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM trip_chat_messages WHERE sender_id IN (${ph})`).run(...empIds);
+    db.prepare(`DELETE FROM sos_events WHERE reporter_id IN (${ph})`).run(...empIds);
+  db.prepare(`DELETE FROM address_updates WHERE user_id IN (${ph})`).run(...empIds);
+  }
+  // Location-change requests tied to this company's locations.
+  if (locIds.length) {
+    const lp = locIds.map(() => '?').join(',');
+    db.prepare(`DELETE FROM location_change_requests WHERE to_location_id IN (${lp}) OR from_location_id IN (${lp})`).run(...locIds, ...locIds);
+  }
+  // Login events for the company (admin + staff).
+  db.prepare('DELETE FROM login_events WHERE company_id=?').run(cid);
+  db.prepare('DELETE FROM notifications WHERE user_id=?').run(u.id);
+  // Vehicles & routes.
+  // vehicles has no company_id; derive via locations only.
+  const vehIds2 = db.prepare('SELECT id FROM vehicles WHERE company_location_id IN (SELECT id FROM company_locations WHERE company_id=?)').all(cid).map((r) => r.id);
+  if (vehIds2.length) {
+    const vp = vehIds2.map(() => '?').join(',');
+    db.prepare(`DELETE FROM speed_events WHERE vehicle_id IN (${vp})`).run(...vehIds2);
+    db.prepare(`DELETE FROM parking_events WHERE vehicle_id IN (${vp})`).run(...vehIds2);
+    db.prepare(`UPDATE schedules SET vehicle_id=NULL WHERE vehicle_id IN (${vp})`).run(...vehIds2);
+    db.prepare(`DELETE FROM vehicles WHERE id IN (${vp})`).run(...vehIds2);
+  }
+  const routeIds = db.prepare('SELECT id FROM routes WHERE company_id=?').all(cid).map((r) => r.id);
+  if (routeIds.length) {
+    const rp = routeIds.map(() => '?').join(',');
+    db.prepare(`UPDATE schedules SET route_id=NULL WHERE route_id IN (${rp})`).run(...routeIds);
+    db.prepare(`UPDATE vehicles SET route_id=NULL WHERE route_id IN (${rp})`).run(...routeIds);
+    db.prepare(`DELETE FROM routes WHERE id IN (${rp})`).run(...routeIds);
+  }
+  // Locations + addresses + codes + invites.
+  const locIds = db.prepare('SELECT id FROM company_locations WHERE company_id=?').all(cid).map((r) => r.id);
+  if (locIds.length) {
+    const lp = locIds.map(() => '?').join(',');
+    db.prepare(`DELETE FROM company_addresses WHERE company_location_id IN (${lp})`).run(...locIds);
+    db.prepare(`DELETE FROM location_codes WHERE company_location_id IN (${lp})`).run(...locIds);
+    db.prepare(`DELETE FROM driver_invites WHERE company_location_id IN (${lp})`).run(...locIds);
+    db.prepare(`UPDATE users SET company_location_id=NULL WHERE company_location_id IN (${lp})`).run(...locIds);
+    db.prepare(`DELETE FROM company_locations WHERE id IN (${lp})`).run(...locIds);
+  }
+  db.prepare('DELETE FROM company_cities WHERE company_id=?').run(cid);
+  db.prepare('DELETE FROM company_states WHERE company_id=?').run(cid);
+  // Remaining company users (employees/drivers/admins except owner).
+  db.prepare("DELETE FROM users WHERE (company_id=? OR id=?) AND emp_id != 'ADMIN'").run(cid, u.id);
+  try { db.exec('COMMIT'); } catch (e) {}
   res.json({ ok: true });
 });
 app.put('/api/admin/admins/:id/toggle-status', auth, role('admin'), ownerOnly, (req, res) => {
@@ -2676,7 +2780,16 @@ app.delete('/api/admin/locations/locations/:id', auth, role('admin'), (req, res)
   // Preserve history: never hard-delete a location that users reference.
   const used = db.prepare('SELECT COUNT(*) c FROM users WHERE company_location_id=?').get(row.id).c;
   if (used) return res.status(409).json({ error: `Location is assigned to ${used} user(s). Reassign them first.` });
+  try { db.exec('BEGIN'); } catch (e) {}
+  // Cascade: addresses and invite codes belong to this location and must not
+  // outlive it (the admin ops pages used to keep showing orphaned rows).
+  db.prepare('DELETE FROM company_addresses WHERE company_location_id=?').run(row.id);
+  db.prepare('DELETE FROM location_codes WHERE company_location_id=?').run(row.id);
+  db.prepare('DELETE FROM driver_invites WHERE company_location_id=?').run(row.id);
+  db.prepare('DELETE FROM login_events WHERE company_location_id=?').run(row.id);
+  db.prepare('UPDATE vehicles SET company_location_id=NULL WHERE company_location_id=?').run(row.id);
   db.prepare('DELETE FROM company_locations WHERE id=?').run(row.id);
+  try { db.exec('COMMIT'); } catch (e) {}
   res.json({ ok: true });
 });
 
@@ -6680,8 +6793,12 @@ app.get('/api/vendor/routes', vendorAuth, (req, res) => {
 });
 
 app.delete('/api/admin/vendors/:id', auth, role('admin'), (req, res) => {
-  db.prepare('DELETE FROM vendors WHERE id = ?').run(req.params.id);
-  db.prepare('UPDATE vehicles SET vendor_id = NULL WHERE vendor_id = ?').run(req.params.id);
+  const vid = Number(req.params.id);
+  db.prepare("UPDATE driver_invites SET status='revoked', revoked_at=?, revoked_by=? WHERE vendor_id=? AND status='active'").run(ts(), req.user.id, vid);
+  db.prepare('DELETE FROM driver_duty_sessions WHERE vendor_id=?').run(vid);
+  db.prepare('DELETE FROM users WHERE vendor_id=? AND role=\'vendor\'').run(vid);
+  db.prepare('UPDATE vehicles SET vendor_id = NULL WHERE vendor_id = ?').run(vid);
+  db.prepare('DELETE FROM vendors WHERE id = ?').run(vid);
   res.json({ ok: true });
 });
 
