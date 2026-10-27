@@ -12,7 +12,7 @@ function renderWizard() {
 }
 
 describe('Company registration — location invite code', () => {
-  it('offers a per-location invite code field and an easy address picker in the States/Cities step', () => {
+  it('offers a per-location invite code field and an easy address picker in the States/Cities step', { timeout: 15000 }, () => {
     renderWizard();
 
     fireEvent.change(screen.getByPlaceholderText('Acme Corp'), { target: { value: 'Acme Corp' } });

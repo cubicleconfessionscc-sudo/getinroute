@@ -8084,6 +8084,21 @@ app.post('/api/admin/location-codes/:id/revoke', auth, role('admin'), (req, res)
   res.json({ ok: true });
 });
 
+// Permanently remove a location code (active or revoked). Admin and owner only,
+// scoped to the caller's company/location. Use this to clean up test or
+// obsolete codes; revoke is the soft alternative.
+app.delete('/api/admin/location-codes/:id', auth, role('admin'), (req, res) => {
+  const cid = locCompanyId(req);
+  if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  const row = db.prepare('SELECT * FROM location_codes WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
+  if (!row) return res.status(404).json({ error: 'Location code not found.' });
+  const scope = locationScope(req);
+  if (scope && !scope.includes(Number(row.company_location_id))) return res.status(403).json({ error: 'Location is outside your authorized scope.' });
+  db.prepare('DELETE FROM location_codes WHERE id=?').run(row.id);
+  try { require('./v3/core').audit({ company_id: cid, actor_id: req.user.id, actor_role: req.user.role, action: 'location-code:remove', category: 'access', entity_type: 'location_code', entity_id: String(row.id), old_value: { code: row.code, status: row.status }, result: 'ok' }); } catch (e) {}
+  res.json({ ok: true });
+});
+
 /* -------------------------------------------------------------------
  * LOCATION CHANGE REQUESTS (Part 4.3)
  *

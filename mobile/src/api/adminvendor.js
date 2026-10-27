@@ -61,6 +61,7 @@ export function issueLocationCode(company_location_id, code) {
   return client.post("/admin/location-codes", { company_location_id, ...(code ? { code } : {}) }).then((r) => r.data);
 }
 export function revokeLocationCode(id) { return client.post(`/admin/location-codes/${id}/revoke`).then((r) => r.data); }
+export function removeLocationCode(id) { return client.delete(`/admin/location-codes/${id}`).then((r) => r.data); }
 
 // --- Locations (states / cities / locations) ---
 export function getLocations() { return client.get("/admin/locations").then((r) => r.data); }

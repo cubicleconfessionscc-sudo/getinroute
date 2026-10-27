@@ -7,7 +7,7 @@ import {
   getAdminStats, getAdminEmployees, getAdminDrivers, getAdminVehicles, getAdminRoutes,
   getAdminSchedules, getAdminTracking, getCheckinLogs,   getApprovals, resolveApproval, getLocationChangeRequests, approveLocationChange, rejectLocationChange,
   getVendorDashboard, getVendorEmployees, getVendorDrivers, getVendorVehicles, getVendorRoutes, getVendorTrips,
-  getLocationCodes, issueLocationCode, revokeLocationCode,
+  getLocationCodes, issueLocationCode, revokeLocationCode, removeLocationCode,
   getDriverInvites, createDriverInvite, revokeDriverInvite,
   getLocations, addLocation,
   addEmployee, deleteEmployee, setEmployeeLocation, suspendEmployee, approveEmployee,
@@ -489,6 +489,7 @@ function Screen({ screen, data, mode, user, openModal, runAction, busy, download
             sub={[c.location_name || c.company_location_id, c.status, c.created_at].filter(Boolean).join(" · ")}
             actions={[
               c.status === "active" && !isVendor ? { label: "Revoke", danger: true, onPress: () => runAction(() => revokeLocationCode(c.id), "Code revoked.") } : null,
+              !isVendor ? { label: "Remove", danger: true, onPress: () => runAction(() => removeLocationCode(c.id), "Code removed.") } : null,
             ].filter(Boolean)} />
         ))}
         {!data.codes.length ? <Empty text="No codes issued yet. Codes are auto-created when locations are added." /> : null}

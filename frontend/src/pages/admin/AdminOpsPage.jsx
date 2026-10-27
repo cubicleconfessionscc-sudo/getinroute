@@ -289,6 +289,10 @@ function CodeRow({ c, onRevoke }) {
       <span style={{ fontSize: 11, color: c.status === 'active' ? '#10b981' : '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>{c.status}</span>
       <button className="btn btn-sm btn-ghost" onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
       {c.status === 'active' && <button className="btn btn-sm btn-ghost" onClick={onRevoke}>Revoke</button>}
+      <button className="btn btn-sm btn-ghost" style={{ color: '#dc2626' }} onClick={() => {
+        if (!window.confirm('Permanently remove this location code? It cannot be recovered.')) return;
+        api.del('/api/admin/location-codes/' + c.id + '?company_id=' + companyId).then(() => { toast('Code removed'); loadCodes(); }).catch((e) => toast(e.message, 'err'));
+      }}>Remove</button>
     </div>
   );
 }
