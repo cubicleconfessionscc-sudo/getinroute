@@ -2677,7 +2677,11 @@ app.delete('/api/company/me/nodal-points/:id', auth, role('admin', 'vendor'), (r
 function locCompanyId(req) {
   const sc = companyAdminScope(req);
   if (!sc.isOwner) return Number(sc.cid) || null;
-  const cid = Number((req.body && req.body.company_id) || (req.query && req.query.company_id) || 0);
+  // Owner accounts have no company_id column of their own; their user id IS the
+  // company key (57 in prod). Fall back to it so owner-driven operations (issue
+  // / revoke location codes, create locations, ...) work without the client
+  // having to know and pass the company id explicitly.
+  const cid = Number((req.body && req.body.company_id) || (req.query && req.query.company_id) || (req.user && req.user.id) || 0);
   return cid > 0 ? cid : null;
 }
 // company_location_id values a user is authorized for:
@@ -8001,6 +8005,11 @@ function listLocationCodes(req) {
   } else if (!isOwner) {
     where += ' AND lc.company_id = ?';
     params.push(Number(req.user.company_id != null ? req.user.company_id : req.user.id));
+  } else {
+    // Platform owner: scope to the requested company when one is given so the
+    // Company Operations page only shows (and can revoke) that company's codes.
+    const qcid = Number((req.query && req.query.company_id) || 0);
+    if (qcid > 0) { where += ' AND lc.company_id = ?'; params.push(qcid); }
   }
   const scope = locationScope(req);
   if (scope && scope.length) {

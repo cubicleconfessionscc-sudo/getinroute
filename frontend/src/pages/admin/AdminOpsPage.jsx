@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../api';
+import { useAuth } from '../../auth';
 import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
 import { Plus, MapPin, Key, RefreshCw, X, Copy, Check, Building2, MapPinned, Trash2 } from 'lucide-react';
@@ -14,6 +15,8 @@ import ViewOnMapLink from '../../components/ViewOnMapLink';
 //   3. Pending location changes -> /api/admin/location-change-requests
 export default function AdminOpsPage() {
   const toast = useToast();
+  const { user } = useAuth();
+  const companyId = user?.company_id || user?.id;
 
   // ---- Locations & addresses ----
   const [locData, setLocData] = useState({ states: [], cities: [], locations: [], addresses: [] });
@@ -23,18 +26,19 @@ export default function AdminOpsPage() {
   async function loadLocations() {
     try {
       const [locs, addrs] = await Promise.all([
-        api.get('/api/admin/locations'),
-        api.get('/api/admin/addresses')
+        api.get('/api/admin/locations', { company_id: companyId }),
+        api.get('/api/admin/addresses', { company_id: companyId })
       ]);
       setLocData({ ...locs, addresses: addrs });
     } catch (e) { toast(e.message, 'err'); }
   }
-  useEffect(() => { loadLocations(); }, []);
+  useEffect(() => { loadLocations(); }, [companyId]);
 
   async function saveAddress() {
     try {
-      if (addrEdit) await api.put('/api/admin/addresses/' + addrEdit.id, addrForm);
-      else await api.post('/api/admin/addresses', addrForm);
+      const payload = { ...addrForm, company_id: companyId };
+      if (addrEdit) await api.put('/api/admin/addresses/' + addrEdit.id, payload);
+      else await api.post('/api/admin/addresses', payload);
       setAddrModal(false);
       setAddrEdit(null);
       setAddrForm({ company_location_id: '', label: '', address: '', lat: null, lng: null });
@@ -53,7 +57,7 @@ export default function AdminOpsPage() {
   }
   async function removeAddress(a) {
     if (!window.confirm('Remove address "' + a.label + '"?')) return;
-    try { await api.del('/api/admin/addresses/' + a.id); loadLocations(); } catch (e) { toast(e.message, 'err'); }
+    try { await api.del('/api/admin/addresses/' + a.id + '?company_id=' + companyId); loadLocations(); } catch (e) { toast(e.message, 'err'); }
   }
 
   // ---- Location codes ----
@@ -61,30 +65,30 @@ export default function AdminOpsPage() {
   const [codeModal, setCodeModal] = useState(false);
   const [codeForm, setCodeForm] = useState({ company_location_id: '', code: '', notes: '' });
   async function loadCodes() {
-    try { setCodes(await api.get('/api/admin/location-codes')); } catch (e) { toast(e.message, 'err'); }
+    try { setCodes(await api.get('/api/admin/location-codes', { company_id: companyId })); } catch (e) { toast(e.message, 'err'); }
   }
-  useEffect(() => { loadCodes(); }, []);
+  useEffect(() => { loadCodes(); }, [companyId]);
 
   async function issueCode() {
-    try { await api.post('/api/admin/location-codes', codeForm); setCodeModal(false); setCodeForm({ company_location_id: '', code: '', notes: '' }); loadCodes(); } catch (e) { toast(e.message, 'err'); }
+    try { await api.post('/api/admin/location-codes', { ...codeForm, company_id: companyId }); setCodeModal(false); setCodeForm({ company_location_id: '', code: '', notes: '' }); loadCodes(); } catch (e) { toast(e.message, 'err'); }
   }
   async function revokeCode(c) {
     if (!window.confirm('Revoke the active code for this location? The location admin will be unable to sign in until a new code is issued.')) return;
-    try { await api.post('/api/admin/location-codes/' + c.id + '/revoke'); loadCodes(); } catch (e) { toast(e.message, 'err'); }
+    try { await api.post('/api/admin/location-codes/' + c.id + '/revoke', { company_id: companyId }); loadCodes(); } catch (e) { toast(e.message, 'err'); }
   }
 
   // ---- Pending location-change requests ----
   const [changeReqs, setChangeReqs] = useState([]);
   const [reasonDraft, setReasonDraft] = useState({});
   async function loadChangeReqs() {
-    try { setChangeReqs(await api.get('/api/admin/location-change-requests?status=pending')); } catch (e) { toast(e.message, 'err'); }
+    try { setChangeReqs(await api.get('/api/admin/location-change-requests', { status: 'pending', company_id: companyId })); } catch (e) { toast(e.message, 'err'); }
   }
-  useEffect(() => { loadChangeReqs(); }, []);
+  useEffect(() => { loadChangeReqs(); }, [companyId]);
   async function approve(r) {
-    try { await api.post('/api/admin/location-change-requests/' + r.id + '/approve', { reason: reasonDraft[r.id] || '' }); loadChangeReqs(); } catch (e) { toast(e.message, 'err'); }
+    try { await api.post('/api/admin/location-change-requests/' + r.id + '/approve', { reason: reasonDraft[r.id] || '', company_id: companyId }); loadChangeReqs(); } catch (e) { toast(e.message, 'err'); }
   }
   async function reject(r) {
-    try { await api.post('/api/admin/location-change-requests/' + r.id + '/reject', { reason: reasonDraft[r.id] || '' }); loadChangeReqs(); } catch (e) { toast(e.message, 'err'); }
+    try { await api.post('/api/admin/location-change-requests/' + r.id + '/reject', { reason: reasonDraft[r.id] || '', company_id: companyId }); loadChangeReqs(); } catch (e) { toast(e.message, 'err'); }
   }
   async function expireAll() {
     try { const r = await api.post('/api/admin/location-change-requests/expire', {}); toast(`Expired ${r.expired} requests`); loadChangeReqs(); } catch (e) { toast(e.message, 'err'); }
