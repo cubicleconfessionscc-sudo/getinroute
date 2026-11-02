@@ -11,7 +11,9 @@ import { colors, spacing, radius } from "../../theme";
 // server-side enforcement) instead of a user toggle, so the two apps can never
 // switch roles on device. The School build keeps its own role choices.
 const VARIANT = Constants.expoConfig?.extra?.appVariant || "company";
-const LOCKED_ROLE = VARIANT === "driver" ? "driver" : VARIANT === "company" ? "employee" : null;
+// 'company' and 'employee' are the same build (the Employee app) — both must
+// lock to employee. Only the school build shows a role choice.
+const LOCKED_ROLE = VARIANT === "driver" ? "driver" : VARIANT === "company" || VARIANT === "employee" ? "employee" : null;
 const APP_NAME = VARIANT === "driver" ? "GetInRoute Driver" : "GetInRoute";
 
 export default function RegisterScreen({ navigation }) {
@@ -24,22 +26,41 @@ export default function RegisterScreen({ navigation }) {
   const [idNumber, setIdNumber] = useState(""); // employeeId or driver licenseNumber
   const [inviteCode, setInviteCode] = useState("");
   const [companyHint, setCompanyHint] = useState(null); // { name } | { missing: true }
+  // The company's registered places (State > City > Location) returned with the
+  // lookup — the employee can pick their office right at sign-up.
+  const [places, setPlaces] = useState([]);
+  const [locationId, setLocationId] = useState(null);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Employees join a company by their email domain; show which company (if
-  // any) matches so they know their registration goes to the right admin.
+  // any) matches so they know their registration goes to the right admin, and
+  // offer that company's registered places as office-location options.
   async function checkCompany() {
     const value = email.trim();
     if (!value || !value.includes("@")) {
       setCompanyHint(null);
+      setPlaces([]);
+      setLocationId(null);
       return;
     }
     try {
       const res = await lookupCompany({ domain: value });
-      setCompanyHint(res?.exists ? { name: res.name } : { missing: true });
+      if (res?.open) {
+        // Open platform: no company owns this email domain.
+        setCompanyHint({ open: true });
+        setPlaces([]);
+      } else if (res?.exists) {
+        setCompanyHint({ name: res.name });
+        setPlaces(Array.isArray(res?.places) ? res.places : []);
+      } else {
+        setCompanyHint({ missing: true });
+        setPlaces([]);
+      }
+      setLocationId(null);
     } catch (e) {
       setCompanyHint(null);
+      setPlaces([]);
     }
   }
 
@@ -61,7 +82,8 @@ export default function RegisterScreen({ navigation }) {
       role,
       ...(gender ? { gender } : {}),
       ...(role === "employee" ? { employeeId: idNumber } : { licenseNumber: idNumber }),
-      ...(role === "driver" ? { inviteCode: inviteCode.trim().toUpperCase() } : {})
+      ...(role === "driver" ? { inviteCode: inviteCode.trim().toUpperCase() } : {}),
+      ...(locationId ? { company_location_id: locationId } : {})
     };
     register(payload)
       .then(() => navigation.replace("PendingApproval", { email }))
@@ -101,6 +123,12 @@ export default function RegisterScreen({ navigation }) {
         </View>
       )}
 
+      {LOCKED_ROLE === "employee" && (
+        <Text style={styles.driverHint}>
+          Driving a cab? Drivers have their own app — GetInRoute Driver.
+        </Text>
+      )}
+
       {role === "employee" && (
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Gender (for SafeDrop)</Text>
@@ -125,8 +153,33 @@ export default function RegisterScreen({ navigation }) {
         <Text style={companyHint.missing ? styles.hintError : styles.hintOk}>
           {companyHint.missing
             ? "No company is registered for this email domain. Registration will fail — check with your transport admin."
-            : `You'll be joining ${companyHint.name}.`}
+            : companyHint.open
+              ? "No company matches this email domain — you can still register; an admin will review your request."
+              : `You'll be joining ${companyHint.name}.`}
         </Text>
+      )}
+      {role === "employee" && places.length > 0 && (
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Office location (optional)</Text>
+          {places.map((p) => {
+            const active = locationId === p.id;
+            return (
+              <TouchableOpacity
+                key={p.id}
+                style={[styles.placeRow, active && styles.placeRowActive]}
+                onPress={() => setLocationId(active ? null : p.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !!active }}
+              >
+                <Text style={[styles.placeName, active && styles.placeActiveText]} numberOfLines={1}>{p.name}</Text>
+                <Text style={[styles.placeSub, active && styles.placeActiveText]} numberOfLines={1}>
+                  {[p.city, p.state].filter(Boolean).join(", ")}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          <Text style={styles.hintDim}>Pick the office you report to — your admin sees it right away.</Text>
+        </View>
       )}
       <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="+91 98450 XXXXX" keyboardType="phone-pad" />
       <Field
@@ -206,6 +259,20 @@ const styles = StyleSheet.create({
   hintOk: { color: colors.teal, fontSize: 12, marginTop: -spacing.sm, marginBottom: spacing.sm },
   hintError: { color: colors.coral, fontSize: 12, marginTop: -spacing.sm, marginBottom: spacing.sm },
   hintDim: { color: colors.textDim, fontSize: 12, marginTop: -spacing.sm, marginBottom: spacing.sm },
+  driverHint: { color: colors.textDim, fontSize: 12.5, lineHeight: 17, marginTop: -8, marginBottom: 16 },
+  placeRow: {
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    marginBottom: 8
+  },
+  placeRowActive: { borderColor: colors.teal, backgroundColor: colors.panel2 },
+  placeName: { color: colors.text, fontSize: 14, fontWeight: "600" },
+  placeSub: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  placeActiveText: { color: colors.teal },
   fieldLabel: { color: colors.textDim, fontSize: 12, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 },
   input: {
     backgroundColor: colors.panel,

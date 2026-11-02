@@ -83,7 +83,10 @@ async function main() {
 
   const server = spawn(process.execPath, ['server.js'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), DB_PATH: DB_FILE, JWT_SECRET: 'getinroute_dev_secret_change_me', FRONTEND_URL: 'http://localhost:5173' },
+    // Rate limits are IP-keyed and shared across every guarded route, so the
+    // many logins/registers in this walk-through would trip the onboard guard
+    // mid-test. This is an isolated throwaway server — disable them here.
+    env: { ...process.env, PORT: String(PORT), DB_PATH: DB_FILE, JWT_SECRET: 'getinroute_dev_secret_change_me', FRONTEND_URL: 'http://localhost:5173', DISABLE_RATE_LIMITS: '1' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let out = '';
@@ -203,6 +206,76 @@ async function main() {
   // ---- 9. approval on a different user's behalf (owner can always approve) ----
   const apprEOwner = await post(`/api/admin/approvals/${pendB.id}`, { action: 'accept' }, ownerTok);
   check('owner can approve any employee', apprEOwner.status === 200, apprEOwner);
+
+  // ---- 10. per-location administrators + company domain binding ----
+  const CO_C = { name: 'Northwind Traders', domain: 'northwind.example', adminEmail: 'nw.admin@getinroute.com', adminPw: 'NwPass!123' };
+  const onC = await post('/api/company/onboard', {
+    companyName: CO_C.name, domain: CO_C.domain, adminName: 'NW Admin', adminEmail: CO_C.adminEmail, adminPassword: CO_C.adminPw,
+    states: ['Karnataka'],
+    addresses: [{ state: 'Karnataka', city: 'Bengaluru', locations: [{ name: 'Northwind HQ', address: '1 MG Road', lat: 12.9716, lng: 77.5946 }] }],
+    locationAdmins: [{ state: 'Karnataka', city: 'Bengaluru', location: 'Northwind HQ', name: 'NW Location Admin', email: 'nw.loc@northwind.example', password: 'NwLocPass!1' }]
+  });
+  check('company C onboarded with one location admin', onC.status === 200 && Array.isArray(onC.json?.locationAdmins) && onC.json.locationAdmins.length === 1, onC);
+  const laC = onC.json?.locationAdmins?.[0];
+  check('location admin comes back with its location invite code', !!laC?.email && !!laC?.code && laC?.location === 'Northwind HQ', onC.json);
+
+  // A half-filled location-admin card must be rejected before anything is created.
+  const onBad = await post('/api/company/onboard', {
+    companyName: 'Bad Co', domain: 'badco.example', adminName: 'B Admin', adminEmail: 'b.admin@getinroute.com', adminPassword: 'BadPass!123',
+    states: ['Kerala'],
+    addresses: [{ state: 'Kerala', city: 'Kochi', locations: [{ name: 'Bad HQ' }] }],
+    locationAdmins: [{ state: 'Kerala', city: 'Kochi', location: 'Bad HQ', name: 'Half Filled', email: 'half@badco.example' }]
+  });
+  check('half-filled location admin card is rejected', onBad.status === 400 && /administrator details/i.test(onBad.json?.error || ''), onBad);
+
+  const pendList = await get('/api/admin/pending-companies', ownerTok);
+  check('location admins are not listed as separate pending companies',
+    Array.isArray(pendList.json)
+      && pendList.json.some((u) => u.email === CO_C.adminEmail)
+      && !pendList.json.some((u) => u.email === 'nw.loc@northwind.example'), pendList);
+
+  const laPre = await ldap('nw.loc@northwind.example', 'NwLocPass!1');
+  check('location admin cannot sign in before the company is approved', laPre.status === 403, laPre);
+
+  const pendC = pendList.json?.find?.((u) => u.email === CO_C.adminEmail);
+  const apprC = await post(`/api/admin/pending-companies/${pendC.id}/approve`, {}, ownerTok);
+  check('owner approves company C', apprC.status === 200, apprC);
+  check('approving the company cascades to its location admin', apprC.json?.locationAdminsApproved === 1, apprC);
+
+  const laLogin = await ldap('nw.loc@northwind.example', 'NwLocPass!1');
+  check('location admin signs in once the company is approved', laLogin.status === 200 && !!laLogin.json?.token, laLogin);
+
+  // Employee app: the company's registered places must come back for its domain
+  // even for an identifier with no account yet, and the register-time lookup
+  // must expose them as office-location options.
+  const places = await post('/api/auth/employee-locations', { identifier: 'someone@northwind.example' });
+  check('employee-places resolves the company by email domain',
+    places.json?.company?.name === CO_C.name && Array.isArray(places.json?.locations) && places.json.locations.length === 1, places);
+  const look = await get('/api/company/lookup?domain=someone@northwind.example');
+  check('company lookup returns the matched company + its places',
+    look.json?.company_id != null && Array.isArray(look.json?.places) && look.json.places.length === 1, look);
+
+  // Domain-bound registration can pick the office location up-front...
+  const regC = await post('/api/auth/register', {
+    app: 'web', role: 'employee', emp_id: 'NW-1001', email: 'devi.k@northwind.example',
+    password: 'EmpPass#321', name: 'Devi K', company_location_id: places.json?.locations?.[0]?.id
+  });
+  check('domain registration with an office location is accepted', regC.status === 200, regC);
+  // ...but an office location from another company is rejected (tenant scoping).
+  const regBadLoc = await post('/api/auth/register', {
+    app: 'web', role: 'employee', emp_id: 'NW-1002', email: 'intruder@northwind.example',
+    password: 'EmpPass#321', name: 'Intruder', company_location_id: 999999
+  });
+  check('office location outside the company is rejected', regBadLoc.status === 400, regBadLoc);
+
+  const tokC = (await ldap(CO_C.adminEmail, CO_C.adminPw)).json?.token;
+  const apprListC = await get('/api/admin/approvals', tokC);
+  check('domain-bound employee lands in company C approvals', !!apprListC.json?.find?.((u) => u.emp_id === 'NW-1001'), apprListC);
+  const pendDevi = apprListC.json?.find?.((u) => u.emp_id === 'NW-1001');
+  await post(`/api/admin/approvals/${pendDevi.id}`, { action: 'accept' }, tokC);
+  const deviLogin = await ldap('devi.k@northwind.example', 'EmpPass#321');
+  check('approved employee keeps the office location chosen at sign-up',
+    deviLogin.status === 200 && Number(deviLogin.json?.user?.company_location_id) === Number(places.json?.locations?.[0]?.id), deviLogin);
 
   server.kill();
   console.log(`\nMULTITENANT AUTH E2E: ${passed} passed, ${failed} failed`);

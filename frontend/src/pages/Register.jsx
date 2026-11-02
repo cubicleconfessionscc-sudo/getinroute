@@ -60,6 +60,11 @@ export default function Register() {
             <div className="rp-sub">Drive the company cab</div>
           </button>
         </div>
+        {role === 'driver' && (
+          <p style={{ fontSize: 12.5, color: '#64748b', margin: '-4px 0 14px', lineHeight: 1.5 }}>
+            Drivers have a dedicated <b>GetInRoute Driver</b> mobile app for navigation and daily duty — sign in there with this same account once approved.
+          </p>
+        )}
 
         <form onSubmit={submit}>
           <div className="form-grid">

@@ -113,6 +113,11 @@ export default function CompanyOnboard() {
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  // Step 3 — optional administrator per chosen place, keyed by state||city||location.
+  // A card left completely blank is skipped; a half-filled card blocks Continue.
+  const [locAdmins, setLocAdmins] = useState({});
+  // Accounts actually created by the registration (returned by the API).
+  const [createdLocAdmins, setCreatedLocAdmins] = useState([]);
   // Codes issued for each location during registration (returned by the API).
   // Shown on the success screen so the company can hand them to the location
   // admins / vendors who sign in scoped to that location.
@@ -194,6 +199,23 @@ export default function CompanyOnboard() {
     }));
   }
 
+  // Step 3 helpers — every place chosen in Step 2 gets an optional admin card.
+  const placeKey = (s, c, n) => `${s}||${c}||${n}`;
+  const allPlaces = useMemo(
+    () => plan.flatMap((p) => p.cities.flatMap((c) => c.locations.map((l) => ({ state: p.state, city: c.name, name: l.name })))),
+    [plan]
+  );
+  function setLocAdminField(key, field, value) {
+    setLocAdmins((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), [field]: value } }));
+  }
+  function clearLocAdmin(key) {
+    setLocAdmins((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
   // Step-gating
   const canNext = () => {
     if (step === 1) return !!(companyName.trim() && domain.trim());
@@ -201,9 +223,41 @@ export default function CompanyOnboard() {
       // At least one state with at least one city with at least one location
       return plan.length > 0 && plan.every((p) => p.cities.length > 0) && plan.every((p) => p.cities.every((c) => c.locations.length > 0));
     }
-    if (step === 3) return !!(adminName.trim() && adminEmail.trim() && adminPassword.length >= 8);
+    if (step === 3) {
+      if (!(adminName.trim() && adminEmail.trim() && adminPassword.length >= 8)) return false;
+      // Per-location admins are optional, but a started card must be complete,
+      // with a valid email and a password of at least 8 characters, and no
+      // duplicate emails anywhere in this registration.
+      const emails = new Set([adminEmail.trim().toLowerCase()]);
+      for (const p of allPlaces) {
+        const e = locAdmins[placeKey(p.state, p.city, p.name)] || {};
+        const values = [e.name, e.email, e.password].map((v) => String(v || '').trim());
+        if (!values.some(Boolean)) continue; // untouched card — skipped
+        if (values.some((v) => !v)) return false; // half-filled card
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values[1])) return false;
+        if (String(e.password).length < 8) return false;
+        if (emails.has(values[1].toLowerCase())) return false;
+        emails.add(values[1].toLowerCase());
+      }
+      return true;
+    }
     return true;
   };
+
+  // Cards that are fully filled — what gets sent to the API and shown in Review.
+  const pendingLocAdmins = allPlaces
+    .map((p) => {
+      const e = locAdmins[placeKey(p.state, p.city, p.name)] || {};
+      return {
+        state: p.state,
+        city: p.city,
+        location: p.name,
+        name: String(e.name || '').trim(),
+        email: String(e.email || '').trim(),
+        password: String(e.password || '')
+      };
+    })
+    .filter((e) => e.name && e.email && e.password);
 
   const submit = async () => {
     setBusy(true);
@@ -235,6 +289,8 @@ export default function CompanyOnboard() {
         }
       }
       const states = plan.map((p) => p.state);
+      // Per-location administrators: only fully-filled cards are sent; the
+      // server validates each one against the places added in Step 2.
       const resp = await api.post('/api/company/onboard', {
         companyName,
         domain,
@@ -243,9 +299,11 @@ export default function CompanyOnboard() {
         adminEmail,
         adminPassword,
         states,
-        addresses: flat
+        addresses: flat,
+        locationAdmins: pendingLocAdmins
       });
       setIssuedCodes(Array.isArray(resp && resp.locationCodes) ? resp.locationCodes : []);
+      setCreatedLocAdmins(Array.isArray(resp && resp.locationAdmins) ? resp.locationAdmins : []);
       setStep(5);
       setDone(true);
     } catch (err) {
@@ -293,6 +351,30 @@ export default function CompanyOnboard() {
               </div>
             </div>
           )}
+          {createdLocAdmins.length > 0 && (
+            <div style={{ background: 'rgba(124,58,237,.08)', border: '1px solid rgba(124,58,237,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: 'var(--text-2)', marginBottom: 16 }}>
+              <b style={{ display: 'block', marginBottom: 4 }}>Location administrators created</b>
+              <p style={{ margin: '0 0 10px', fontSize: 12.5, color: '#475569' }}>
+                These accounts are approved together with your company. Each signs in with their own email, password and their location&apos;s invite code.
+              </p>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {createdLocAdmins.map((a) => (
+                  <div key={a.email} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px', fontSize: 12.5 }}>
+                    <div style={{ fontWeight: 700 }}>{a.name} <span style={{ fontWeight: 400, color: '#64748b' }}>— {a.email}</span></div>
+                    <div style={{ color: '#475569' }}>{a.location}, {a.city}, {a.state}</div>
+                    {a.code ? (
+                      <div style={{ marginTop: 3 }}>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.06em', color: 'var(--primary)' }}>{a.code}</span>
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => copyCode(a.code)} style={{ padding: '2px 8px', marginLeft: 6 }}>
+                          {copiedCode === a.code ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', borderRadius: 12, padding: '14px 16px', textAlign: 'left', fontSize: 13.5, color: 'var(--text-2)', marginBottom: 20 }}>
             <b style={{ display: 'block', marginBottom: 6 }}>Step 6 — Trial Activated (what happens next)</b>
             <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 4 }}>
@@ -314,7 +396,7 @@ export default function CompanyOnboard() {
   const stepHead = {
     1: { title: 'Company Information', sub: 'Basic company details to create your workspace.' },
     2: { title: 'Locations & Addresses', sub: 'Pick the states you operate in, then add the cities and locations where your employees report.' },
-    3: { title: 'Administrator Information', sub: 'This person signs in and runs the company on GetInRoute.' },
+    3: { title: 'Administrator Information', sub: 'Create the main company admin, then add an admin for each of your locations (optional).' },
     4: { title: 'Request 10-Day Trial', sub: 'Review and submit. The owner approves, then your trial starts.' }
   }[step];
 
@@ -377,23 +459,92 @@ export default function CompanyOnboard() {
         />}
 
         {step === 3 && (
-          <div className="form-grid">
-            <div className="field full">
-              <label>Admin Name</label>
-              <input value={adminName} onChange={(e) => setAdminName(e.target.value)} placeholder="Full name" required />
-            </div>
-            <div className="field full">
-              <label>Admin Email</label>
-              <input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="admin@acme.com" required />
-            </div>
-            <div className="field full">
-              <label>Password</label>
-              <div style={{ position: 'relative' }}>
-                <input type={showPw ? 'text' : 'password'} value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Min 8 characters" minLength={8} required style={{ paddingRight: 40 }} />
-                <button type="button" onClick={() => setShowPw(!showPw)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}>
-                  {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+          <div>
+            <div className="form-grid">
+              <div className="field full">
+                <label>Admin Name</label>
+                <input value={adminName} onChange={(e) => setAdminName(e.target.value)} placeholder="Full name" required />
               </div>
+              <div className="field full">
+                <label>Admin Email</label>
+                <input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="admin@acme.com" required />
+              </div>
+              <div className="field full">
+                <label>Password</label>
+                <div style={{ position: 'relative' }}>
+                  <input type={showPw ? 'text' : 'password'} value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Min 8 characters" minLength={8} required style={{ paddingRight: 40 }} />
+                  <button type="button" onClick={() => setShowPw(!showPw)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}>
+                    {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Per-location administrators — one card per place from Step 2. */}
+            <div style={{ borderTop: '1px solid #e2e8f0', marginTop: 16, paddingTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Administrator for each location (optional)</div>
+              <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 12px' }}>
+                Each place you chose in Step 2 can get its own admin — they sign in scoped to that location with its invite code.
+                Leave a card blank to skip it, or fill all three fields to create it.
+              </p>
+              {allPlaces.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#94a3b8' }}>No locations found — go back to Step 2 and add at least one.</p>
+              ) : (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {allPlaces.map((p) => {
+                    const key = placeKey(p.state, p.city, p.name);
+                    const e = locAdmins[key] || {};
+                    const values = [e.name, e.email, e.password];
+                    const filledCount = values.filter((v) => String(v || '').trim()).length;
+                    const partial = filledCount > 0 && filledCount < 3;
+                    const emailStr = String(e.email || '').trim();
+                    const emailOk = !emailStr || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr);
+                    const pwOk = !e.password || String(e.password).length >= 8;
+                    return (
+                      <div key={key} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, background: filledCount === 3 ? '#f8fafc' : '#fff' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                          <MapPin size={14} color="var(--primary)" />
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
+                          <div style={{ fontSize: 11.5, color: '#64748b' }}>{p.city}, {p.state}</div>
+                          {filledCount === 3 && emailOk && pwOk ? (
+                            <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: '#15803d' }}>✓ ready</span>
+                          ) : null}
+                          {filledCount > 0 ? (
+                            <button type="button" onClick={() => clearLocAdmin(key)} aria-label={`Clear admin for ${p.name}`} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 11.5, fontWeight: 600, marginLeft: filledCount === 3 && emailOk && pwOk ? 8 : 'auto' }}>
+                              Clear
+                            </button>
+                          ) : null}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <div className="field">
+                            <label>Admin name</label>
+                            <input value={e.name || ''} onChange={(ev) => setLocAdminField(key, 'name', ev.target.value)} placeholder="Full name" autoComplete="off" />
+                          </div>
+                          <div className="field">
+                            <label>Email</label>
+                            <input type="email" value={e.email || ''} onChange={(ev) => setLocAdminField(key, 'email', ev.target.value)} placeholder="admin@acme.com" autoComplete="off" />
+                          </div>
+                          <div className="field" style={{ gridColumn: '1 / -1' }}>
+                            <label>Password</label>
+                            <input type="password" value={e.password || ''} onChange={(ev) => setLocAdminField(key, 'password', ev.target.value)} placeholder="Min 8 characters" autoComplete="new-password" />
+                          </div>
+                        </div>
+                        {partial ? (
+                          <p style={{ fontSize: 12, color: '#b45309', margin: '8px 0 0', fontWeight: 600 }}>
+                            Fill in name, email and password — or clear the card to skip this location.
+                          </p>
+                        ) : null}
+                        {!emailOk ? (
+                          <p style={{ fontSize: 12, color: '#be123c', margin: '8px 0 0', fontWeight: 600 }}>Enter a valid email address.</p>
+                        ) : null}
+                        {!pwOk ? (
+                          <p style={{ fontSize: 12, color: '#be123c', margin: '8px 0 0', fontWeight: 600 }}>Password must be at least 8 characters.</p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -414,6 +565,20 @@ export default function CompanyOnboard() {
                 </div>
               )}
               <div><b>Admin:</b> {adminName} ({adminEmail})</div>
+              {pendingLocAdmins.length > 0 ? (
+                <div>
+                  <b>Location admins:</b>
+                  <div style={{ display: 'grid', gap: 3, marginTop: 4 }}>
+                    {pendingLocAdmins.map((e) => (
+                      <div key={e.email} style={{ fontSize: 12.5 }}>
+                        • <b>{e.name}</b> ({e.email}) — {e.location}, {e.city}, {e.state}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: '#94a3b8' }}><b>Location admins:</b> none — you can create them later from the admin console.</div>
+              )}
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
               {TRIAL_POINTS.map((p, i) => (

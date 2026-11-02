@@ -56,6 +56,9 @@ if (USE_PG) {
   try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_sid_expires_at TEXT;"); } catch (e) { console.warn('[pg] active_sid_expires_at column:', e.message); }
   try { pgdb.exec("ALTER TABLE users ALTER COLUMN active_sid_expires_at TYPE TEXT USING active_sid_expires_at::text;"); } catch (e) { console.warn('[pg] active_sid_expires_at type fix:', e.message); }
   try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS safety_drop_eligible INTEGER DEFAULT 0;"); } catch (e) {}
+  // Company domain registered at onboarding (used to auto-bind employees who
+  // sign up with a company email domain to that company's workspace/places).
+  try { pgdb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS company_domain TEXT;"); } catch (e) {}
   // Soft-delete/archive columns (idempotent; safe on already-migrated databases).
   try { pgdb.exec("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS archived_at TEXT;"); } catch (e) {}
   try { pgdb.exec("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS archived_by BIGINT;"); } catch (e) {}
@@ -315,6 +318,7 @@ try { db.exec(`ALTER TABLE schedules ADD COLUMN cancelled_at TEXT;`); } catch (e
 try { db.exec(`ALTER TABLE schedules ADD COLUMN safety_status TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN safety_drop_eligible INTEGER DEFAULT 0;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN gender TEXT;`); } catch (e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN company_domain TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN last_login TEXT;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0;`); } catch (e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN home_address TEXT;`); } catch (e) {}

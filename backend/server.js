@@ -1159,6 +1159,33 @@ app.post('/api/auth/logout', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Company domain binding ----
+// Companies register with a domain (e.g. acme.com). Employees who sign up with
+// that email domain are attached to that company automatically, which is what
+// makes the company's registered places (State > City > Location) appear in the
+// employee app and routes the registration into that company's approvals queue.
+function companyByDomain(domain) {
+  const d = String(domain || '').toLowerCase().split('@').pop().trim();
+  if (!d || !d.includes('.') || d === 'unknown') return null;
+  // Primary company admin first (location admins carry company_id = primary id),
+  // approved before pending, and rejected companies (approved=-1) never bind.
+  return db.prepare(`SELECT id, name, department FROM users
+    WHERE role='admin' AND emp_id != 'ADMIN' AND approved >= 0
+      AND company_domain IS NOT NULL AND lower(company_domain) = ?
+    ORDER BY (company_id IS NULL) DESC, approved DESC, id ASC LIMIT 1`).get(d) || null;
+}
+// The company's registered places, in the shape both employee portals render
+// (grouped State > City > Location by the client).
+function companyPlaces(cid) {
+  return db.prepare(`SELECT l.id, l.name, l.address, l.lat, l.lng,
+      c.name AS city, s.name AS state
+    FROM company_locations l
+    JOIN company_cities c ON c.id = l.city_id
+    JOIN company_states s ON s.id = l.state_id
+    WHERE l.company_id = ? AND l.status = 'active'
+    ORDER BY s.name, c.name, l.name`).all(cid);
+}
+
 app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => {
   const { role, emp_id: rawEmpId, employeeId, licenseNumber, email: rawEmail, password, name, phone, department, designation, inviteCode } = req.body || {};
   const emp_id = String(rawEmpId || employeeId || licenseNumber || '').trim();
@@ -1201,6 +1228,29 @@ app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => 
     }
     companyId = companyAdmin.id;
   }
+  // Domain binding: an employee who signs up with the company's registered
+  // email domain (e.g. you@acme.com) is attached to that company even without
+  // an invite code. This is what makes the company's registered places
+  // (State > City > Location) available in the employee app for this account,
+  // and routes the request into that company's approvals queue.
+  if (companyId == null) {
+    const domainCompany = companyByDomain(email);
+    if (domainCompany) companyId = domainCompany.id;
+  }
+  // Optional office location chosen at registration (State > City > Location).
+  // Only accepted when the account is bound to a company, and only when that
+  // location belongs to the same company (fail-closed tenant scoping).
+  let locationId = null;
+  const rawLoc = (req.body || {}).company_location_id ?? (req.body || {}).officeLocationId;
+  if (rawLoc != null && String(rawLoc).trim() !== '') {
+    const locId = Number(rawLoc);
+    if (!locId) return res.status(400).json({ error: 'Invalid office location.', message: 'Invalid office location.' });
+    if (companyId != null) {
+      const loc = db.prepare("SELECT id FROM company_locations WHERE id=? AND company_id=? AND status='active'").get(locId, companyId);
+      if (!loc) return res.status(400).json({ error: 'That office location does not belong to your company.', message: 'That office location does not belong to your company.' });
+      locationId = locId;
+    }
+  }
   // Case-insensitive uniqueness: without this, "Test@X.com" and "test@x.com"
   // could both be inserted, and the login lookup (which matches
   // case-insensitively) could pick the rejected copy and reject the valid one.
@@ -1208,8 +1258,8 @@ app.post('/api/auth/register', guard(30, 60 * 60 * 1000), h(async (req, res) => 
   if (existing) return res.status(400).json({ error: 'Email or Employee ID already registered', message: 'Email or Employee ID already registered' });
   const hash = bcrypt.hashSync(password, 10);
   const g = ['male', 'female', 'other'].includes(String(req.body.gender || '').toLowerCase()) ? String(req.body.gender).toLowerCase() : null;
-  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, company_id, invite_code, gender, safety_drop_eligible) VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)`)
-    .run(role, emp_id, email, name, phone || null, department || null, designation || null, hash, companyId, invite, g, g === 'female' || g === 'other' ? 1 : 0);
+  const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, company_id, company_location_id, invite_code, gender, safety_drop_eligible) VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?)`)
+    .run(role, emp_id, email, name, phone || null, department || null, designation || null, hash, companyId, locationId, invite, g, g === 'female' || g === 'other' ? 1 : 0);
   const userId = Number(info.lastInsertRowid);
   if (companyId) {
     notify(companyId, 'New Registration Request', `${name} (${emp_id}) registered as ${role} for your company. Approve or reject in Admin → Approvals.`);
@@ -1408,18 +1458,58 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
     seenInviteCodes.add(a.code);
   }
 
+  // ---- Per-location administrators (optional) ----
+  // The wizard's "Administrator Information" step lists every place chosen in
+  // the Locations step; the registrant can create one admin account per place
+  // (name + email + password) so each State > City > Location has its own
+  // responsible admin. Entries left blank are skipped.
+  const locKey = (s, c, n) => `${String(s).toLowerCase()}||${String(c).toLowerCase()}||${String(n).toLowerCase()}`;
+  const rawLocAdmins = Array.isArray(b.locationAdmins) ? b.locationAdmins : [];
+  const locAdminPlan = [];
+  const seenAdminEmails = new Set([adminEmail.toLowerCase()]);
+  const seenAdminLocs = new Set();
+  for (const a of rawLocAdmins) {
+    if (!a || typeof a !== 'object') continue;
+    const laName = String(a.name || '').trim();
+    const laEmail = String(a.email || '').trim().toLowerCase();
+    const laPassword = String(a.password || '');
+    if (!laName && !laEmail && !laPassword) continue; // untouched card
+    const where = [String(a.location || '').trim(), String(a.city || '').trim(), resolveStateName(a.state) || String(a.state || '').trim()].filter(Boolean).join(' · ');
+    if (!laName || !laEmail || !laPassword) {
+      return res.status(400).json({ error: `Complete the administrator details for ${where || 'each location'} (name, email and password).` });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(laEmail)) return res.status(400).json({ error: `Enter a valid email address for the administrator of ${where}.` });
+    if (laPassword.length < 8) return res.status(400).json({ error: `Password must be at least 8 characters for ${laEmail}.` });
+    if (seenAdminEmails.has(laEmail)) return res.status(400).json({ error: `The email ${laEmail} is already used in this registration.` });
+    const target = addressPlan.find((p) => p.name.toLowerCase() === String(a.location || '').trim().toLowerCase()
+      && (!a.city || p.city.toLowerCase() === String(a.city).trim().toLowerCase()))
+      || addressPlan.find((p) => p.name.toLowerCase() === String(a.location || '').trim().toLowerCase());
+    if (!target) return res.status(400).json({ error: `The location "${String(a.location || '').trim()}" was not added in the previous step.` });
+    const key = locKey(target.state, target.city, target.name);
+    if (seenAdminLocs.has(key)) return res.status(400).json({ error: `Only one administrator can be assigned to ${target.name}.` });
+    seenAdminEmails.add(laEmail);
+    seenAdminLocs.add(key);
+    locAdminPlan.push({ key, name: laName, email: laEmail, password: laPassword, location: target.name, city: target.city, state: target.state });
+  }
+  for (const la of locAdminPlan) {
+    if (db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)').get(la.email)) {
+      return res.status(400).json({ error: `An account with ${la.email} already exists. Use a different email.` });
+    }
+  }
+
   const hash = bcrypt.hashSync(adminPassword, 10);
   const emp_id = 'ADMIN-' + Date.now().toString(36).toUpperCase();
   const inviteCode = genInviteCode(companyName);
+  const companyDomain = domain ? domain.toLowerCase() : null;
   // Use a single transaction so either everything lands or nothing does.
   // node:sqlite's DatabaseSync does not expose a .transaction() helper the way
   // better-sqlite3 does, so we drive BEGIN/COMMIT explicitly.
   let result = null;
   try {
     db.exec('BEGIN');
-    const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, invite_code)
-      VALUES (?,?,?,?,?,?,?,?,0,?)`)
-      .run('admin', emp_id, adminEmail, adminName, phone || null, companyName, 'Company Admin', hash, inviteCode);
+    const info = db.prepare(`INSERT INTO users (role, emp_id, email, name, phone, department, designation, password_hash, approved, invite_code, company_domain)
+      VALUES (?,?,?,?,?,?,?,?,0,?,?)`)
+      .run('admin', emp_id, adminEmail, adminName, phone || null, companyName, 'Company Admin', hash, inviteCode, companyDomain);
     const userId = Number(info.lastInsertRowid);
     const stateRowByName = {};
     for (const sName of stateNames) {
@@ -1433,6 +1523,7 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
     }
     let addressesCreated = 0;
     const locationCodes = [];
+    const locIdByKey = {};
     for (const a of addressPlan) {
       const stateId = stateRowByName[a.state].id;
       let city = db.prepare('SELECT id FROM company_cities WHERE company_id=? AND state_id=? AND name=?').get(userId, stateId, a.city);
@@ -1457,6 +1548,7 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
           locationCodes.push({ location_id: loc.id, location: a.name, city: a.city, state: a.state, code });
         }
       }
+      locIdByKey[locKey(a.state, a.city, a.name)] = loc.id;
       if (a.lat != null && a.lng != null) {
         const label = `${a.city} ${a.name}`;
         try {
@@ -1468,14 +1560,35 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
         }
       }
     }
+    // Per-location administrators: created after their place exists so each
+    // account is bound to exactly one State > City > Location. They are pending
+    // owner approval (same gate as the primary company admin) and sign in
+    // scoped to their location using that location's invite code.
+    const locationAdmins = [];
+    for (const la of locAdminPlan) {
+      const locId = locIdByKey[la.key];
+      if (!locId) continue;
+      let laEmpId = '';
+      do { laEmpId = 'ADMIN-' + crypto.randomBytes(4).toString('hex').toUpperCase(); } while (db.prepare('SELECT id FROM users WHERE emp_id=?').get(laEmpId));
+      const laInfo = db.prepare(`INSERT INTO users (role, emp_id, email, name, department, designation, password_hash, approved, status, company_id, company_location_id, company_domain)
+        VALUES ('admin', ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?)`)
+        .run(laEmpId, la.email, la.name, companyName, 'Location Admin', bcrypt.hashSync(la.password, 10), userId, locId, companyDomain);
+      const activeCode = db.prepare("SELECT code FROM location_codes WHERE company_location_id=? AND status='active'").get(locId);
+      locationAdmins.push({
+        id: Number(laInfo.lastInsertRowid), emp_id: laEmpId, name: la.name, email: la.email,
+        location: la.location, city: la.city, state: la.state, code: activeCode ? activeCode.code : null
+      });
+    }
     db.exec('COMMIT');
-      result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated, locationCodes };
+      result = { userId, statesCreated: stateNames.length, locationsCreated: addressPlan.length, addressesCreated, locationCodes, locationAdmins };
       // Test-only: AUTO_APPROVE_COMPANIES=1 marks the new admin user as
       // approved immediately. The web Playwright suite uses this so it can
       // log in as the just-created company admin without first going through
       // the owner approval step. Never set in production.
       if (process.env.AUTO_APPROVE_COMPANIES === '1') {
         try { db.prepare("UPDATE users SET approved=1 WHERE id=?").run(userId); } catch (e) {}
+        // Location admins belong to the same registration — approve them too.
+        try { db.prepare("UPDATE users SET approved=1 WHERE company_id=? AND role='admin' AND approved=0").run(userId); } catch (e) {}
         // Echo the password and email back so the test harness can log in
         // without round-tripping through the owner approval flow.
         result.testEmail = adminEmail;
@@ -1501,6 +1614,8 @@ app.post('/api/company/onboard', guard(20, 60 * 60 * 1000), h(async (req, res) =
     locationsCreated: result.locationsCreated,
     addressesCreated: result.addressesCreated,
     locationCodes: result.locationCodes || [],
+    // Admin accounts created for individual places (State > City > Location).
+    locationAdmins: result.locationAdmins || [],
     // Test-only fields (only present when AUTO_APPROVE_COMPANIES=1).
     ...(result.testEmail ? { testEmail: result.testEmail, testPassword: result.testPassword } : {})
   });
@@ -2341,21 +2456,42 @@ app.get('/api/admin/approvals', auth, role('admin'), (req, res) => {
   res.json(rows.map(publicUser));
 });
 app.get('/api/admin/pending-companies', auth, role('admin'), (req, res) => {
-  const rows = db.prepare(`SELECT * FROM users WHERE role='admin' AND emp_id != 'ADMIN' ORDER BY approved ASC, id DESC`).all();
+  // Only PRIMARY company registrations are listed. Location admins created
+  // during onboarding carry company_id = the primary admin's id and are
+  // activated automatically when their company is approved (or rejected).
+  const rows = db.prepare(`SELECT * FROM users WHERE role='admin' AND emp_id != 'ADMIN' AND company_id IS NULL ORDER BY approved ASC, id DESC`).all();
   res.json(rows.map(publicUser));
 });
 app.post('/api/admin/pending-companies/:id/approve', auth, role('admin'), (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'admin');
   if (!u) return res.status(404).json({ error: 'Admin not found' });
   if (u.approved) return res.status(400).json({ error: 'Already approved' });
+  // Only the platform owner or this company's own admin may act on its accounts
+  // (a location admin carries company_id = the company's primary admin id).
+  const isOwner = req.user.emp_id === 'ADMIN';
+  const sameCompany = (u.company_id != null && Number(u.company_id) === Number(req.user.id))
+    || (req.user.company_id != null && u.company_id != null && Number(u.company_id) === Number(req.user.company_id));
+  if (!isOwner && !sameCompany) return res.status(403).json({ error: 'This registration belongs to another company.' });
   db.prepare('UPDATE users SET approved=1 WHERE id=?').run(u.id);
+  // Approving a company also activates the location administrators created for
+  // it during registration, so one approval is enough for the whole workspace.
+  const locAdmins = db.prepare("SELECT id, name FROM users WHERE company_id=? AND role='admin' AND approved=0").all(u.id);
+  if (locAdmins.length) {
+    db.prepare("UPDATE users SET approved=1 WHERE company_id=? AND role='admin' AND approved=0").run(u.id);
+    for (const la of locAdmins) notify(la.id, 'Location Admin Approved', `Your location administrator account for ${u.department || 'your company'} is active. Sign in with your email and the location's invite code.`);
+  }
   notify(u.id, 'Company Approved', 'Your company account has been approved. You can now sign in.');
-  res.json({ ok: true });
+  res.json({ ok: true, locationAdminsApproved: locAdmins.length });
 });
 app.post('/api/admin/pending-companies/:id/reject', auth, role('admin'), (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ? AND role = ?').get(req.params.id, 'admin');
   if (!u) return res.status(404).json({ error: 'Admin not found' });
+  const isOwner = req.user.emp_id === 'ADMIN';
+  const sameCompany = (u.company_id != null && Number(u.company_id) === Number(req.user.id))
+    || (req.user.company_id != null && u.company_id != null && Number(u.company_id) === Number(req.user.company_id));
+  if (!isOwner && !sameCompany) return res.status(403).json({ error: 'This registration belongs to another company.' });
   db.prepare('UPDATE users SET approved=-1 WHERE id=?').run(u.id);
+  db.prepare("UPDATE users SET approved=-1 WHERE company_id=? AND role='admin' AND approved=0").run(u.id);
   notify(u.id, 'Company Rejected', 'Your company registration was not approved. Contact support for details.');
   res.json({ ok: true });
 });
@@ -2422,11 +2558,6 @@ app.delete('/api/admin/admins/:id', auth, role('admin'), ownerOnly, (req, res) =
     db.prepare(`DELETE FROM sos_events WHERE reporter_id IN (${ph})`).run(...empIds);
   db.prepare(`DELETE FROM address_updates WHERE user_id IN (${ph})`).run(...empIds);
   }
-  // Location-change requests tied to this company's locations.
-  if (locIds.length) {
-    const lp = locIds.map(() => '?').join(',');
-    db.prepare(`DELETE FROM location_change_requests WHERE to_location_id IN (${lp}) OR from_location_id IN (${lp})`).run(...locIds, ...locIds);
-  }
   // Login events for the company (admin + staff).
   db.prepare('DELETE FROM login_events WHERE company_id=?').run(cid);
   db.prepare('DELETE FROM notifications WHERE user_id=?').run(u.id);
@@ -2451,6 +2582,9 @@ app.delete('/api/admin/admins/:id', auth, role('admin'), ownerOnly, (req, res) =
   const locIds = db.prepare('SELECT id FROM company_locations WHERE company_id=?').all(cid).map((r) => r.id);
   if (locIds.length) {
     const lp = locIds.map(() => '?').join(',');
+    // Location-change requests tied to this company's locations (must run while
+    // the locations still exist — they are keyed by location id).
+    db.prepare(`DELETE FROM location_change_requests WHERE to_location_id IN (${lp}) OR from_location_id IN (${lp})`).run(...locIds, ...locIds);
     db.prepare(`DELETE FROM company_addresses WHERE company_location_id IN (${lp})`).run(...locIds);
     db.prepare(`DELETE FROM location_codes WHERE company_location_id IN (${lp})`).run(...locIds);
     db.prepare(`DELETE FROM driver_invites WHERE company_location_id IN (${lp})`).run(...locIds);
@@ -2923,9 +3057,25 @@ app.post('/api/auth/employee-locations', guard(60, 60 * 1000), (req, res) => {
   if (!ident) return res.json({ company: null, locations: [] });
   const u = db.prepare(`SELECT * FROM users WHERE (lower(email)=lower(?) OR lower(emp_id)=lower(?))
     AND role='employee' AND status='active' ORDER BY id LIMIT 1`).get(ident, ident);
-  if (!u) return res.json({ company: null, locations: [] });
-  const cid = u.company_id != null ? Number(u.company_id) : null;
-  if (cid == null) return res.json({ company: { id: null, name: u.department || '' }, locations: [] });
+  let cid = u && u.company_id != null ? Number(u.company_id) : null;
+  // Domain fallback: an employee whose email domain matches a registered
+  // company sees that company's registered places (State > City > Location)
+  // even before their account exists or was ever bound. When the account does
+  // exist it is auto-bound so the places persist everywhere afterwards.
+  if (cid == null && ident.includes('@')) {
+    const byDomain = companyByDomain(ident);
+    if (byDomain) {
+      cid = Number(byDomain.id);
+      if (u) {
+        try { db.prepare('UPDATE users SET company_id=? WHERE id=? AND company_id IS NULL').run(cid, u.id); } catch (e) {}
+      }
+    }
+  }
+  if (cid == null) {
+    return u
+      ? res.json({ company: { id: null, name: u.department || '' }, locations: [] })
+      : res.json({ company: null, locations: [] });
+  }
   const company = db.prepare('SELECT id, name, department FROM users WHERE id=?').get(cid);
   const rows = db.prepare(`SELECT l.id, l.name, l.address, l.lat, l.lng,
       c.name AS city, s.name AS state
@@ -2935,9 +3085,12 @@ app.post('/api/auth/employee-locations', guard(60, 60 * 1000), (req, res) => {
     WHERE l.company_id = ? AND l.status = 'active'
     ORDER BY s.name, c.name, l.name`).all(cid);
   res.json({
-    company: { id: cid, name: company ? (company.name || company.department) : '' },
+    // For an admin row the company name is stored in `department` (the person's
+    // own name sits in `name`) — prefer it so employees see "Acme Corp", not
+    // the admin's personal name.
+    company: { id: cid, name: company ? (company.department || company.name || '') : '' },
     locations: rows,
-    current_location_id: u.company_location_id != null ? Number(u.company_location_id) : null
+    current_location_id: u && u.company_location_id != null ? Number(u.company_location_id) : null
   });
 });
 
@@ -7613,11 +7766,33 @@ app.get('/api/company/lookup', (req, res) => {
   // compared with the bare domain extracted from the email (e.g. "gmail.com").
   const cfgDomain = String(company.domain || '').trim().toLowerCase().replace(/^@+/, '');
   const d = String(domain || '').toLowerCase().split('@').pop();
-  if (inviteCode && company.inviteCode && String(inviteCode).trim().toUpperCase() === String(company.inviteCode).trim().toUpperCase()) {
-    return res.json({ exists: true, name: company.name || 'Your Company' });
+  // Invite code: match an onboarded company first (multi-tenant registrations
+  // store one invite code per company admin row).
+  const inv = String(inviteCode || '').trim();
+  if (inv) {
+    const byInvite = db.prepare(`SELECT id, name, department FROM users
+      WHERE role='admin' AND emp_id != 'ADMIN' AND approved >= 0 AND invite_code IS NOT NULL AND upper(invite_code) = upper(?)
+      ORDER BY (company_id IS NULL) DESC, approved DESC, id ASC LIMIT 1`).get(inv);
+    if (byInvite) {
+      return res.json({ exists: true, name: byInvite.department || byInvite.name || 'Your Company', company_id: Number(byInvite.id), places: companyPlaces(byInvite.id) });
+    }
+    if (company.inviteCode && inv.toUpperCase() === String(company.inviteCode).trim().toUpperCase()) {
+      return res.json({ exists: true, name: company.name || 'Your Company' });
+    }
   }
-  if (d && cfgDomain && d === cfgDomain) {
-    return res.json({ exists: true, name: company.name || 'Your Company' });
+  // Domain: match an onboarded company's registered domain. Returning its
+  // registered places lets the employee app offer the company's State > City >
+  // Location options at sign-up.
+  if (d) {
+    const byDomain = companyByDomain(d);
+    if (byDomain) {
+      // Admin rows keep the company name in `department`; `name` is the admin's
+      // own name — never surface that as the company.
+      return res.json({ exists: true, name: byDomain.department || byDomain.name || 'Your Company', company_id: Number(byDomain.id), places: companyPlaces(byDomain.id) });
+    }
+    if (cfgDomain && d === cfgDomain) {
+      return res.json({ exists: true, name: company.name || 'Your Company' });
+    }
   }
   // Open platform: any employee or driver email may register. The real gate
   // is admin approval - new accounts cannot sign in until an admin approves them.

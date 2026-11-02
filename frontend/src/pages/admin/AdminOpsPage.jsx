@@ -3,7 +3,7 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
-import { Plus, MapPin, Key, RefreshCw, X, Copy, Check, Building2, MapPinned, Trash2 } from 'lucide-react';
+import { Plus, MapPin, Key, RefreshCw, X, Copy, Check, Building2, MapPinned, Trash2, Pencil } from 'lucide-react';
 import AddressPicker from '../../components/AddressPicker';
 import ViewOnMapLink from '../../components/ViewOnMapLink';
 
@@ -60,6 +60,55 @@ export default function AdminOpsPage() {
     try { await api.del('/api/admin/addresses/' + a.id + '?company_id=' + companyId); loadLocations(); } catch (e) { toast(e.message, 'err'); }
   }
 
+  // ---- Add state / city / location (post-registration place creation) ----
+  const PLACE_NEW = '__new';
+  const [placeModal, setPlaceModal] = useState(false);
+  const [placeBusy, setPlaceBusy] = useState(false);
+  const [place, setPlace] = useState({ stateId: '', newState: '', cityId: '', newCity: '', name: '', address: '', lat: null, lng: null, code: '' });
+  function openPlace() {
+    setPlace({ stateId: '', newState: '', cityId: '', newCity: '', name: '', address: '', lat: null, lng: null, code: '' });
+    setPlaceModal(true);
+  }
+  async function savePlace() {
+    const isNewState = place.stateId === PLACE_NEW;
+    const stateName = isNewState ? place.newState.trim() : (locData.states.find((s) => String(s.id) === String(place.stateId))?.name || '');
+    if (!stateName) { toast('Pick an existing state or enter a new one.', 'err'); return; }
+    const isNewCity = place.cityId === PLACE_NEW;
+    const cityName = isNewCity ? place.newCity.trim() : (locData.cities.find((c) => String(c.id) === String(place.cityId))?.name || '');
+    if (!cityName) { toast('Pick an existing city or enter a new one.', 'err'); return; }
+    if (!place.name.trim()) { toast('Enter the location name.', 'err'); return; }
+    setPlaceBusy(true);
+    try {
+      let stateId = Number(place.stateId);
+      if (isNewState) {
+        const r = await api.post('/api/admin/locations/states', { name: stateName, company_id: companyId });
+        stateId = r.id;
+      }
+      let cityId = Number(place.cityId);
+      if (isNewCity) {
+        const r = await api.post('/api/admin/locations/cities', { state_id: stateId, name: cityName, company_id: companyId });
+        cityId = r.id;
+      }
+      const r = await api.post('/api/admin/locations/locations', {
+        city_id: cityId,
+        name: place.name.trim(),
+        company_id: companyId,
+        ...(place.address ? { address: place.address } : {}),
+        ...(place.lat != null && place.lng != null ? { lat: place.lat, lng: place.lng } : {}),
+        ...(place.code ? { code: place.code } : {})
+      });
+      setPlaceModal(false);
+      toast(r.code ? `Location added. Invite code: ${r.code}` : 'Location added.');
+      await loadLocations();
+      await loadCodes();
+    } catch (e) { toast(e.message, 'err'); }
+    finally { setPlaceBusy(false); }
+  }
+  async function removeCode(c) {
+    if (!window.confirm('Permanently remove this location code? It cannot be recovered.')) return;
+    try { await api.del('/api/admin/location-codes/' + c.id + '?company_id=' + companyId); toast('Code removed'); loadCodes(); } catch (e) { toast(e.message, 'err'); }
+  }
+
   // ---- Location codes ----
   const [codes, setCodes] = useState([]);
   const [codeModal, setCodeModal] = useState(false);
@@ -107,10 +156,13 @@ export default function AdminOpsPage() {
               {locData.states.length} states · {locData.cities.length} cities · {locData.locations.length} locations · {locData.addresses.length} addresses
             </p>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={openAdd}><Plus size={14} /> Add address</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm btn-outline" onClick={openPlace}><MapPinned size={14} /> Add state / city / location</button>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}><Plus size={14} /> Add address</button>
+          </div>
         </div>
         {locData.locations.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--muted)' }}>No locations yet. Add a company through the registration form to seed states, cities and locations.</p>
+          <p style={{ fontSize: 13, color: 'var(--muted)' }}>No locations yet. Use <b>Add state / city / location</b> above to create your company's first place.</p>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
             {locData.locations.map((l) => {
@@ -169,7 +221,7 @@ export default function AdminOpsPage() {
         ) : (
           <div style={{ display: 'grid', gap: 6 }}>
             {codes.map((c) => (
-              <CodeRow key={c.id} c={c} onRevoke={() => revokeCode(c)} />
+              <CodeRow key={c.id} c={c} onRevoke={() => revokeCode(c)} onDelete={() => removeCode(c)} />
             ))}
           </div>
         )}
@@ -237,6 +289,91 @@ export default function AdminOpsPage() {
         </div>
       </Modal>
 
+      {/* Add state / city / location modal */}
+      <Modal open={placeModal} onClose={() => setPlaceModal(false)} title="Add state / city / location">
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>State</label>
+            <select
+              value={place.stateId}
+              onChange={(e) => setPlace({ ...place, stateId: e.target.value, cityId: '' })}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8 }}
+            >
+              <option value="">{locData.states.length ? 'Select a state…' : 'No states yet — add one below'}</option>
+              {locData.states.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value={PLACE_NEW}>＋ New state…</option>
+            </select>
+            {place.stateId === PLACE_NEW && (
+              <input
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, marginTop: 6 }}
+                value={place.newState}
+                onChange={(e) => setPlace({ ...place, newState: e.target.value })}
+                placeholder="e.g. Karnataka"
+              />
+            )}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>City</label>
+            <select
+              disabled={!place.stateId}
+              value={place.cityId}
+              onChange={(e) => setPlace({ ...place, cityId: e.target.value })}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8 }}
+            >
+              <option value="">{place.stateId ? 'Select a city…' : 'Pick a state first'}</option>
+              {(place.stateId && place.stateId !== PLACE_NEW
+                ? locData.cities.filter((c) => Number(c.state_id) === Number(place.stateId))
+                : []
+              ).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {place.stateId ? <option value={PLACE_NEW}>＋ New city…</option> : null}
+            </select>
+            {place.cityId === PLACE_NEW && (
+              <input
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, marginTop: 6 }}
+                value={place.newCity}
+                onChange={(e) => setPlace({ ...place, newCity: e.target.value })}
+                placeholder="e.g. Bengaluru"
+              />
+            )}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Location name</label>
+            <input
+              value={place.name}
+              onChange={(e) => setPlace({ ...place, name: e.target.value })}
+              placeholder="e.g. Bengaluru Location 1"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Address (optional — search or pick on the map)</label>
+            <AddressPicker
+              value={place.lat != null ? { address: place.address, lat: place.lat, lng: place.lng } : null}
+              onChange={(v) => setPlace({ ...place, address: v.address, lat: v.lat, lng: v.lng })}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Invite code (optional — auto-generated if blank)</label>
+            <input
+              value={place.code}
+              onChange={(e) => setPlace({ ...place, code: e.target.value.toUpperCase() })}
+              placeholder="e.g. BLR-HQ-2026"
+              maxLength={32}
+              autoComplete="off"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
+            A location code is issued automatically — it is the credential a location-scoped admin enters at login.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={() => setPlaceModal(false)}>Cancel</button>
+            <button className="btn btn-primary" disabled={placeBusy || !place.stateId || !place.cityId || !place.name.trim()} onClick={savePlace}>
+              {placeBusy ? 'Adding…' : 'Add location'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Code modal */}
       <Modal open={codeModal} onClose={() => setCodeModal(false)} title="Issue / regenerate location code">
         <div style={{ display: 'grid', gap: 10 }}>
@@ -273,7 +410,7 @@ export default function AdminOpsPage() {
   );
 }
 
-function CodeRow({ c, onRevoke }) {
+function CodeRow({ c, onRevoke, onDelete }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try { await navigator.clipboard.writeText(c.code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch (e) {}
@@ -289,10 +426,7 @@ function CodeRow({ c, onRevoke }) {
       <span style={{ fontSize: 11, color: c.status === 'active' ? '#10b981' : '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>{c.status}</span>
       <button className="btn btn-sm btn-ghost" onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>
       {c.status === 'active' && <button className="btn btn-sm btn-ghost" onClick={onRevoke}>Revoke</button>}
-      <button className="btn btn-sm btn-ghost" style={{ color: '#dc2626' }} onClick={() => {
-        if (!window.confirm('Permanently remove this location code? It cannot be recovered.')) return;
-        api.del('/api/admin/location-codes/' + c.id + '?company_id=' + companyId).then(() => { toast('Code removed'); loadCodes(); }).catch((e) => toast(e.message, 'err'));
-      }}>Remove</button>
+      <button className="btn btn-sm btn-ghost" style={{ color: '#dc2626' }} onClick={onDelete}>Remove</button>
     </div>
   );
 }
