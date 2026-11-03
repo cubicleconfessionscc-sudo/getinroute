@@ -371,9 +371,13 @@ Write-Host "[4/4] verifying $apkName before publish ..." -ForegroundColor Green
 $verify = Join-Path $root 'scripts\verify-apk.ps1'
 if (Test-Path -LiteralPath $verify) {
   $apkOut = Join-Path $out $apkName
-  $vlog = & $verify -File $apkOut -ExpectPackage $meta.package -ExpectVersionCode $meta.versionCode 2>&1 | Out-String
+  # verify-apk.ps1 reports via Write-Host (the information stream), which a
+  # plain 2>&1 does NOT capture - $vlog came out empty and every passing build
+  # was thrown away as a failure. `*>&1` merges all streams.
+  $vlog = & $verify -File $apkOut -ExpectPackage $meta.package -ExpectVersionCode $meta.versionCode *>&1 | Out-String
+  $vcode = $LASTEXITCODE
   Write-Host $vlog
-  if ($vlog -notmatch 'ALL CHECKS PASSED') { throw "verify-apk.ps1 did not pass - artifact not publishable (see output above)" }
+  if ($vcode -ne 0 -or $vlog -notmatch 'ALL CHECKS PASSED') { throw "verify-apk.ps1 did not pass (exit $vcode) - artifact not publishable (see output above)" }
 } else {
   Write-Host "      (verify-apk.ps1 not found - skipping)" -ForegroundColor Yellow
 }
