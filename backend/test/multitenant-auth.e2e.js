@@ -277,6 +277,24 @@ async function main() {
   check('approved employee keeps the office location chosen at sign-up',
     deviLogin.status === 200 && Number(deviLogin.json?.user?.company_location_id) === Number(places.json?.locations?.[0]?.id), deviLogin);
 
+  // Settings → Company Address reads /api/admin/locations. The freshly onboarded
+  // primary admin (users.company_id IS NULL) must see the registered places and
+  // be able to extend them without the owner-only Company Operations page.
+  const locsC = await get('/api/admin/locations', tokC);
+  check('primary admin sees the registered places for Settings',
+    Array.isArray(locsC.json?.locations) && locsC.json.locations.length === 1
+      && locsC.json.locations[0].name === 'Northwind HQ'
+      && locsC.json.locations[0].address === '1 MG Road'
+      && Array.isArray(locsC.json.states) && locsC.json.states.some((s) => s.name === 'Karnataka')
+      && Array.isArray(locsC.json.cities) && locsC.json.cities.some((c) => c.name === 'Bengaluru'), locsC);
+  const cityC = (locsC.json?.cities || []).find((c) => c.name === 'Bengaluru');
+  const addC = await post('/api/admin/locations/locations', { city_id: cityC?.id, name: 'Northwind Annex' }, tokC);
+  check('admin can add another location from Settings', addC.status === 200 && !!addC.json?.id && !!addC.json?.code, addC);
+  const locsC2 = await get('/api/admin/locations', tokC);
+  check('added location appears immediately for the admin',
+    Array.isArray(locsC2.json?.locations) && locsC2.json.locations.length === 2
+      && locsC2.json.locations.some((l) => l.name === 'Northwind Annex'), locsC2);
+
   server.kill();
   console.log(`\nMULTITENANT AUTH E2E: ${passed} passed, ${failed} failed`);
   if (failed > 0) { console.log('--- server log tail ---\n' + out.split('\n').slice(-40).join('\n')); process.exit(1); }

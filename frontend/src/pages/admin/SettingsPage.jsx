@@ -5,10 +5,16 @@ import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
 import { Plus, Pencil, MapPin, Building2, Clock, Bus, Shield, Bell, MapPinned, X, Lock, Key, Copy, Smartphone, AlertTriangle, MessageCircle, ShieldAlert, HelpCircle, Trash2, Search, Palette } from 'lucide-react';
 import ThemePicker from '../../components/ThemePicker';
+import AddressPicker from '../../components/AddressPicker';
 import ViewOnMapLink from '../../components/ViewOnMapLink';
 import { MAP_LOCATION_RESULT_KEY } from '../shared/LocationPickerPage';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// Add state/city/location modal (post-registration place creation).
+const PLACE_NEW = '__new';
+const BLANK_PLACE = { stateId: '', newState: '', cityId: '', newCity: '', name: '', address: '', lat: null, lng: null, code: '' };
+const ROW_STYLE = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--line)' };
 
 export default function SettingsPage() {
   const toast = useToast();
@@ -20,6 +26,10 @@ export default function SettingsPage() {
   const [npModal, setNpModal] = useState(false);
   const [npEdit, setNpEdit] = useState(null);
   const [npForm, setNpForm] = useState({ label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000 });
+  const [locData, setLocData] = useState({ states: [], cities: [], locations: [] });
+  const [placeModal, setPlaceModal] = useState(false);
+  const [placeBusy, setPlaceBusy] = useState(false);
+  const [place, setPlace] = useState(BLANK_PLACE);
   const [pwdForm, setPwdForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [inviteDraft, setInviteDraft] = useState('');
   useEffect(() => {
@@ -57,7 +67,17 @@ export default function SettingsPage() {
       : api.get('/api/admin/settings');
     loadSettings.then((data) => { setS({ ...DEFAULT_S, ...data }); setLoading(false); }).catch(() => { setS(DEFAULT_S); setLoading(false); });
   };
-  useEffect(() => { load(); }, [user?.id, user?.role]);
+  // The company's registered State > City > Location places (created during
+  // registration or added later) — shown alongside the nodal address points so
+  // an admin sees every company location right after signing in.
+  const loadLocations = () => {
+    if (user?.role === 'vendor') return;
+    const companyId = user?.company_id || user?.id;
+    api.get('/api/admin/locations', companyId != null ? { company_id: companyId } : undefined)
+      .then((d) => setLocData({ states: d?.states || [], cities: d?.cities || [], locations: d?.locations || [] }))
+      .catch(() => {});
+  };
+  useEffect(() => { load(); loadLocations(); }, [user?.id, user?.role]);
 
   useEffect(() => {
     const onMessage = (event) => {
@@ -77,7 +97,20 @@ export default function SettingsPage() {
         if (result && draft.returnToken === result.returnToken) {
           mapReturnToken.current = result.returnToken;
           setNpEdit(draft.npEdit || null);
-          setNpForm({ ...draft.npForm, address: result.address, lat: result.lat, lng: result.lng, place_id: result.place_id || '' });
+          // Rebuild the form from known-good types: a stale/garbage draft must
+          // never be able to crash the modal render (ErrorBoundary).
+          const d = draft.npForm && typeof draft.npForm === 'object' ? draft.npForm : {};
+          const radius = Number(d.radiusMeters);
+          setNpForm({
+            label: typeof d.label === 'string' ? d.label : '',
+            address: typeof result.address === 'string' ? result.address : '',
+            lat: result.lat ?? null,
+            lng: result.lng ?? null,
+            place_id: typeof result.place_id === 'string' ? result.place_id : '',
+            type: typeof d.type === 'string' ? d.type : 'office',
+            radiusMeters: Number.isFinite(radius) && radius > 0 ? radius : 1000,
+            company_location_id: d.company_location_id ?? user?.company_location_id ?? null
+          });
           setNpModal(true);
           sessionStorage.removeItem(MAP_LOCATION_RESULT_KEY);
           sessionStorage.removeItem('nodal-map-draft');
@@ -96,15 +129,16 @@ export default function SettingsPage() {
     if (npForm.address) q.set('address', npForm.address);
     if (npForm.place_id) q.set('place_id', npForm.place_id);
     const url = `/admin/map-picker?${q.toString()}`;
+    const saveDraft = () => { try { sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: token, npEdit, npForm })); } catch { /* private/locked-down browsers */ } };
     // Web opens a separate tab; embedded webviews fall back to same-tab routing.
     if (window.ReactNativeWebView) {
-      sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: token, npEdit, npForm }));
+      saveDraft();
       window.location.assign(url);
       return;
     }
     const popup = window.open(url, '_blank');
     if (!popup) {
-      sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: token, npEdit, npForm }));
+      saveDraft();
       window.location.assign(url);
     }
   };
@@ -138,6 +172,9 @@ export default function SettingsPage() {
 
   const company = s.company || {};
   const nodalPoints = Array.isArray(company.nodalPoints) ? company.nodalPoints : [];
+  const regLocations = Array.isArray(locData.locations) ? locData.locations : [];
+  const stateName = (id) => locData.states.find((x) => Number(x.id) === Number(id))?.name || '';
+  const cityName = (id) => locData.cities.find((x) => Number(x.id) === Number(id))?.name || '';
   const vt = Array.isArray(s.vehicleTypes) ? s.vehicleTypes : [];
   const lt = Array.isArray(s.loginTimes) ? s.loginTimes : [];
   const ot = Array.isArray(s.logoutTimes) ? s.logoutTimes : [];
@@ -156,6 +193,44 @@ export default function SettingsPage() {
       setNpModal(false);
       load();
     } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // ---- Add state / city / location (extend the company's registered places) ----
+  const openPlace = () => { setPlace(BLANK_PLACE); setPlaceModal(true); };
+  const savePlace = async () => {
+    const isNewState = place.stateId === PLACE_NEW;
+    const stateName = isNewState ? place.newState.trim() : (locData.states.find((s) => String(s.id) === String(place.stateId))?.name || '');
+    if (!stateName) { toast('Pick an existing state or enter a new one.', 'err'); return; }
+    const isNewCity = place.cityId === PLACE_NEW;
+    const cityName = isNewCity ? place.newCity.trim() : (locData.cities.find((c) => String(c.id) === String(place.cityId))?.name || '');
+    if (!cityName) { toast('Pick an existing city or enter a new one.', 'err'); return; }
+    if (!place.name.trim()) { toast('Enter the location name.', 'err'); return; }
+    const companyId = user?.company_id || user?.id;
+    setPlaceBusy(true);
+    try {
+      let stateId = Number(place.stateId);
+      if (isNewState) {
+        const r = await api.post('/api/admin/locations/states', { name: stateName, company_id: companyId });
+        stateId = r.id;
+      }
+      let cityId = Number(place.cityId);
+      if (isNewCity) {
+        const r = await api.post('/api/admin/locations/cities', { state_id: stateId, name: cityName, company_id: companyId });
+        cityId = r.id;
+      }
+      const r = await api.post('/api/admin/locations/locations', {
+        city_id: cityId,
+        name: place.name.trim(),
+        company_id: companyId,
+        ...(place.address ? { address: place.address } : {}),
+        ...(place.lat != null && place.lng != null ? { lat: place.lat, lng: place.lng } : {}),
+        ...(place.code ? { code: place.code } : {})
+      });
+      setPlaceModal(false);
+      toast(r.code ? `Location added. Invite code: ${r.code}` : 'Location added.', 'ok');
+      loadLocations();
+    } catch (e) { toast(e.message, 'err'); }
+    finally { setPlaceBusy(false); }
   };
 
   // Vendor portal uses this shared Settings component but only owns its scoped
@@ -431,18 +506,37 @@ export default function SettingsPage() {
         </Field>
       </Section>
 
-      <Section icon={<MapPinned size={16} />} title={`Company Address (${nodalPoints.length})`}
+      <Section icon={<MapPinned size={16} />} title={`Company Address (${regLocations.length + nodalPoints.length})`}
         action={
-          <button className="btn btn-sm btn-primary" onClick={() => { setNpEdit(null); setNpForm({ label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000, company_location_id: user?.company_location_id ?? null }); setNpModal(true); }}>
-            <Plus size={14} /> Add Point
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm btn-outline" data-testid="add-location" onClick={openPlace}><Building2 size={14} /> Add location</button>
+            <button className="btn btn-sm btn-primary" onClick={() => { setNpEdit(null); setNpForm({ label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000, company_location_id: user?.company_location_id ?? null }); setNpModal(true); }}>
+              <Plus size={14} /> Add Point
+            </button>
+          </div>
         }>
-        {nodalPoints.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--muted)', padding: '12px 0' }}>No company addresses configured. Add your office locations.</div>
+        {regLocations.length === 0 && nodalPoints.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--muted)', padding: '12px 0' }}>No company addresses configured yet. Your registered locations and office points will appear here — or add one now.</div>
         ) : (
           <div style={{ display: 'grid', gap: 10 }}>
+            {regLocations.map((l) => (
+              <div key={`loc-${l.id}`} data-testid="registered-location" style={ROW_STYLE}>
+                <Building2 size={16} color="var(--primary)" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{l.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {[stateName(l.state_id), cityName(l.city_id)].filter(Boolean).join(' · ')}
+                    {l.address ? ` — ${l.address}` : ''}
+                  </div>
+                </div>
+                <ViewOnMapLink lat={l.lat} lng={l.lng} address={l.address} label="View on Google Maps" />
+              </div>
+            ))}
+            {regLocations.length > 0 && nodalPoints.length > 0 && (
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginTop: 4 }}>Address points</div>
+            )}
             {nodalPoints.map((np) => (
-              <div key={np._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--line)' }}>
+              <div key={np._id} style={ROW_STYLE}>
                 <MapPin size={16} color="var(--primary)" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{np.label}</div>
@@ -530,6 +624,97 @@ export default function SettingsPage() {
       )}
 
       <NodalPointModal open={npModal} onClose={() => setNpModal(false)} npEdit={npEdit} npForm={npForm} setNpForm={setNpForm} onMap={openMapPicker} onSave={saveNodalPoint} />
+
+      {/* Add state / city / location — extend the company's registered places */}
+      <Modal open={placeModal} onClose={() => setPlaceModal(false)} title="Add company location">
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>State</label>
+            <select
+              data-testid="place-state"
+              value={place.stateId}
+              onChange={(e) => setPlace({ ...place, stateId: e.target.value, cityId: '' })}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8 }}
+            >
+              <option value="">{locData.states.length ? 'Select a state…' : 'No states yet — add one below'}</option>
+              {locData.states.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value={PLACE_NEW}>＋ New state…</option>
+            </select>
+            {place.stateId === PLACE_NEW && (
+              <input
+                data-testid="place-new-state"
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, marginTop: 6 }}
+                value={place.newState}
+                onChange={(e) => setPlace({ ...place, newState: e.target.value })}
+                placeholder="e.g. Karnataka"
+              />
+            )}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>City</label>
+            <select
+              data-testid="place-city"
+              disabled={!place.stateId}
+              value={place.cityId}
+              onChange={(e) => setPlace({ ...place, cityId: e.target.value })}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8 }}
+            >
+              <option value="">{place.stateId ? 'Select a city…' : 'Pick a state first'}</option>
+              {(place.stateId && place.stateId !== PLACE_NEW
+                ? locData.cities.filter((c) => Number(c.state_id) === Number(place.stateId))
+                : []
+              ).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {place.stateId ? <option value={PLACE_NEW}>＋ New city…</option> : null}
+            </select>
+            {place.cityId === PLACE_NEW && (
+              <input
+                data-testid="place-new-city"
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, marginTop: 6 }}
+                value={place.newCity}
+                onChange={(e) => setPlace({ ...place, newCity: e.target.value })}
+                placeholder="e.g. Bengaluru"
+              />
+            )}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Location name</label>
+            <input
+              data-testid="place-name"
+              value={place.name}
+              onChange={(e) => setPlace({ ...place, name: e.target.value })}
+              placeholder="e.g. Bengaluru Location 1"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Address (optional — search or pick on the map)</label>
+            <AddressPicker
+              value={place.lat != null ? { address: place.address, lat: place.lat, lng: place.lng } : null}
+              onChange={(v) => setPlace({ ...place, address: v.address, lat: v.lat, lng: v.lng })}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Invite code (optional — auto-generated if blank)</label>
+            <input
+              data-testid="place-code"
+              value={place.code}
+              onChange={(e) => setPlace({ ...place, code: e.target.value.toUpperCase() })}
+              placeholder="e.g. BLR-HQ-2026"
+              maxLength={32}
+              autoComplete="off"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
+            A location code is issued automatically — it is the credential a location-scoped admin enters at login. New locations appear for your employees in the app immediately.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={() => setPlaceModal(false)}>Cancel</button>
+            <button className="btn btn-primary" data-testid="place-save" disabled={placeBusy || !place.stateId || !place.cityId || !place.name.trim()} onClick={savePlace}>
+              {placeBusy ? 'Adding…' : 'Add location'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
