@@ -101,11 +101,15 @@ export default function SettingsPage() {
           // never be able to crash the modal render (ErrorBoundary).
           const d = draft.npForm && typeof draft.npForm === 'object' ? draft.npForm : {};
           const radius = Number(d.radiusMeters);
+          // Coordinates are coerced: a draft left by an older build may carry
+          // strings/NaN, which must degrade to "no point picked" instead of
+          // leaking into the map link / save payload.
+          const coord = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
           setNpForm({
             label: typeof d.label === 'string' ? d.label : '',
             address: typeof result.address === 'string' ? result.address : '',
-            lat: result.lat ?? null,
-            lng: result.lng ?? null,
+            lat: coord(result.lat),
+            lng: coord(result.lng),
             place_id: typeof result.place_id === 'string' ? result.place_id : '',
             type: typeof d.type === 'string' ? d.type : 'office',
             radiusMeters: Number.isFinite(radius) && radius > 0 ? radius : 1000,

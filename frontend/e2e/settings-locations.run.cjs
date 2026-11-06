@@ -36,13 +36,19 @@ function seed() {
   const db = require(path.join(BACKEND, 'db'));
   const hash = bcrypt.hashSync('SetLoc@12345', 4);
   // Fresh-registration shape: primary company admin with company_id = NULL.
-  const companyId = Number(db.prepare(`INSERT INTO users (role,emp_id,email,name,password_hash,approved,status,vertical)
-    VALUES ('admin','CO-SL','settings.admin@test','Settings Admin',?,1,'active','company')`).run(hash).lastInsertRowid);
+  const companyId = Number(db.prepare(`INSERT INTO users (role,emp_id,email,name,password_hash,approved,status,vertical,company_domain)
+    VALUES ('admin','CO-SL','settings.admin@test','Settings Admin',?,1,'active','company','sagility.test')`).run(hash).lastInsertRowid);
   const stateId = Number(db.prepare('INSERT INTO company_states(company_id,name) VALUES (?,?)').run(companyId, 'Karnataka').lastInsertRowid);
   const cityId = Number(db.prepare('INSERT INTO company_cities(company_id,state_id,name) VALUES (?,?,?)').run(companyId, stateId, 'Bangalore').lastInsertRowid);
-  const locId = Number(db.prepare('INSERT INTO company_locations(company_id,state_id,name,city_id,address) VALUES (?,?,?,?,?)').run(companyId, stateId, 'Main Location', cityId, 'MG Road, Bangalore').lastInsertRowid);
+  // Coordinates present, exactly like places registered through the wizard's map picker.
+  const locId = Number(db.prepare('INSERT INTO company_locations(company_id,state_id,name,city_id,address,lat,lng) VALUES (?,?,?,?,?,?,?)')
+    .run(companyId, stateId, 'Main Location', cityId, 'MG Road, Bangalore', 12.9716, 77.5946).lastInsertRowid);
+  // Per-location admin created by the same registration (company_id = primary id,
+  // bound to one operational location) — the second reported account shape.
+  const locAdminId = Number(db.prepare(`INSERT INTO users (role,emp_id,email,name,password_hash,approved,status,vertical,company_id,company_location_id)
+    VALUES ('admin','CO-SL-LA','loc.admin@test','Location Admin',?,1,'active','company',?,?)`).run(hash, companyId, locId).lastInsertRowid);
   db.close();
-  return { companyId, locId, stateId, cityId };
+  return { companyId, locId, stateId, cityId, locAdminId };
 }
 
 async function mockGeo(ctx) {
@@ -60,15 +66,22 @@ async function mockGeo(ctx) {
   }));
 }
 
-async function login(page) {
+async function login(page, opts = {}) {
+  const id = opts.id || 'settings.admin@test';
+  const pw = opts.pw || 'SetLoc@12345';
+  // pickLocation=false leaves "All locations (company-wide)" selected — the
+  // way a location-scoped admin signs in without re-presenting their code.
+  const pickLocation = opts.pickLocation !== false;
   await page.goto(`${base}/admin/login`);
-  await page.fill('[data-testid=admin-id]', 'settings.admin@test');
+  await page.fill('[data-testid=admin-id]', id);
   await page.click('[data-testid=continue]');
-  await page.waitForSelector('[data-testid=location]');
-  await page.selectOption('[data-testid=state]', { label: 'Karnataka' });
-  await page.selectOption('[data-testid=city]', { label: 'Bangalore' });
-  await page.selectOption('[data-testid=location]', { label: 'Main Location' });
-  await page.fill('[data-testid=password]', 'SetLoc@12345');
+  if (pickLocation) {
+    await page.waitForSelector('[data-testid=location]');
+    await page.selectOption('[data-testid=state]', { label: 'Karnataka' });
+    await page.selectOption('[data-testid=city]', { label: 'Bangalore' });
+    await page.selectOption('[data-testid=location]', { label: 'Main Location' });
+  }
+  await page.fill('[data-testid=password]', pw);
   await page.click('[data-testid=signin]');
   await page.waitForURL('**/admin', { timeout: 10000 });
 }
@@ -91,8 +104,16 @@ async function main() {
     page.on('pageerror', (e) => pageErrors.push(String(e)));
 
     await login(page);
+    // Leftover map-picker draft from an OLDER build (the exact shape that used
+    // to blow up the Add Point modal with the ErrorBoundary). The token does
+    // not match, so it must be ignored — and it must never crash the page.
+    await page.evaluate(() => {
+      sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: 'stale-token', npEdit: 7, npForm: 'garbage-not-an-object' }));
+      sessionStorage.setItem('map-location-result', JSON.stringify({ returnToken: 'other-token', address: 123, lat: 'abc', lng: null, place_id: 42 }));
+    });
     await page.goto(`${base}/admin/settings`);
     await page.waitForSelector('[data-testid=add-location]', { timeout: 10000 });
+    check('stale map-picker draft does not crash Settings', await noErrorBoundary(page));
 
     // ---------- 1) registered places are visible right after login ----------
     const regRows = page.locator('[data-testid=registered-location]');
@@ -140,6 +161,57 @@ async function main() {
     check('nodal point saved and listed', await page.getByText('Head Office', { exact: true }).count() > 0);
     check('section count now (3) = 2 registered + 1 nodal', await page.getByText('Company Address (3)', { exact: true }).count() > 0);
     check('no ErrorBoundary anywhere in the Add Point flow', await noErrorBoundary(page));
+
+    // ---------- 4) stale draft with a MATCHING token (the crash class) -------
+    // The restore path must rebuild a clean, well-typed form instead of
+    // trusting whatever an older build left behind.
+    await page.evaluate(() => {
+      sessionStorage.setItem('nodal-map-draft', JSON.stringify({ returnToken: 'match-token', npEdit: 'nope', npForm: 'garbage-not-an-object' }));
+      sessionStorage.setItem('map-location-result', JSON.stringify({ returnToken: 'match-token', address: 999, lat: 'oops', place_id: 7 }));
+    });
+    await page.reload();
+    await page.waitForSelector('[data-testid=address-label]', { timeout: 10000 });
+    const restored = await page.evaluate(() => ({
+      label: document.querySelector('[data-testid=address-label]')?.value,
+      radius: document.querySelector('[data-testid=address-radius]')?.value,
+      address: document.querySelector('[data-testid=address-formatted]')?.value,
+      viewMap: document.querySelectorAll('[data-testid=address-view-map]').length
+    }));
+    check('matching stale draft restores a clean, typed form',
+      restored.label === '' && restored.radius === '1000' && restored.address === '' && restored.viewMap === 0, restored);
+    check('restored modal renders without ErrorBoundary', await noErrorBoundary(page));
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    // ---------- 5) employee app feed: every registered place -----------------
+    const emp = await page.evaluate(async () => {
+      const r = await fetch('/api/auth/employee-locations', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ identifier: 'worker@sagility.test' })
+      });
+      return r.json();
+    });
+    check('employee app receives every company location',
+      !!emp.company && emp.locations.length === 2
+      && emp.locations.some((l) => l.name === 'Main Location')
+      && emp.locations.some((l) => l.name === 'Second Office'),
+      { company: emp.company, locs: (emp.locations || []).map((l) => l.name) });
+
+    // ---------- 6) location-scoped admin sees the same places ---------------
+    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    await login(page, { id: 'loc.admin@test', pickLocation: false });
+    await page.goto(`${base}/admin/settings`);
+    await page.waitForSelector('[data-testid=add-location]', { timeout: 10000 });
+    const laRows = page.locator('[data-testid=registered-location]');
+    check('location-scoped admin sees the registered places',
+      await laRows.count() >= 1 && (await laRows.first().innerText()).includes('Main Location'),
+      await laRows.count());
+    check('location-scoped admin section counts registered + nodal',
+      await page.getByText('Company Address (3)', { exact: true }).count() > 0);
+    await page.getByRole('button', { name: /Add Point/i }).click();
+    await page.waitForSelector('[data-testid=address-label]');
+    check('location-scoped admin: Add Point opens without ErrorBoundary', await noErrorBoundary(page));
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
     check('no uncaught page errors', pageErrors.length === 0, pageErrors);
 
     await ctx.close();

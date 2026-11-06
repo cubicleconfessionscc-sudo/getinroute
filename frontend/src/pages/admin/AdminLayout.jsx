@@ -160,6 +160,42 @@ export default function AdminLayout() {
       .catch(() => setFlags(null));
   }, [user?.id]);
 
+  // ---- Stale-tab guard -------------------------------------------------
+  // The portal is a single-page app: a tab left open across a deploy keeps
+  // running the OLD bundle (old features, old bugs) until it is reloaded,
+  // which is exactly how "deployed but you still see the old behaviour"
+  // happens. Identify THIS tab's running entry bundle and compare it with
+  // the entry bundle the server is serving right now; offer a one-click
+  // refresh the moment they differ. The probe URL carries a cache-busting
+  // query (so a service-worker cache-first branch can never answer with
+  // stale HTML) and the HTML response is no-store on the server anyway.
+  const [updateReady, setUpdateReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const runningEntry = (() => {
+      for (const s of document.scripts) {
+        if (!s.src) continue;
+        const p = new URL(s.src, location.href).pathname;
+        if (/\/assets\/index-[\w-]+\.js$/.test(p)) return p;
+      }
+      return null;
+    })();
+    if (!runningEntry) return undefined;
+    const check = () => fetch(`/admin/index.html?_gir_build=${Date.now()}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.text() : ''))
+      .then((html) => {
+        if (!alive || !html) return;
+        const live = html.match(/\/assets\/index-[\w-]+\.js/);
+        if (live && live[0] !== runningEntry) setUpdateReady(true);
+      })
+      .catch(() => { /* offline / transient — keep the session going */ });
+    check();
+    const iv = setInterval(check, 60000);
+    const onVis = () => { if (!document.hidden) check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
+
   useInterval(() => {
     api.get('/api/admin/stats').then((s) => setUnread(Number(s?.unread_notifications) || 0)).catch(() => {});
   }, 20000);
@@ -190,6 +226,13 @@ export default function AdminLayout() {
 
   return (
     <div className="shell">
+      {updateReady && (
+        <div data-testid="app-update-banner" role="status"
+          style={{ position: 'fixed', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 3000, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 10px 30px rgba(15,23,42,.18)', fontSize: 13, color: 'var(--text)' }}>
+          <span>A new version of GetInRoute is ready.</span>
+          <button className="btn btn-primary btn-sm" onClick={() => window.location.reload()}>Refresh now</button>
+        </div>
+      )}
       <div className={`sidebar-overlay ${open ? 'open' : ''}`} />
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <div className="brand">

@@ -688,6 +688,12 @@ try { db.exec(`ALTER TABLE users ADD COLUMN company_id INTEGER;`); } catch (e) {
 (function migrateUsersRoles() {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
   if (!row || /student/.test(row.sql)) return;
+  // company_domain is ALTERed in before this rebuild runs (line ~321), so the
+  // explicit column list below would silently drop the column — and its data —
+  // on every brand-new database. Capture whether the old table has it so the
+  // copy preserves it; the post-rebuild ALTER re-adds it when it didn't exist.
+  const hadCompanyDomain = db.prepare('PRAGMA table_info(users)').all()
+    .some((c) => c.name === 'company_domain');
   db.exec('BEGIN;');
   try {
     db.exec('ALTER TABLE users RENAME TO users_old;');
@@ -726,12 +732,13 @@ try { db.exec(`ALTER TABLE users ADD COLUMN company_id INTEGER;`); } catch (e) {
         school_id INTEGER,
         company_id INTEGER,
         driver_verified INTEGER DEFAULT 0,
-        must_change_password INTEGER DEFAULT 0
+        must_change_password INTEGER DEFAULT 0,
+        company_domain TEXT
       );
     `);
     db.exec(`
-      INSERT INTO users (id, role, emp_id, email, name, phone, department, designation, password_hash, approved, status, lat, lng, last_update, vehicle_id, reset_token, reset_expiry, created_at, locked_until, last_login, login_count, home_address, home_lat, home_lng, pending_address, pending_lat, pending_lng, vendor_id, invite_code, vertical, school_id, company_id, driver_verified, must_change_password)
-      SELECT id, role, emp_id, email, name, phone, department, designation, password_hash, approved, status, lat, lng, last_update, vehicle_id, reset_token, reset_expiry, created_at, locked_until, last_login, login_count, home_address, home_lat, home_lng, pending_address, pending_lat, pending_lng, vendor_id, invite_code, COALESCE(vertical, 'company'), school_id, NULL, COALESCE(driver_verified, 0), 0
+      INSERT INTO users (id, role, emp_id, email, name, phone, department, designation, password_hash, approved, status, lat, lng, last_update, vehicle_id, reset_token, reset_expiry, created_at, locked_until, last_login, login_count, home_address, home_lat, home_lng, pending_address, pending_lat, pending_lng, vendor_id, invite_code, vertical, school_id, company_id, driver_verified, must_change_password, company_domain)
+      SELECT id, role, emp_id, email, name, phone, department, designation, password_hash, approved, status, lat, lng, last_update, vehicle_id, reset_token, reset_expiry, created_at, locked_until, last_login, login_count, home_address, home_lat, home_lng, pending_address, pending_lat, pending_lng, vendor_id, invite_code, COALESCE(vertical, 'company'), school_id, NULL, COALESCE(driver_verified, 0), 0, ${hadCompanyDomain ? 'company_domain' : 'NULL'}
       FROM users_old;
     `);
     db.exec('DROP TABLE users_old;');
