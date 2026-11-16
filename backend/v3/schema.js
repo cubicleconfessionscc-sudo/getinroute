@@ -896,9 +896,9 @@ function ensureDefaults(db) {
     // Company/admin/vendor portals may only use these features once the OWNER
     // turns them on (nav FlagGate + route FlagGate + server-side flagGate).
     // New keys always seed OFF. AI_COMMAND_CENTER and AI_TRANSPORT_MANAGER
-    // existed with a platform default of ON — rebase them to OFF exactly once,
-    // only while they still carry their seed value (updated_at IS NULL), so an
-    // owner's own toggle is never overwritten afterwards.
+    // shipped with a platform default of ON, so they are rebased to OFF exactly
+    // ONCE, recorded in platform_config.ownerGateRebased — afterwards an
+    // owner's own toggle is never touched by a restart.
     const ownerGatedDefaults = [
       ['POLICY_ENGINE', 'Policy Engine (owner-gated for company/admin/vendor)'],
       ['BILLING_OPERATIONS', 'Billing Operations (owner-gated for company/admin/vendor)'],
@@ -908,8 +908,20 @@ function ensureDefaults(db) {
     ];
     for (const [k, d] of ownerGatedDefaults) ins.run(k, 0, d);
     try {
-      db.prepare(`UPDATE feature_flags SET enabled = 0, updated_at = ?
-        WHERE flag_key IN ('AI_COMMAND_CENTER','AI_TRANSPORT_MANAGER') AND updated_at IS NULL`).run(now());
+      const pcRow = db.prepare('SELECT data FROM platform_config WHERE id = 1').get();
+      let pc = {};
+      try { pc = pcRow && pcRow.data ? JSON.parse(pcRow.data) : {}; } catch (e) { pc = {}; }
+      if (!pc.ownerGateRebased) {
+        db.prepare(`UPDATE feature_flags SET enabled = 0, updated_at = ?
+          WHERE flag_key IN ('AI_COMMAND_CENTER','AI_TRANSPORT_MANAGER')`).run(now());
+        db.prepare(`UPDATE feature_flags SET description = ?
+          WHERE flag_key = 'AI_COMMAND_CENTER'`).run('AI command center enabled (owner-gated for company/admin/vendor)');
+        db.prepare(`UPDATE feature_flags SET description = ?
+          WHERE flag_key = 'AI_TRANSPORT_MANAGER'`).run('Natural-language transport manager enabled (owner-gated for company/admin/vendor)');
+        pc.ownerGateRebased = true;
+        db.prepare('UPDATE platform_config SET data = ?, updated_at = ? WHERE id = 1')
+          .run(JSON.stringify(pc), now());
+      }
     } catch (e) { console.error('[v3] owner-gate rebase failed:', e.message); }
     const plan = db.prepare('SELECT id FROM platform_subscription_plans WHERE is_current = 1').get();
     if (!plan) {
