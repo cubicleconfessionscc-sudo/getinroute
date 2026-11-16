@@ -27,6 +27,12 @@ function seed() {
   process.env.DB_PATH = DB_FILE;
   const db = require(path.join(BACKEND, 'db'));
   try { const { ensureSchema, ensureDefaults } = require(path.join(BACKEND, 'v3', 'schema')); ensureSchema(db); ensureDefaults(db); } catch (e) {}
+  // The Intelligence Center is owner-gated (INTELLIGENCE_CENTER seeds OFF) —
+  // this suite opts the flag ON explicitly, exactly like an owner would.
+  try {
+    db.prepare(`INSERT OR IGNORE INTO feature_flags (flag_key, enabled, rollout_pct, description) VALUES ('INTELLIGENCE_CENTER', 1, 100, NULL)`).run();
+    db.prepare(`UPDATE feature_flags SET enabled = 1 WHERE flag_key = 'INTELLIGENCE_CENTER'`).run();
+  } catch (e) {}
   const hash = bcrypt.hashSync('Intel@12345', 4);
   const ca = Number(db.prepare(`INSERT INTO users (role,emp_id,email,name,password_hash,approved,status,vertical) VALUES ('admin','CO-A','intel.admin@test','Intel Admin',?,1,'active','company')`).run(hash).lastInsertRowid);
   db.prepare('UPDATE users SET company_id=? WHERE id=?').run(ca, ca);

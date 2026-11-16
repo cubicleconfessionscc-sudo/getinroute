@@ -43,10 +43,14 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   const R = express.Router();
 
   /* ---- FEATURE FLAGS ---- */
+  // Read: any admin may VIEW the flag list (granted admins see status
+  // read-only). Write: OWNER ONLY — company/admin/vendor accounts can use a
+  // feature only when the owner turns it on, so nobody but the owner may
+  // flip a platform-wide default.
   R.get('/flags', auth, role('admin','owner'), (req, res) => {
     res.json(db.prepare('SELECT * FROM feature_flags ORDER BY flag_key').all());
   });
-  R.put('/flags/:key', auth, role('admin','owner'), (req, res) => {
+  R.put('/flags/:key', auth, role('admin','owner'), ownerOnly, (req, res) => {
     const { enabled, description } = req.body || {};
     db.prepare('UPDATE feature_flags SET enabled = ?, description = ?, updated_at = ? WHERE flag_key = ?')
       .run(enabled ? 1 : 0, description || null, now(), req.params.key);
@@ -65,12 +69,12 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.post('/subscription/company/:companyId/renew', auth, role('admin','owner'), (req, res) => res.json(sub.renew(req.params.companyId, req.user)));
   R.post('/subscription/company/:companyId/terminate', auth, role('admin','owner'), (req, res) => res.json(sub.terminate(req.params.companyId, req.user, req.ip, req.body.reason)));
 
-  /* ---- POLICIES ---- */
-  R.get('/policies', auth, role('admin'), (req, res) => {
+  /* ---- POLICIES (owner-gated: Policy Engine) ---- */
+  R.get('/policies', auth, role('admin'), core.flagGate('POLICY_ENGINE'), (req, res) => {
     res.json(db.prepare('SELECT * FROM policy_rules WHERE ((? || \'\') IS NULL OR company_id = ?) ORDER BY vertical, rule_key')
       .all(req.query.company_id || null, req.query.company_id || null));
   });
-  R.put('/policies', auth, role('admin'), (req, res) => {
+  R.put('/policies', auth, role('admin'), core.flagGate('POLICY_ENGINE'), (req, res) => {
     const { company_id, vertical, key, value, type, name } = req.body || {};
     core.upsertPolicy(company_id || null, vertical || 'company', key, value, type, name);
     res.json({ ok: true });
@@ -152,14 +156,15 @@ function mountV3({ app, db, io, auth, role, guard, ownerOnly }) {
   R.post('/documents/:kind/:ownerId', auth, (req, res) => res.json(ops.addDocument(req.params.kind, req.params.ownerId, req.body || {})));
   R.post('/documents/:kind/:docId/verify', auth, (req, res) => res.json(ops.verifyDocument(req.params.kind, req.params.docId, req.user.id, req.body.decision, req.body.reason)));
 
-  /* ---- BILLING ---- */
-  R.get('/billing/rates', auth, (req, res) => res.json(db.prepare('SELECT * FROM billing_rates WHERE ((? || \'\') IS NULL OR company_id = ?) ORDER BY rate_key').all(req.query.company_id || null, req.query.company_id || null)));
-  R.put('/billing/rates', auth, role('admin'), (req, res) => { billing.upsertRate(req.body); res.json({ ok: true }); });
-  R.post('/billing/record', auth, role('admin'), (req, res) => res.json(billing.createRecord({ ...req.body, createdBy: req.user && req.user.id })));
-  R.post('/billing/invoice', auth, role('admin'), (req, res) => res.json(billing.generateInvoice({ ...req.body, createdBy: req.user && req.user.id })));
-  R.post('/billing/adjust', auth, role('admin'), (req, res) => res.json(billing.adjust({ ...req.body, createdBy: req.user && req.user.id })));
-  R.post('/billing/reconcile', auth, role('admin'), (req, res) => res.json(billing.reconcile({ ...req.body, verifiedBy: req.user && req.user.id })));
-  R.get('/billing/list', auth, (req, res) => res.json(billing.list({ companyId: req.user && req.user.company_id, kind: req.query.kind, vendorId: req.query.vendor_id })));
+  /* ---- BILLING (owner-gated: Billing Operations) ---- */
+  const billingGate = core.flagGate('BILLING_OPERATIONS');
+  R.get('/billing/rates', auth, billingGate, (req, res) => res.json(db.prepare('SELECT * FROM billing_rates WHERE ((? || \'\') IS NULL OR company_id = ?) ORDER BY rate_key').all(req.query.company_id || null, req.query.company_id || null)));
+  R.put('/billing/rates', auth, role('admin'), billingGate, (req, res) => { billing.upsertRate(req.body); res.json({ ok: true }); });
+  R.post('/billing/record', auth, role('admin'), billingGate, (req, res) => res.json(billing.createRecord({ ...req.body, createdBy: req.user && req.user.id })));
+  R.post('/billing/invoice', auth, role('admin'), billingGate, (req, res) => res.json(billing.generateInvoice({ ...req.body, createdBy: req.user && req.user.id })));
+  R.post('/billing/adjust', auth, role('admin'), billingGate, (req, res) => res.json(billing.adjust({ ...req.body, createdBy: req.user && req.user.id })));
+  R.post('/billing/reconcile', auth, role('admin'), billingGate, (req, res) => res.json(billing.reconcile({ ...req.body, verifiedBy: req.user && req.user.id })));
+  R.get('/billing/list', auth, billingGate, (req, res) => res.json(billing.list({ companyId: req.user && req.user.company_id, kind: req.query.kind, vendorId: req.query.vendor_id })));
 
   /* ---- AUDIT LOG ---- */
   R.get('/audit/logs', auth, (req, res) => {

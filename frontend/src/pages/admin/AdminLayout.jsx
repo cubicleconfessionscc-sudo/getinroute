@@ -90,15 +90,15 @@ const NAV_ADMIN = [
   { label: 'Intelligence', items: [
     { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center', flag: 'AI_COMMAND_CENTER' },
     { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
-    { to: '/admin/intelligence', icon: <Brain size={18} />, text: 'AI Intelligence' },
-    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' },
-    { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator' }
+    { to: '/admin/intelligence', icon: <Brain size={18} />, text: 'AI Intelligence', flag: 'INTELLIGENCE_CENTER' },
+    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager', flag: 'AI_TRANSPORT_MANAGER' },
+    { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator', flag: 'WHAT_IF_SIMULATOR' }
   ]},
   { label: 'Configuration', items: [
-    { to: '/admin/policies', icon: <ShieldCheck size={18} />, text: 'Policies' },
+    { to: '/admin/policies', icon: <ShieldCheck size={18} />, text: 'Policies', flag: 'POLICY_ENGINE' },
     { to: '/admin/documents', icon: <FileText size={18} />, text: 'Documents', flag: 'DOCUMENT_MANAGEMENT' },
-    { to: '/admin/billing', icon: <DollarSign size={18} />, text: 'Billing' },
-    { to: '/admin/feature-flags', icon: <Flag size={18} />, text: 'Feature Flags' },
+    { to: '/admin/billing', icon: <DollarSign size={18} />, text: 'Billing', flag: 'BILLING_OPERATIONS' },
+    { to: '/admin/feature-flags', icon: <Flag size={18} />, text: 'Feature Flags', flag: 'ADMIN_FEATURE_FLAGS' },
     { to: '/admin/system-health', icon: <Activity size={18} />, text: 'System Health' },
     { to: '/admin/settings', icon: <Settings size={18} />, text: 'Settings' }
   ]}
@@ -133,8 +133,8 @@ const NAV_VENDOR = [
   { label: 'Intelligence', items: [
     { to: '/admin/command-center', icon: <Activity size={18} />, text: 'Command Center', flag: 'AI_COMMAND_CENTER' },
     { to: '/admin/automation', icon: <Zap size={18} />, text: 'Automation Builder' },
-    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager' },
-    { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator' }
+    { to: '/admin/transport-manager', icon: <Send size={18} />, text: 'Transport Manager', flag: 'AI_TRANSPORT_MANAGER' },
+    { to: '/admin/what-if', icon: <Activity size={18} />, text: 'What-If Simulator', flag: 'WHAT_IF_SIMULATOR' }
   ]}
 ];
 
@@ -281,7 +281,7 @@ export default function AdminLayout() {
         </div>
         <div style={{ flex: 1 }}>
           <ErrorBoundary key={location?.pathname}>
-            <Outlet />
+            <Outlet context={{ flags }} />
           </ErrorBoundary>
         </div>
       </div>

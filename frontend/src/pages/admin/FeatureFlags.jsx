@@ -127,10 +127,16 @@ export default function FeatureFlags() {
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px', display: 'flex', gap: 8 }}>
-                      <button className={`btn btn-sm ${f.enabled ? 'btn-danger' : 'btn-green'}`} onClick={() => toggle(f.flag_key, f.enabled, f.description)}>
-                        {f.enabled ? 'Disable' : 'Enable'}
-                      </button>
-                      {companyId && f.override ? (
+                      {/* Only the owner may flip flags (the PUT is owner-only);
+                          granted admins get a read-only view. */}
+                      {isOwner ? (
+                        <button className={`btn btn-sm ${f.enabled ? 'btn-danger' : 'btn-green'}`} onClick={() => toggle(f.flag_key, f.enabled, f.description)}>
+                          {f.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Owner only</span>
+                      )}
+                      {isOwner && companyId && f.override ? (
                         <button className="btn btn-sm btn-ghost" onClick={() => clearOverride(f.flag_key)}>Use default</button>
                       ) : null}
                     </td>

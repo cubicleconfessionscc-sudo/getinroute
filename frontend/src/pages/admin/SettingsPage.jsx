@@ -513,7 +513,15 @@ export default function SettingsPage() {
       <Section icon={<MapPinned size={16} />} title={`Company Address (${regLocations.length + nodalPoints.length})`}
         action={
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-sm btn-outline" data-testid="add-location" onClick={openPlace}><Building2 size={14} /> Add location</button>
+            {/* An admin allotted to ONE operational location sees only that
+                location (the API filters the list) and cannot add more —
+                hierarchy writes are a company-wide admin's job. Add Point
+                (a nodal address inside their location) stays available.
+                allotted_location_id is the PERMANENT row allotment; the
+                session-picked location never hides this control. */}
+            {user?.allotted_location_id == null && (
+              <button className="btn btn-sm btn-outline" data-testid="add-location" onClick={openPlace}><Building2 size={14} /> Add location</button>
+            )}
             <button className="btn btn-sm btn-primary" onClick={() => { setNpEdit(null); setNpForm({ label: '', address: '', lat: null, lng: null, place_id: '', type: 'office', radiusMeters: 1000, company_location_id: user?.company_location_id ?? null }); setNpModal(true); }}>
               <Plus size={14} /> Add Point
             </button>

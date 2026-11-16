@@ -196,17 +196,37 @@ async function main() {
       && emp.locations.some((l) => l.name === 'Second Office'),
       { company: emp.company, locs: (emp.locations || []).map((l) => l.name) });
 
-    // ---------- 6) location-scoped admin sees the same places ---------------
+    // ---------- 6) location-scoped admin: ONLY their allotted place ----------
+    // The company has 2 registered locations by now; the admin allotted to
+    // "Main Location" must see exactly that one, must NOT get the "Add
+    // location" control (hierarchy writes are company-wide admin's job), and
+    // must still be able to use Add Point inside their own location.
     await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
     await login(page, { id: 'loc.admin@test', pickLocation: false });
     await page.goto(`${base}/admin/settings`);
-    await page.waitForSelector('[data-testid=add-location]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid=registered-location]', { timeout: 10000 });
     const laRows = page.locator('[data-testid=registered-location]');
-    check('location-scoped admin sees the registered places',
-      await laRows.count() >= 1 && (await laRows.first().innerText()).includes('Main Location'),
-      await laRows.count());
-    check('location-scoped admin section counts registered + nodal',
-      await page.getByText('Company Address (3)', { exact: true }).count() > 0);
+    const laTexts = await laRows.allInnerTexts();
+    check('location-scoped admin sees ONLY their allotted location',
+      laTexts.length === 1 && laTexts[0].includes('Main Location') && !laTexts.join(' ').includes('Second Office'),
+      laTexts);
+    check('location-scoped admin does NOT get the Add location control',
+      (await page.locator('[data-testid=add-location]').count()) === 0);
+    // Section counts 1 registered place + the nodal point created above.
+    check('location-scoped admin section counts their places',
+      await page.getByText('Company Address (2)', { exact: true }).count() > 0);
+    // Server-side: hierarchy writes are rejected for a scoped admin.
+    const scopedWrite = await page.evaluate(async () => {
+      const token = sessionStorage.getItem('getinroute_token_admin') || sessionStorage.getItem('getinroute_token');
+      const r = await fetch('/api/admin/locations/locations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+        body: JSON.stringify({ state_id: 1, city_id: 1, name: 'Sneaky Branch' })
+      });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    });
+    check('API rejects location creation from a scoped admin (403)',
+      scopedWrite.status === 403 && scopedWrite.body && scopedWrite.body.code === 'LOCATION_HIERARCHY_READ_ONLY', scopedWrite);
     await page.getByRole('button', { name: /Add Point/i }).click();
     await page.waitForSelector('[data-testid=address-label]');
     check('location-scoped admin: Add Point opens without ErrorBoundary', await noErrorBoundary(page));

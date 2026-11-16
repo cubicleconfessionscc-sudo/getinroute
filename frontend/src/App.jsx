@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './auth';
 import { ToastProvider } from './components/ui';
 import ErrorBoundary from './components/ErrorBoundary';
+import FlagGate from './components/FlagGate';
 
 import Landing from './pages/Landing';
 import PortalLogin from './pages/PortalLogin';
@@ -213,22 +214,22 @@ export default function App() {
             <Route path="cancellations" element={<CancellationsPage />} />
             <Route path="safety" element={<SafetyPage />} />
             <Route path="subscription" element={<SubscriptionCommandCenter />} />
-            <Route path="feature-flags" element={<FeatureFlags />} />
+            <Route path="feature-flags" element={<FlagGate flag="ADMIN_FEATURE_FLAGS" label="Feature Flags"><FeatureFlags /></FlagGate>} />
             <Route path="system-health" element={<SystemHealth />} />
-            <Route path="policies" element={<PolicyEngine />} />
-            <Route path="intelligence" element={<IntelligenceCenter />} />
-            <Route path="transport-manager" element={<AITransportManager />} />
+            <Route path="policies" element={<FlagGate flag="POLICY_ENGINE" label="Policy Engine"><PolicyEngine /></FlagGate>} />
+            <Route path="intelligence" element={<FlagGate flag="INTELLIGENCE_CENTER" label="Intelligence Center"><IntelligenceCenter /></FlagGate>} />
+            <Route path="transport-manager" element={<FlagGate flag="AI_TRANSPORT_MANAGER" label="AI Transport Manager"><AITransportManager /></FlagGate>} />
             <Route path="reports" element={<Reports />} />
             <Route path="documents" element={<Documents />} />
-            <Route path="billing" element={<BillingOps />} />
+            <Route path="billing" element={<FlagGate flag="BILLING_OPERATIONS" label="Billing Operations"><BillingOps /></FlagGate>} />
             <Route path="notification-templates" element={<NotificationTemplates />} />
             <Route path="announcements" element={<AnnouncementsPage />} />
-            <Route path="command-center" element={<CommandCenter />} />
+            <Route path="command-center" element={<FlagGate flag="AI_COMMAND_CENTER" label="Command Center"><CommandCenter /></FlagGate>} />
             <Route path="automation" element={<AutomationBuilder />} />
             <Route path="drivers" element={<DriversManagement />} />
             <Route path="driver-assignments" element={<DriverAssignmentsPage />} />
             <Route path="parents" element={<ParentsManagement />} />
-            <Route path="what-if" element={<WhatIfSimulator />} />
+            <Route path="what-if" element={<FlagGate flag="WHAT_IF_SIMULATOR" label="What-If Simulator"><WhatIfSimulator /></FlagGate>} />
           </Route>
 
           <Route path="/school" element={<Require role="admin" vertical="school"><SchoolLayout /></Require>}>

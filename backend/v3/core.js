@@ -41,6 +41,40 @@ function setFlag(key, enabled, desc) {
               ON CONFLICT(flag_key) DO UPDATE SET enabled = excluded.enabled, description = excluded.description, updated_at = excluded.updated_at`)
     .run(key, enabled ? 1 : 0, desc || null, now());
 }
+// Effective state of an OWNER-GATED feature for this caller: the platform
+// default, overridden by the caller's company override when one exists.
+// The owner (emp_id 'ADMIN') always passes — the owner is the one who enables
+// features for company/admin/vendor portals.
+function flagForUser(key, user) {
+  if (!db) return true; // not booted yet — never brick requests
+  try {
+    if (user && user.emp_id === 'ADMIN') return true;
+    const g = db.prepare('SELECT enabled FROM feature_flags WHERE flag_key = ?').get(key);
+    if (!g) return true; // unknown key — nothing to enforce
+    let companyId = null;
+    if (user && user.role === 'admin') companyId = user.company_id != null ? Number(user.company_id) : Number(user.id);
+    else if (user && user.role === 'vendor') companyId = user.company_id != null ? Number(user.company_id) : null;
+    if (companyId != null) {
+      const ov = db.prepare('SELECT enabled FROM company_feature_flags WHERE company_id = ? AND flag_key = ?').get(companyId, key);
+      if (ov) return Number(ov.enabled) === 1;
+    }
+    return Number(g.enabled) === 1;
+  } catch (e) {
+    return true; // fail open — a flag lookup problem must never lock the portal
+  }
+}
+// Express middleware: the feature stays unusable until the owner enables it.
+// Client-side FlagGate hides the page; this makes the rule real server-side.
+function flagGate(key) {
+  return (req, res, next) => {
+    if (flagForUser(key, req.user)) return next();
+    res.status(403).json({
+      error: 'This feature is switched off for your company. Ask the platform owner to turn it on from Feature Flags.',
+      code: 'FEATURE_DISABLED',
+      flag_key: key
+    });
+  };
+}
 
 /* ---------------- AUDIT + FLAG EXPRESS MIDDLEWARE ---------------- */
 function auditMw(ctx) {
@@ -173,7 +207,7 @@ function approve(recId, actorId, actorRole, decision, reason) {
   return rec;
 }
 
-module.exports = { setDb, audit, flag, envFlag, setFlag, auditMw,
+module.exports = { setDb, audit, flag, envFlag, setFlag, auditMw, flagForUser, flagGate,
   getPolicy, policyNumber, policyBool, policyString, upsertPolicy, DEFAULT_POLICIES,
   checkConstraints, vehicleCapacityConstraint, driverShiftConstraint, duplicateAssignmentConstraint, tenantConstraint,
   confidence, approvalRequired, approve };

@@ -542,6 +542,14 @@ const maskKey = (s) => {
 const emailDomain = (s) => (String(s || '').split('@')[1] || 'unknown').toLowerCase();
 
 function publicUser(u) {
+  // Permanent allotment from the users row. auth() overwrites
+  // company_location_id with the login-session `loc` claim, so the row value is
+  // preserved as allotted_location_id — the client uses it to hide
+  // company-wide controls (e.g. "Add location") from an admin who is scoped
+  // to a single operational location.
+  const allotted = u.allotted_location_id !== undefined
+    ? (u.allotted_location_id != null ? Number(u.allotted_location_id) : null)
+    : (u.company_location_id != null ? Number(u.company_location_id) : null);
   return {
     id: u.id, role: u.role, emp_id: u.emp_id, email: u.email, name: u.name,
     phone: u.phone, department: u.department, designation: u.designation,
@@ -549,6 +557,7 @@ function publicUser(u) {
     vendor_id: u.vendor_id || null,
     company_id: u.company_id || null,
     company_location_id: u.company_location_id != null ? Number(u.company_location_id) : null,
+    allotted_location_id: allotted,
     vertical: u.vertical || 'company', school_id: u.school_id || null, driver_verified: u.driver_verified || 0,
     safety_drop_eligible: u.safety_drop_eligible ? 1 : 0,
 lat: u.lat, lng: u.lng, last_update: u.last_update, created_at: u.created_at,
@@ -644,6 +653,10 @@ function auth(req, res, next) {
     }
     // A signed `loc` claim makes the login-selected operational location the
     // authoritative session scope for every downstream location-scoped query.
+    // The PERMANENT allotment (the users row) is kept alongside it so callers
+    // can tell a location-allotted admin apart from a company admin who merely
+    // picked a location for their session.
+    user.allotted_location_id = user.company_location_id != null ? Number(user.company_location_id) : null;
     if (payload.loc != null) user.company_location_id = Number(payload.loc);
     req.user = user;
     req.tokenPayload = payload;
@@ -2850,20 +2863,65 @@ function applyLocationScope(where, params, scope, column) {
   for (const id of scope) params.push(id);
   return where;
 }
+// The caller's PERMANENT allotted location (the users row), ignoring any
+// login-session location override (a signed `loc` claim replaces
+// req.user.company_location_id for data queries elsewhere). Used where the
+// ALLOTMENT — not the login session — decides what this admin may see or
+// manage: an admin allotted one location must never be offered the whole
+// company's location list, while a company admin who merely picked a
+// location for their session keeps full hierarchy management.
+function allottedLocationId(req) {
+  const u = req.user;
+  if (!u || u.emp_id === 'ADMIN') return null;
+  const sessionOverride = !!(req.tokenPayload && req.tokenPayload.loc != null);
+  if (!sessionOverride) return u.company_location_id != null ? Number(u.company_location_id) : null;
+  try {
+    const r = db.prepare('SELECT company_location_id FROM users WHERE id = ?').get(u.id);
+    return r && r.company_location_id != null ? Number(r.company_location_id) : null;
+  } catch (e) { return null; }
+}
+// A location-allotted admin manages their location's DATA — only a
+// company-wide admin (or the owner) may create/remove locations in the
+// State > City > Location hierarchy.
+function hierarchyWriteGuard(req, res) {
+  if (allottedLocationId(req) != null) {
+    res.status(403).json({
+      error: 'Your account is scoped to one operational location. Ask a company-wide admin to add or remove locations.',
+      code: 'LOCATION_HIERARCHY_READ_ONLY'
+    });
+    return false;
+  }
+  return true;
+}
 
 app.get('/api/admin/locations', auth, role('admin', 'vendor'), (req, res) => {
   const cid = locCompanyId(req);
   if (cid == null) return res.json({ states: [], cities: [], locations: [] });
-  res.json({
-    states: db.prepare('SELECT * FROM company_states WHERE company_id=? ORDER BY name').all(cid),
-    cities: db.prepare('SELECT * FROM company_cities WHERE company_id=? ORDER BY name').all(cid),
-    locations: db.prepare('SELECT * FROM company_locations WHERE company_id=? ORDER BY name').all(cid)
-  });
+  const states = db.prepare('SELECT * FROM company_states WHERE company_id=? ORDER BY name').all(cid);
+  const cities = db.prepare('SELECT * FROM company_cities WHERE company_id=? ORDER BY name').all(cid);
+  let locations = db.prepare('SELECT * FROM company_locations WHERE company_id=? ORDER BY name').all(cid);
+  // An admin ALLotted to one operational location only ever sees that
+  // location; the states/cities lists narrow to its hierarchy so nothing
+  // hints at (or offers) the rest of the company's locations.
+  const allotted = allottedLocationId(req);
+  if (allotted != null) {
+    locations = locations.filter((l) => Number(l.id) === allotted);
+    const stateIds = new Set(locations.map((l) => Number(l.state_id)));
+    const cityIds = new Set(locations.map((l) => Number(l.city_id)));
+    res.json({
+      states: states.filter((s) => stateIds.has(Number(s.id))),
+      cities: cities.filter((c) => cityIds.has(Number(c.id))),
+      locations
+    });
+    return;
+  }
+  res.json({ states, cities, locations });
 });
 
 app.post('/api/admin/locations/states', auth, role('admin'), (req, res) => {
   const cid = locCompanyId(req);
   if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  if (!hierarchyWriteGuard(req, res)) return;
   const name = String((req.body || {}).name || '').trim();
   if (!name) return res.status(400).json({ error: 'State name required.' });
   if (db.prepare('SELECT id FROM company_states WHERE company_id=? AND name=?').get(cid, name)) return res.status(409).json({ error: 'State already exists.' });
@@ -2874,6 +2932,7 @@ app.post('/api/admin/locations/states', auth, role('admin'), (req, res) => {
 app.post('/api/admin/locations/cities', auth, role('admin'), (req, res) => {
   const cid = locCompanyId(req);
   if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  if (!hierarchyWriteGuard(req, res)) return;
   const stateId = Number((req.body || {}).state_id);
   const name = String((req.body || {}).name || '').trim();
   if (!stateId || !name) return res.status(400).json({ error: 'State and city name required.' });
@@ -2886,6 +2945,7 @@ app.post('/api/admin/locations/cities', auth, role('admin'), (req, res) => {
 app.post('/api/admin/locations/locations', auth, role('admin'), (req, res) => {
   const cid = locCompanyId(req);
   if (cid == null) return res.status(400).json({ error: 'Company required.' });
+  if (!hierarchyWriteGuard(req, res)) return;
   const b = req.body || {};
   const cityId = Number(b.city_id);
   const name = String(b.name || '').trim();
@@ -2913,6 +2973,7 @@ app.post('/api/admin/locations/locations', auth, role('admin'), (req, res) => {
 
 app.delete('/api/admin/locations/locations/:id', auth, role('admin'), (req, res) => {
   const cid = locCompanyId(req);
+  if (!hierarchyWriteGuard(req, res)) return;
   const row = db.prepare('SELECT id FROM company_locations WHERE id=? AND company_id=?').get(Number(req.params.id), cid);
   if (!row) return res.status(404).json({ error: 'Location not found' });
   // Preserve history: never hard-delete a location that users reference.
@@ -7603,7 +7664,7 @@ function expOperational(scope) {
   return { filename: `GetInRoute_Operational_Export_${istDateOnly(0)}.xlsx`, sheets: { Employees: e.sheets.Employees, Drivers: d.sheets.Drivers, Vehicles: v.sheets.Vehicles, Routes: r.sheets.Routes, Trips: t.sheets.Trips, Bookings: b.sheets.Bookings } };
 }
 
-app.post('/api/v3/ai/transport-manager', auth, role('admin', 'vendor'), h(async (req, res) => {
+app.post('/api/v3/ai/transport-manager', auth, role('admin', 'vendor'), require('./v3/core').flagGate('AI_TRANSPORT_MANAGER'), h(async (req, res) => {
   const question = String((req.body || {}).question || '').trim();
   if (!question) return res.status(400).json({ error: 'Question required' });
   const q = question.toLowerCase();
@@ -7987,7 +8048,7 @@ app.get('/api/v3/flags/mine', auth, (req, res) => {
 
 // Live Intelligence Center: every module computed from the REAL database, scoped
 // to the caller's company / operational location / vendor and a date range.
-app.get('/api/v3/ai/center', auth, role('admin', 'vendor'), (req, res) => {
+app.get('/api/v3/ai/center', auth, role('admin', 'vendor'), require('./v3/core').flagGate('INTELLIGENCE_CENTER'), (req, res) => {
   const isOwner = req.user.emp_id === 'ADMIN';
   const ven = isVendorReq(req);
   const sc = companyAdminScope(req);
@@ -8014,7 +8075,7 @@ app.get('/api/v3/ai/center', auth, role('admin', 'vendor'), (req, res) => {
   res.json(il.computeCenter({ companyId, locationId, vendorId, from, to, isOwner }));
 });
 // Audit-logged approval decision for a live-intelligence recommendation.
-app.post('/api/v3/ai/center/decide', auth, role('admin', 'vendor'), (req, res) => {
+app.post('/api/v3/ai/center/decide', auth, role('admin', 'vendor'), require('./v3/core').flagGate('INTELLIGENCE_CENTER'), (req, res) => {
   const b = req.body || {};
   const module = String(b.module || '').slice(0, 60);
   const decision = String(b.decision || '').toUpperCase();

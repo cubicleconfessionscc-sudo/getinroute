@@ -874,13 +874,13 @@ function ensureDefaults(db) {
       ['VENDOR_MODULE', 1, null, 'Vendor management module enabled'],
       ['BILLING_MODULE', 1, null, 'Operational/vendor billing engine enabled'],
       ['ANALYTICS', 1, null, 'Advanced analytics enabled'],
-      ['AI_COMMAND_CENTER', 1, null, 'AI command center enabled'],
+      ['AI_COMMAND_CENTER', 0, null, 'AI command center enabled (owner-gated for company/admin/vendor)'],
       ['AI_ROUTE_OPTIMIZATION', 1, null, 'Route intelligence enabled'],
       ['AI_VEHICLE_ALLOCATION', 1, null, 'Vehicle intelligence enabled'],
       ['AI_DRIVER_ALLOCATION', 1, null, 'Driver intelligence enabled'],
       ['AI_DELAY_PREDICTION', 1, null, 'ETA + delay prediction enabled'],
       ['AI_SAFETY', 1, null, 'Safety intelligence enabled'],
-      ['AI_TRANSPORT_MANAGER', 1, null, 'Natural-language transport manager enabled'],
+      ['AI_TRANSPORT_MANAGER', 0, null, 'Natural-language transport manager enabled (owner-gated for company/admin/vendor)'],
       ['SIMULATION_MODE', 0, null, 'Simulation / digital twin enabled'],
       ['ADDRESS_AUTOCOMPLETE', 1, null, 'Address autocomplete + location picker'],
       ['DOCUMENT_MANAGEMENT', 1, null, 'Vehicle/driver document tracking'],
@@ -892,6 +892,25 @@ function ensureDefaults(db) {
     ];
     const ins = db.prepare('INSERT OR IGNORE INTO feature_flags (flag_key, enabled, rollout_pct, description) VALUES (?, ?, 100, ?)');
     for (const [k, v, d] of flagDefaults) ins.run(k, v, d);
+    // ---- Owner-gated feature pack -------------------------------------
+    // Company/admin/vendor portals may only use these features once the OWNER
+    // turns them on (nav FlagGate + route FlagGate + server-side flagGate).
+    // New keys always seed OFF. AI_COMMAND_CENTER and AI_TRANSPORT_MANAGER
+    // existed with a platform default of ON — rebase them to OFF exactly once,
+    // only while they still carry their seed value (updated_at IS NULL), so an
+    // owner's own toggle is never overwritten afterwards.
+    const ownerGatedDefaults = [
+      ['POLICY_ENGINE', 'Policy Engine (owner-gated for company/admin/vendor)'],
+      ['BILLING_OPERATIONS', 'Billing Operations (owner-gated for company/admin/vendor)'],
+      ['INTELLIGENCE_CENTER', 'Intelligence Center (owner-gated for company/admin/vendor)'],
+      ['WHAT_IF_SIMULATOR', 'What-If Simulator / Digital Twin (owner-gated for company/admin/vendor)'],
+      ['ADMIN_FEATURE_FLAGS', 'Feature Flags page for company admins (owner-gated)']
+    ];
+    for (const [k, d] of ownerGatedDefaults) ins.run(k, 0, d);
+    try {
+      db.prepare(`UPDATE feature_flags SET enabled = 0, updated_at = ?
+        WHERE flag_key IN ('AI_COMMAND_CENTER','AI_TRANSPORT_MANAGER') AND updated_at IS NULL`).run(now());
+    } catch (e) { console.error('[v3] owner-gate rebase failed:', e.message); }
     const plan = db.prepare('SELECT id FROM platform_subscription_plans WHERE is_current = 1').get();
     if (!plan) {
       db.prepare('INSERT INTO platform_subscription_plans (name, description, price, currency, billing_interval, trial_duration_days, entitlements, limits, is_current) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
