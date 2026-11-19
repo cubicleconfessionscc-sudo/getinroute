@@ -213,6 +213,36 @@ async function main() {
     await adminPage.screenshot({ path: path.join(SHOTS, 'adminops-2-with-code.png'), fullPage: true });
     check('Admin Operations page shows the issued code', !!(await adminPage.locator('text=' + issue.code).first()), null);
 
+    // ---- 4b. Registered company locations appear in Routes → New route ----
+    // The company was registered WITH 3 locations (Bengaluru 1/2, Chennai 1)
+    // and has no nodal office points, so the office dropdown must be offered
+    // from company_locations instead of "Office location is not configured".
+    await adminPage.goto(base + '/admin/routes', { waitUntil: 'domcontentloaded' });
+    await sleep(1500);
+    check('Routes & Speed Limits page renders', !!(await adminPage.locator('text=Routes').first()), null);
+    await adminPage.locator('button:has-text("New route")').first().click();
+    await sleep(800);
+    const officeErr = await adminPage.locator('text=Office location is not configured').count();
+    check('New route does NOT block with "Office location is not configured"', officeErr === 0, null);
+    const officeSel = adminPage.locator('[data-testid=office-location]');
+    check('New route shows the Office / location dropdown', await officeSel.count() > 0, null);
+    const officeOpts = await officeSel.locator('option').allTextContents();
+    check('Dropdown offers Bengaluru Location 1 (registered)', officeOpts.some((t) => t.includes('Bengaluru Location 1')), officeOpts);
+    check('Dropdown offers Chennai Location 1 (registered)', officeOpts.some((t) => t.includes('Chennai Location 1')), officeOpts);
+    const blrOpt = officeOpts.find((t) => t.includes('Bengaluru Location 1'));
+    if (blrOpt) {
+      await officeSel.selectOption({ label: blrOpt });
+      await sleep(400);
+      check('Selecting a registered location renders the 🏢 selected badge',
+        !!(await adminPage.locator('[data-testid=office-selected]').first()), null);
+      check('Selected badge names Bengaluru Location 1',
+        (await adminPage.locator('[data-testid=office-selected]').first().textContent()).includes('Bengaluru Location 1'), null);
+    } else {
+      check('Selecting a registered location renders the 🏢 selected badge', false, 'option missing');
+      check('Selected badge names Bengaluru Location 1', false, 'option missing');
+    }
+    await adminPage.screenshot({ path: path.join(SHOTS, 'routes-new-office-dropdown.png'), fullPage: true });
+
     // ---- 5. Two-tab Owner/Admin smoke check (full flow in admin-login.run.cjs) ----
     const ownerCtx = await browser.newContext();
     const ownerPage = await ownerCtx.newPage();

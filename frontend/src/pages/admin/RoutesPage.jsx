@@ -23,6 +23,7 @@ export default function RoutesPage() {
   const [routes, setRoutes] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [offices, setOffices] = useState([]);
+  const [regLocations, setRegLocations] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [modal, setModal] = useState(false);
   const [vendorConfig, setVendorConfig] = useState(null); // route being configured by the Vendor
@@ -58,6 +59,12 @@ export default function RoutesPage() {
     api.get('/api/admin/drivers/all').then((r) => setDrivers(asArr(r))).catch(() => {});
     // Office locations reuse the company's existing nodal points (type='office').
     api.get('/api/company/me/nodal-points').then((r) => setOffices((asArr(r)).filter((p) => !p.type || p.type === 'office'))).catch(() => setOffices([]));
+    // …plus the company's REGISTERED locations (created during registration or
+    // in Settings → Company Address). A freshly registered company has these
+    // but no nodal points yet, so New route must offer them as office choices.
+    api.get('/api/admin/locations')
+      .then((r) => setRegLocations(Array.isArray(r && r.locations) ? r.locations : []))
+      .catch(() => setRegLocations([]));
     // Vendors the Admin can assign a route to (reuses the existing vendors API).
     api.get('/api/admin/vendors').then((r) => setVendors(asArr(r))).catch(() => setVendors([]));
   };
@@ -243,6 +250,53 @@ export default function RoutesPage() {
   const hasXY = (o) => o && o.lat != null && o.lng != null && !Number.isNaN(Number(o.lat)) && !Number.isNaN(Number(o.lng));
   const stopValid = (s) => !!(s && (s.name || s.employee_name) && hasXY(s));
   const officeValid = () => hasXY(form);
+
+  // ---- Office choices for the admin's New / Edit route form ---------------
+  // One dropdown, two sources:
+  //   1. nodal points of type 'office' (the original behaviour) → key `n:<id>`
+  //   2. the company's REGISTERED locations (company_locations rows created
+  //      during registration or in Settings) → key `l:<id>`.
+  // A registered location keeps office_point_id NULL because that column must
+  // stay a nodal_points id or NULL (smart auto-assign joins nodal_points on
+  // it); office_label / office_lat / office_lng carry the actual office.
+  const officeOptions = [
+    ...offices.map((o) => ({
+      key: `n:${o._id}`, kind: 'nodal', pointId: o._id,
+      label: o.label || 'Office', address: o.address || '', lat: o.lat, lng: o.lng, usable: hasXY(o)
+    })),
+    ...regLocations.map((l) => ({
+      key: `l:${l.id}`, kind: 'location', pointId: null,
+      label: l.name || 'Location', address: l.address || '', lat: l.lat, lng: l.lng, usable: hasXY(l)
+    }))
+  ];
+  // Controlled <select> value: the saved nodal id, else a match against the
+  // registered locations (label + coordinates), else the saved office itself
+  // when it no longer exists in either list.
+  const officeValue = () => {
+    if (form.office_point_id != null) {
+      const k = `n:${form.office_point_id}`;
+      return officeOptions.some((o) => o.key === k) ? k : '';
+    }
+    if (!form.office_label || !hasXY(form)) return '';
+    const hit = officeOptions.find((o) => o.kind === 'location'
+      && o.label === form.office_label
+      && Number(o.lat) === Number(form.office_lat)
+      && Number(o.lng) === Number(form.office_lng));
+    return hit ? hit.key : '__saved__';
+  };
+  const setOffice = (key) => {
+    if (key === '__saved__') return; // keep the already-saved office as-is
+    const o = officeOptions.find((x) => x.key === key);
+    if (!o) return setForm((f) => ({ ...f, office_point_id: null, office_label: '', office_address: '', office_lat: null, office_lng: null }));
+    setForm((f) => ({
+      ...f,
+      office_point_id: o.kind === 'nodal' ? o.pointId : null,
+      office_label: o.label,
+      office_address: o.address,
+      office_lat: o.lat,
+      office_lng: o.lng
+    }));
+  };
 
   const setStops = (stops) => setForm((f) => ({ ...f, stops: stops.map((s, i) => ({ ...s, sequence: i + 1 })) }));
   const addEmployeeStop = (empId) => {
@@ -461,19 +515,22 @@ export default function RoutesPage() {
 
           <div className="field" style={{ marginBottom: 16 }}>
             <label><MapPin size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} color="#0ea5e9" />Office / location</label>
-            {offices.length ? (
-              <select value={form.office_point_id ?? ''} onChange={(e) => {
-                const o = offices.find((x) => String(x._id) === String(e.target.value));
-                if (!o) return setForm((f) => ({ ...f, office_point_id: null, office_label: '', office_lat: null, office_lng: null }));
-                setForm((f) => ({ ...f, office_point_id: o._id, office_label: o.label, office_address: o.address || '', office_lat: o.lat, office_lng: o.lng }));
-              }}>
+            {officeOptions.length ? (
+              <select data-testid="office-location" value={officeValue()} onChange={(e) => setOffice(e.target.value)}>
                 <option value="">Select the office location…</option>
-                {offices.map((o) => (<option key={o._id} value={o._id}>{o.label}{o.address ? ` — ${o.address}` : ''}</option>))}
+                {officeValue() === '__saved__' && (
+                  <option value="__saved__">{form.office_label} (saved)</option>
+                )}
+                {officeOptions.map((o) => (
+                  <option key={o.key} value={o.key} disabled={!o.usable}>
+                    {o.label}{o.address ? ` — ${o.address}` : ''}{o.usable ? '' : ' · add coordinates in Settings'}
+                  </option>
+                ))}
               </select>
             ) : (
-              <div style={{ fontSize: 12, color: '#ef4444' }}>Office location is not configured. Please configure the office location first.</div>
+              <div style={{ fontSize: 12, color: '#ef4444' }}>No office location available yet — register the company with a location, or add an office point in Settings → Company Address.</div>
             )}
-            {form.office_label && <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>🏢 {form.office_label}</div>}
+            {form.office_label && <div data-testid="office-selected" style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>🏢 {form.office_label}</div>}
           </div>
 
           <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--surface-2)', fontSize: 13, marginBottom: 16 }}>

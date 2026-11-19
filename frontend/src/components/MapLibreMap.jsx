@@ -62,6 +62,19 @@ function circleRing(lat, lng, radiusMeters, points = 64) {
   return ring;
 }
 
+/* MapLibre will not remove a source while one of its layers still references
+   it: removeSource() only fires an error event and leaves the source in place,
+   so the very next addSource() throws `Source "..." already exists` — which
+   used to bubble up to the page ErrorBoundary ("Something went wrong"). Always
+   drop EVERY layer of the source first, then the source, and never let a
+   map-library hiccup take the page down. */
+function dropSource(map, sourceId, layerIds = [sourceId]) {
+  layerIds.forEach((id) => {
+    if (map.getLayer(id)) { try { map.removeLayer(id); } catch (e) { /* ignore */ } }
+  });
+  if (map.getSource(sourceId)) { try { map.removeSource(sourceId); } catch (e) { /* ignore */ } }
+}
+
 export default function MapLibreMap({
   markers = [],
   lines = [],
@@ -171,7 +184,7 @@ export default function MapLibreMap({
     markerInstances.current = [];
   }
 
-  function applyData(map) {
+  function applyDataInner(map) {
     clearMarkers();
     if (popupRef.current) { try { popupRef.current.remove(); } catch {} popupRef.current = null; }
 
@@ -221,8 +234,7 @@ export default function MapLibreMap({
       });
 
       if (features.length) {
-        if (map.getLayer('route-lines')) map.removeLayer('route-lines');
-        if (map.getSource('route-lines')) map.removeSource('route-lines');
+        dropSource(map, 'route-lines', ['route-lines']);
         map.addSource('route-lines', { type: 'geojson', data: { type: 'FeatureCollection', features } });
         map.addLayer({
           id: 'route-lines',
@@ -237,8 +249,9 @@ export default function MapLibreMap({
         });
       }
     } else {
-      if (map.getLayer('pick-circles')) map.removeLayer('pick-circles');
-      if (map.getSource('pick-circles')) map.removeSource('pick-circles');
+      // No lines any more — clear the previous line source (this branch used
+      // to clear `pick-circles` instead, leaving stale routes on the map).
+      dropSource(map, 'route-lines', ['route-lines']);
     }
 
     const circleFeatures = (circles || [])
@@ -249,8 +262,7 @@ export default function MapLibreMap({
         geometry: { type: 'Polygon', coordinates: [circleRing(c.lat, c.lng, Number(c.radius))] }
       }));
     if (circleFeatures.length) {
-      if (map.getLayer('pick-circles')) map.removeLayer('pick-circles');
-      if (map.getSource('pick-circles')) map.removeSource('pick-circles');
+      dropSource(map, 'pick-circles', ['pick-circles-outline', 'pick-circles']);
       map.addSource('pick-circles', { type: 'geojson', data: { type: 'FeatureCollection', features: circleFeatures } });
       map.addLayer({
         id: 'pick-circles',
@@ -265,9 +277,7 @@ export default function MapLibreMap({
         paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.75 }
       });
     } else {
-      if (map.getLayer('pick-circles-outline')) map.removeLayer('pick-circles-outline');
-      if (map.getLayer('pick-circles')) map.removeLayer('pick-circles');
-      if (map.getSource('pick-circles')) map.removeSource('pick-circles');
+      dropSource(map, 'pick-circles', ['pick-circles-outline', 'pick-circles']);
     }
 
     if (fit && markerInstances.current.length) {
@@ -279,6 +289,17 @@ export default function MapLibreMap({
         });
       });
       try { map.fitBounds(bounds, { padding: 60, maxZoom: 15 }); } catch {}
+    }
+  }
+
+  /* Every data update funnels through here: a failure inside the map (style,
+     source or layer bookkeeping) is logged and swallowed instead of escaping
+     into React and replacing the whole page with the ErrorBoundary. */
+  function applyData(map) {
+    try {
+      applyDataInner(map);
+    } catch (e) {
+      console.warn('[GetInRoute] map data update failed:', (e && e.message) || e);
     }
   }
 

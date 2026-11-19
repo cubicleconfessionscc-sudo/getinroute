@@ -141,6 +141,39 @@ async function main() {
     const EVIDENCE = 'D:/GetInRoute/test-evidence';
     try { if (!fs.existsSync(EVIDENCE)) fs.mkdirSync(EVIDENCE, { recursive: true }); await popup.screenshot({ path: EVIDENCE + '/map-picker.png', fullPage: true }); console.log('  [screenshot] ' + EVIDENCE + '/map-picker.png'); } catch (e) {}
 
+    // ---------- Regression: a SECOND map interaction after a pick ----------
+    // The radius circle (`pick-circles` source + its two layers) is torn down
+    // and re-added on every pick. The old teardown left the outline layer
+    // behind, so MapLibre refused to remove the source, and the next addSource
+    // threw `Source "pick-circles" already exists` into the ErrorBoundary —
+    // "Something went wrong". Click the canvas again at a spot away from the
+    // pin/controls and the picker must survive with the confirm intact.
+    const canvas = popup.locator('.maplibregl-canvas');
+    check('map canvas is present for the second interaction', await canvas.count() > 0, null);
+    await canvas.click({ position: { x: 140, y: 170 } });
+    await popup.waitForTimeout(1000); // pick + reverse geocode + circle re-render
+    check('second map click does NOT hit the ErrorBoundary', (await popup.locator('text=Something went wrong').count()) === 0, null);
+    check('second map click leaves no "already exists" error on the page', (await popup.locator('text=already exists').count()) === 0, null);
+    await popup.waitForFunction(() => {
+      const b = document.querySelector('[data-testid="confirm-location"]');
+      return b && !b.disabled;
+    }, null, { timeout: 8000 }).catch(() => {});
+    check('confirm is enabled again after the second pick', await popup.getByTestId('confirm-location').isEnabled());
+
+    // The extra click intentionally moved the pin, so re-run the canonical
+    // search-pick to put the known coordinates back before Confirm — the
+    // remaining assertions are about persistence, not the crash regression.
+    await searchAndPick(popup, 'Googleplex');
+    await popup.waitForFunction((addr) => {
+      const el = document.querySelector('main section');
+      return el && el.innerText.includes(addr);
+    }, MOCK_ADDR, { timeout: 5000 }).catch(() => {});
+    await popup.waitForFunction(() => {
+      const b = document.querySelector('[data-testid="confirm-location"]');
+      return b && !b.disabled;
+    }, null, { timeout: 8000 }).catch(() => {});
+    check('picker still usable for the final confirm after the extra interaction', await popup.getByTestId('confirm-location').isEnabled());
+
     const popupClosed = popup.waitForEvent('close', { timeout: 5000 }).catch(() => {});
     await popup.getByTestId('confirm-location').click();
     await popupClosed;
